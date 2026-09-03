@@ -2,7 +2,9 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import requests
+from urllib.request import Request, urlopen
+from urllib.parse import urlencode
+import json
 
 # ============================================================
 # PAGE CONFIG
@@ -30,8 +32,8 @@ TIMEFRAMES = [
     "15 minutes"
 ]
 
-# Fixed random generator used only by demo/placeholder sections.
-# It does NOT generate the live BTC market price.
+# Used only for demo/placeholder sections.
+# This does NOT generate the live BTC price.
 rng = np.random.default_rng(7)
 
 
@@ -44,27 +46,31 @@ def get_btc_data():
     Pull the latest BTC/USDT 1-minute candles
     from Binance public market data.
 
-    No API key is required.
-    No trading permissions are involved.
+    No API key.
+    No Binance account.
+    No trading permissions.
     """
 
     url = f"{BINANCE_BASE_URL}/api/v3/klines"
 
-    params = {
+    params = urlencode({
         "symbol": "BTCUSDT",
         "interval": "1m",
         "limit": 240
-    }
+    })
 
-    response = requests.get(
-        url,
-        params=params,
-        timeout=10
+    request = Request(
+        f"{url}?{params}",
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "BTC-AI-Command-Center/1.0"
+        }
     )
 
-    response.raise_for_status()
-
-    data = response.json()
+    with urlopen(request, timeout=10) as response:
+        data = json.loads(
+            response.read().decode("utf-8")
+        )
 
     if not data:
         raise ValueError(
@@ -87,13 +93,9 @@ def get_btc_data():
             "volume": float(candle[5])
         })
 
-    df = pd.DataFrame(rows)
-
-    df = df.sort_values(
+    return pd.DataFrame(rows).sort_values(
         "time"
     ).reset_index(drop=True)
-
-    return df
 
 
 # ============================================================
@@ -101,15 +103,10 @@ def get_btc_data():
 # ============================================================
 
 def create_demo_data():
-    """
-    Used only if the public Binance connection fails.
-    """
 
     demo_rng = np.random.default_rng(7)
 
-    now = pd.Timestamp.now(
-        tz="UTC"
-    )
+    now = pd.Timestamp.now(tz="UTC")
 
     times = pd.date_range(
         end=now,
@@ -183,10 +180,7 @@ try:
 
     df = get_btc_data()
 
-    data_status = (
-        "🟢 LIVE BTC DATA — BINANCE"
-    )
-
+    data_status = "🟢 LIVE BTC DATA — BINANCE"
     data_error = None
 
 except Exception as e:
@@ -269,48 +263,6 @@ specialists = [
 
 
 # ============================================================
-# UI STYLING
-# ============================================================
-
-st.markdown(
-    """
-    <style>
-
-    .block-container {
-        padding-top: 1.2rem;
-        padding-bottom: 2rem;
-    }
-
-    .hero {
-        padding: 18px 22px;
-        border: 1px solid rgba(128,128,128,.25);
-        border-radius: 16px;
-        background: rgba(128,128,128,.08);
-    }
-
-    .signal {
-        font-size: 32px;
-        font-weight: 800;
-    }
-
-    .muted {
-        opacity: .72;
-    }
-
-    .data-status {
-        padding: 10px 14px;
-        border-radius: 10px;
-        border: 1px solid rgba(128,128,128,.25);
-        margin-bottom: 15px;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-
-# ============================================================
 # HEADER
 # ============================================================
 
@@ -323,20 +275,14 @@ st.caption(
     "15-minute primary horizon • PAPER MODE"
 )
 
-st.markdown(
-    f"""
-    <div class="data-status">
-        <b>{data_status}</b>
-    </div>
-    """,
-    unsafe_allow_html=True
+st.success(
+    data_status
 )
 
 if data_error:
-
     st.warning(
-        "The public Binance connection failed, "
-        "so the app is safely using demo data."
+        "The public Binance connection failed. "
+        "The dashboard is safely using demo data."
     )
 
 
@@ -370,9 +316,7 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader(
-        "Market Data"
-    )
+    st.subheader("Market Data")
 
     st.write(
         data_status
@@ -386,7 +330,7 @@ with st.sidebar:
     st.divider()
 
     st.subheader(
-        "Prediction window"
+        "Prediction Window"
     )
 
     st.write(
@@ -399,8 +343,7 @@ with st.sidebar:
     )
 
     st.caption(
-        "Current market feed: "
-        "BTC/USDT 1-minute candles."
+        "Current feed: BTC/USDT 1-minute candles."
     )
 
 
@@ -428,64 +371,49 @@ price_change_pct = (
 
 
 # ============================================================
-# MASTER PREDICTION
+# MASTER SIGNAL
 # ============================================================
 
-cols = st.columns(
-    [
-        1.1,
-        1,
-        1,
-        1
-    ]
+st.subheader(
+    "Master Prediction"
 )
 
-with cols[0]:
+master_cols = st.columns(4)
+
+with master_cols[0]:
 
     st.markdown(
-        """
-        <div class="hero">
-
-            <div class="muted">
-                MASTER SIGNAL
-            </div>
-
-            <div class="signal">
-                SCALP UP
-            </div>
-
-            <div>
-                Confidence <b>79%</b>
-            </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True
+        "**MASTER SIGNAL**"
     )
 
+    st.markdown(
+        "# SCALP UP"
+    )
 
-with cols[1]:
+    st.write(
+        "Confidence: **79%**"
+    )
+
+with master_cols[1]:
 
     st.metric(
-        "BTC price",
+        "BTC Price",
         f"${last_price:,.2f}",
         f"{price_change_pct:+.3f}%"
     )
 
-
-with cols[2]:
+with master_cols[2]:
 
     st.metric(
-        "Whale pressure",
+        "Whale Pressure",
         "BULLISH",
         "78%"
     )
 
-
-with cols[3]:
+with master_cols[3]:
 
     st.metric(
-        "Risk / reward",
+        "Risk / Reward",
         "1.7 : 1",
         "Paper only"
     )
@@ -514,11 +442,9 @@ fig.add_trace(
     )
 )
 
-
 last = float(
     recent["close"].iloc[-1]
 )
-
 
 future_t = pd.date_range(
     start=(
@@ -553,7 +479,6 @@ lower = (
     - last * 0.0025
 )
 
-
 fig.add_trace(
     go.Scatter(
         x=future_t,
@@ -577,7 +502,7 @@ fig.add_trace(
         fill="toself",
         line=dict(width=0),
         name="Confidence band",
-        opacity=.18
+        opacity=0.18
     )
 )
 
@@ -607,9 +532,7 @@ st.subheader(
 )
 
 wt = pd.date_range(
-    end=pd.Timestamp.now(
-        tz="UTC"
-    ),
+    end=pd.Timestamp.now(tz="UTC"),
     periods=48,
     freq="15min"
 )
@@ -635,12 +558,6 @@ bear = (
     100
     - bull
 )
-
-whale_df = pd.DataFrame({
-    "time": wt,
-    "Bullish %": bull,
-    "Bearish %": bear
-})
 
 wf = go.Figure()
 
@@ -701,7 +618,7 @@ st.caption(
 # ============================================================
 
 st.subheader(
-    "Specialist AI network"
+    "Specialist AI Network"
 )
 
 grid = st.columns(3)
@@ -728,11 +645,11 @@ for i, (
 
 
 # ============================================================
-# AI COMMUNICATION & COMBINATION
+# AI COMMUNICATION
 # ============================================================
 
 st.subheader(
-    "AI communication & combination layer"
+    "AI Communication & Combination Layer"
 )
 
 interaction = pd.DataFrame(
@@ -771,7 +688,7 @@ interaction = pd.DataFrame(
     columns=[
         "Combination",
         "Signal",
-        "Historical score",
+        "Historical Score",
         "Comment"
     ]
 )
@@ -788,20 +705,21 @@ st.dataframe(
 # ============================================================
 
 st.subheader(
-    "Why the Master AI chose this"
+    "Why the Master AI Chose This"
 )
 
 st.info(
     """
-The master layer currently favors UP because several independent
-specialists agree, with Trend, Volume, Whale, Regime, and Historical
-AIs providing the strongest support.
+The current prototype favors UP because several independent
+specialists agree, with Trend, Volume, Whale, Regime, and
+Historical AIs providing the strongest support.
 
 In production, these weights will be learned from walk-forward
-backtesting rather than hard-coded.
+backtests rather than hard-coded.
 
-The system will lower confidence when specialists disagree or when
-historical evidence is weak.
+The system will lower confidence when specialists disagree,
+when historical evidence is weak, or when market conditions
+change significantly.
 """
 )
 
@@ -810,24 +728,28 @@ historical evidence is weak.
 # PERFORMANCE
 # ============================================================
 
+st.subheader(
+    "Model Performance"
+)
+
 m1, m2, m3, m4 = st.columns(4)
 
 m1.metric(
-    "Model win rate",
+    "Model Win Rate",
     "—",
-    "Needs live/backtest data"
+    "Needs scored predictions"
 )
 
 m2.metric(
-    "Profit factor",
+    "Profit Factor",
     "—",
-    "Needs live/backtest data"
+    "Needs backtesting"
 )
 
 m3.metric(
-    "Max drawdown",
+    "Max Drawdown",
     "—",
-    "Needs live/backtest data"
+    "Needs paper trading"
 )
 
 m4.metric(
@@ -835,6 +757,29 @@ m4.metric(
     "—",
     "Needs scored predictions"
 )
+
+
+# ============================================================
+# SYSTEM STATUS
+# ============================================================
+
+st.subheader(
+    "System Status"
+)
+
+status_cols = st.columns(4)
+
+with status_cols[0]:
+    st.success("BTC MARKET DATA")
+
+with status_cols[1]:
+    st.warning("SPECIALIST AIs — DEMO")
+
+with status_cols[2]:
+    st.warning("WHALE AI — DEMO")
+
+with status_cols[3]:
+    st.info("TRADING — PAPER ONLY")
 
 
 # ============================================================
