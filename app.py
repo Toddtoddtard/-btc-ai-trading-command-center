@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 import json
 from datetime import datetime, timezone
 
+
 # ============================================================
 # PAGE CONFIG
 # ============================================================
@@ -16,6 +17,7 @@ st.set_page_config(
     page_icon="₿",
     layout="wide"
 )
+
 
 # ============================================================
 # CONFIG
@@ -33,38 +35,19 @@ TIMEFRAMES = [
     "15 minutes"
 ]
 
-# Paper account only
-STARTING_PAPER_BALANCE = 10000.00
-
-# Paper-trade rules
-MIN_TRADE_CONFIDENCE = 60.0
-TAKE_PROFIT_PCT = 0.0025
-STOP_LOSS_PCT = 0.0015
 
 # ============================================================
-# SESSION STATE
-# ============================================================
-
-if "paper_balance" not in st.session_state:
-    st.session_state.paper_balance = STARTING_PAPER_BALANCE
-
-if "paper_trades" not in st.session_state:
-    st.session_state.paper_trades = []
-
-if "current_paper_trade" not in st.session_state:
-    st.session_state.current_paper_trade = None
-
-if "prediction_history" not in st.session_state:
-    st.session_state.prediction_history = []
-
-if "last_signal" not in st.session_state:
-    st.session_state.last_signal = None
-
-# ============================================================
-# BINANCE REQUEST
+# BINANCE PUBLIC DATA
 # ============================================================
 
 def binance_get(endpoint, params):
+    """
+    Public Binance market-data request.
+
+    No API key.
+    No account.
+    No trading permissions.
+    """
 
     query = urlencode(params)
 
@@ -79,26 +62,31 @@ def binance_get(endpoint, params):
     )
 
     with urlopen(request, timeout=10) as response:
-
         return json.loads(
             response.read().decode("utf-8")
         )
 
 
 # ============================================================
-# BTC CANDLES
+# LIVE BTC CANDLES
 # ============================================================
 
-def get_btc_candles():
+@st.cache_data(ttl=15, show_spinner=False)
+def get_btc_candles(limit=500):
 
     data = binance_get(
         "/api/v3/klines",
         {
             "symbol": "BTCUSDT",
             "interval": "1m",
-            "limit": 500
+            "limit": limit
         }
     )
+
+    if not data:
+        raise ValueError(
+            "Binance returned no candle data."
+        )
 
     rows = []
 
@@ -125,18 +113,24 @@ def get_btc_candles():
 
 
 # ============================================================
-# RECENT AGGREGATED TRADES
+# LIVE AGGREGATED TRADES
 # ============================================================
 
-def get_recent_trades():
+@st.cache_data(ttl=5, show_spinner=False)
+def get_recent_trades(limit=1000):
 
     data = binance_get(
         "/api/v3/aggTrades",
         {
             "symbol": "BTCUSDT",
-            "limit": 1000
+            "limit": limit
         }
     )
+
+    if not data:
+        raise ValueError(
+            "Binance returned no recent trades."
+        )
 
     rows = []
 
@@ -150,6 +144,9 @@ def get_recent_trades():
             ),
             "price": float(trade["p"]),
             "quantity": float(trade["q"]),
+
+            # True means buyer was maker.
+            # Therefore the aggressor was selling.
             "buyer_maker": bool(trade["m"])
         })
 
@@ -158,6 +155,23 @@ def get_recent_trades():
         .sort_values("time")
         .reset_index(drop=True)
     )
+
+
+# ============================================================
+# LIVE BTC PRICE
+# ============================================================
+
+@st.cache_data(ttl=5, show_spinner=False)
+def get_live_price():
+
+    data = binance_get(
+        "/api/v3/ticker/price",
+        {
+            "symbol": "BTCUSDT"
+        }
+    )
+
+    return float(data["price"])
 
 
 # ============================================================
@@ -171,20 +185,16 @@ def build_trade_bars(trades, seconds):
 
     temp = trades.copy()
 
-    temp["buy_volume"] = np.where(
-        ~temp["buyer_maker"],
-        temp["quantity"],
-        0.0
-    )
-
     temp["sell_volume"] = np.where(
         temp["buyer_maker"],
         temp["quantity"],
         0.0
     )
 
-    temp["notional"] = (
-        temp["price"] * temp["quantity"]
+    temp["buy_volume"] = np.where(
+        ~temp["buyer_maker"],
+        temp["quantity"],
+        0.0
     )
 
     temp = temp.set_index("time")
@@ -218,12 +228,20 @@ def build_trade_bars(trades, seconds):
     )
 
     bars = bars.dropna(
-        subset=["open", "high", "low", "close"]
+        subset=[
+            "open",
+            "high",
+            "low",
+            "close"
+        ]
     )
 
     bars["buy_pressure"] = np.where(
         bars["volume"] > 0,
-        bars["buy_volume"] / bars["volume"] * 100,
+        (
+            bars["buy_volume"]
+            / bars["volume"]
+        ) * 100,
         50
     )
 
@@ -231,14 +249,884 @@ def build_trade_bars(trades, seconds):
 
 
 # ============================================================
-# DEMO FALLBACK
+# TECHNICAL INDICATORS
 # ============================================================
 
-def create_demo_data():
+def ema(series, span):
 
-    demo_rng = np.random.default_rng(7)
+    return series.ewm(
+        span=span,
+        adjust=False
+    ).mean()
 
-    now = pd.Timestamp.now(tz="UTC")
+
+def rsi(series, period=14):
+
+    delta = series.diff()
+
+    gain = delta.clip(
+        lower=0
+    )
+
+    loss = -delta.clip(
+        upper=0
+    )
+
+    avg_gain = gain.ewm(
+        alpha=1 / period,
+        adjust=False,
+        min_periods=period
+    ).mean()
+
+    avg_loss = loss.ewm(
+        alpha=1 / period,
+        adjust=False,
+        min_periods=period
+    ).mean()
+
+    rs = (
+        avg_gain
+        / avg_loss.replace(
+            0,
+            np.nan
+        )
+    )
+
+    result = (
+        100
+        - (
+            100
+            / (1 + rs)
+        )
+    )
+
+    return result.fillna(50)
+
+
+def atr(df, period=14):
+
+    previous_close = df["close"].shift(1)
+
+    true_range = pd.concat(
+        [
+            df["high"] - df["low"],
+
+            (
+                df["high"]
+                - previous_close
+            ).abs(),
+
+            (
+                df["low"]
+                - previous_close
+            ).abs()
+        ],
+        axis=1
+    ).max(axis=1)
+
+    return true_range.ewm(
+        alpha=1 / period,
+        adjust=False,
+        min_periods=period
+    ).mean()
+
+
+# ============================================================
+# SPECIALIST AI ENGINE
+# ============================================================
+
+def calculate_specialists(
+    candles,
+    buy_pressure
+):
+
+    c = candles.copy()
+
+    close = c["close"]
+
+    # -------------------------
+    # Core indicators
+    # -------------------------
+
+    ema9 = ema(
+        close,
+        9
+    )
+
+    ema21 = ema(
+        close,
+        21
+    )
+
+    ema50 = ema(
+        close,
+        50
+    )
+
+    rsi_value = rsi(
+        close,
+        14
+    )
+
+    atr_value = atr(
+        c,
+        14
+    )
+
+    macd = (
+        ema(close, 12)
+        - ema(close, 26)
+    )
+
+    macd_signal = ema(
+        macd,
+        9
+    )
+
+    roc5 = (
+        close.pct_change(5)
+        * 100
+    )
+
+    volume_average = (
+        c["volume"]
+        .rolling(20)
+        .mean()
+    )
+
+    current_volume = (
+        c["volume"].iloc[-1]
+    )
+
+    average_volume = (
+        volume_average.iloc[-1]
+    )
+
+    if (
+        pd.isna(average_volume)
+        or average_volume <= 0
+    ):
+        volume_ratio = 1.0
+    else:
+        volume_ratio = (
+            current_volume
+            / average_volume
+        )
+
+    middle_band = (
+        close
+        .rolling(20)
+        .mean()
+    )
+
+    standard_deviation = (
+        close
+        .rolling(20)
+        .std()
+    )
+
+    upper_band = (
+        middle_band
+        + 2 * standard_deviation
+    )
+
+    lower_band = (
+        middle_band
+        - 2 * standard_deviation
+    )
+
+    # -------------------------
+    # Safety helper
+    # -------------------------
+
+    def score(value):
+
+        return float(
+            np.clip(
+                value,
+                5,
+                95
+            )
+        )
+
+    # ========================================================
+    # TREND AI
+    # ========================================================
+
+    current_atr = float(
+        atr_value.iloc[-1]
+    )
+
+    if (
+        not np.isfinite(current_atr)
+        or current_atr <= 0
+    ):
+        current_atr = (
+            float(close.iloc[-1])
+            * 0.001
+        )
+
+    trend_strength = (
+        ema9.iloc[-1]
+        - ema21.iloc[-1]
+    ) / current_atr
+
+    trend_score = (
+        50
+        + 35
+        * np.tanh(
+            trend_strength * 2
+        )
+    )
+
+    trend_score = score(
+        trend_score
+    )
+
+    # ========================================================
+    # MOMENTUM AI
+    # ========================================================
+
+    rsi_component = (
+        rsi_value.iloc[-1]
+        - 50
+    )
+
+    roc_component = (
+        roc5.iloc[-1]
+        if pd.notna(roc5.iloc[-1])
+        else 0
+    )
+
+    macd_component = (
+        macd.iloc[-1]
+        - macd_signal.iloc[-1]
+    )
+
+    momentum_score = (
+        50
+        + 22
+        * np.tanh(
+            rsi_component / 12
+        )
+        + 18
+        * np.tanh(
+            roc_component / 0.25
+        )
+        + 10
+        * np.tanh(
+            macd_component
+            / max(
+                abs(macd.iloc[-1]),
+                1e-9
+            )
+        )
+    )
+
+    momentum_score = score(
+        momentum_score
+    )
+
+    # ========================================================
+    # VOLUME AI
+    # ========================================================
+
+    volume_score = (
+        50
+        + (
+            buy_pressure
+            - 50
+        )
+        * 0.8
+        + 10
+        * np.tanh(
+            volume_ratio - 1
+        )
+    )
+
+    volume_score = score(
+        volume_score
+    )
+
+    # ========================================================
+    # PATTERN AI
+    # ========================================================
+
+    latest_open = (
+        c["open"].iloc[-1]
+    )
+
+    latest_high = (
+        c["high"].iloc[-1]
+    )
+
+    latest_low = (
+        c["low"].iloc[-1]
+    )
+
+    latest_close = (
+        c["close"].iloc[-1]
+    )
+
+    candle_range = max(
+        latest_high
+        - latest_low,
+        1e-9
+    )
+
+    candle_body = (
+        latest_close
+        - latest_open
+    ) / candle_range
+
+    latest_return = (
+        latest_close
+        - c["close"].iloc[-2]
+    ) / c["close"].iloc[-2] * 100
+
+    pattern_score = (
+        50
+        + 25
+        * np.tanh(
+            latest_return
+            / 0.12
+        )
+        + 12
+        * np.tanh(
+            candle_body * 2
+        )
+    )
+
+    pattern_score = score(
+        pattern_score
+    )
+
+    # ========================================================
+    # SUPPORT / RESISTANCE AI
+    # ========================================================
+
+    recent_high = (
+        c["high"]
+        .tail(60)
+        .max()
+    )
+
+    recent_low = (
+        c["low"]
+        .tail(60)
+        .min()
+    )
+
+    midpoint = (
+        recent_high
+        + recent_low
+    ) / 2
+
+    sr_score = (
+        50
+        + 22
+        * np.tanh(
+            (
+                latest_close
+                - midpoint
+            )
+            / (
+                current_atr * 3
+            )
+        )
+    )
+
+    sr_score = score(
+        sr_score
+    )
+
+    # ========================================================
+    # VOLATILITY AI
+    # ========================================================
+
+    volatility_percent = (
+        current_atr
+        / latest_close
+    ) * 100
+
+    volatility_score = (
+        55
+        + 12
+        * np.tanh(
+            volume_ratio - 1
+        )
+        - 8
+        * np.tanh(
+            (
+                volatility_percent
+                - 0.12
+            ) * 3
+        )
+    )
+
+    volatility_score = score(
+        volatility_score
+    )
+
+    # ========================================================
+    # REGIME AI
+    # ========================================================
+
+    regime_strength = (
+        ema9.iloc[-1]
+        - ema50.iloc[-1]
+    ) / current_atr
+
+    regime_score = (
+        50
+        + 30
+        * np.tanh(
+            regime_strength
+        )
+    )
+
+    regime_score = score(
+        regime_score
+    )
+
+    # ========================================================
+    # WHALE AI
+    # ========================================================
+    #
+    # Binance public spot trade data does NOT provide
+    # blockchain whale transfers.
+    #
+    # Therefore this is intentionally an independent
+    # large-trade / aggressor-pressure proxy.
+    #
+    # It is NOT pretending to see on-chain whales.
+    # ========================================================
+
+    whale_score = (
+        50
+        + (
+            buy_pressure
+            - 50
+        )
+        * 0.65
+    )
+
+    whale_score = score(
+        whale_score
+    )
+
+    # ========================================================
+    # LIQUIDITY AI
+    # ========================================================
+
+    liquidity_score = (
+        50
+        + (
+            buy_pressure
+            - 50
+        )
+        * 0.9
+    )
+
+    liquidity_score = score(
+        liquidity_score
+    )
+
+    # ========================================================
+    # DERIVATIVES AI
+    # ========================================================
+    #
+    # No derivatives API is used yet.
+    # For now this specialist uses short-term price behavior
+    # as a temporary proxy.
+    # ========================================================
+
+    derivatives_score = (
+        50
+        + (
+            roc_component
+            * 12
+        )
+    )
+
+    derivatives_score = score(
+        derivatives_score
+    )
+
+    # ========================================================
+    # EVENT AI
+    # ========================================================
+    #
+    # No news/event feed yet.
+    # Remains neutral instead of inventing information.
+    # ========================================================
+
+    event_score = 50.0
+
+    # ========================================================
+    # HISTORICAL AI
+    # ========================================================
+
+    historical_score = (
+        50
+        + 20
+        * np.tanh(
+            roc_component
+            / 0.5
+        )
+    )
+
+    historical_score = score(
+        historical_score
+    )
+
+    scores = {
+
+        "Trend AI":
+            trend_score,
+
+        "Momentum AI":
+            momentum_score,
+
+        "Volume AI":
+            volume_score,
+
+        "Pattern AI":
+            pattern_score,
+
+        "S/R AI":
+            sr_score,
+
+        "Volatility AI":
+            volatility_score,
+
+        "Regime AI":
+            regime_score,
+
+        "Whale AI":
+            whale_score,
+
+        "Liquidity AI":
+            liquidity_score,
+
+        "Derivatives AI":
+            derivatives_score,
+
+        "Event AI":
+            event_score,
+
+        "Historical AI":
+            historical_score
+    }
+
+    features = {
+
+        "ema9":
+            float(ema9.iloc[-1]),
+
+        "ema21":
+            float(ema21.iloc[-1]),
+
+        "ema50":
+            float(ema50.iloc[-1]),
+
+        "rsi":
+            float(rsi_value.iloc[-1]),
+
+        "atr":
+            float(current_atr),
+
+        "volume_ratio":
+            float(volume_ratio),
+
+        "recent_high":
+            float(recent_high),
+
+        "recent_low":
+            float(recent_low),
+
+        "upper_band":
+            float(upper_band.iloc[-1])
+            if pd.notna(upper_band.iloc[-1])
+            else float(latest_close),
+
+        "lower_band":
+            float(lower_band.iloc[-1])
+            if pd.notna(lower_band.iloc[-1])
+            else float(latest_close)
+    }
+
+    return scores, features
+
+
+# ============================================================
+# MASTER AI
+# ============================================================
+
+def master_decision(
+    scores,
+    features
+):
+
+    regime = scores[
+        "Regime AI"
+    ]
+
+    # Start with equal weights.
+    weights = {
+        name: 1.0
+        for name in scores
+    }
+
+    # Directional market:
+    # trend/momentum/regime become more important.
+    if regime >= 60:
+
+        for name in [
+            "Trend AI",
+            "Momentum AI",
+            "Volume AI",
+            "Regime AI"
+        ]:
+
+            weights[name] = 1.35
+
+    # Choppy market:
+    # reduce trend dependence.
+    elif regime <= 40:
+
+        weights[
+            "Trend AI"
+        ] = 0.75
+
+        weights[
+            "Momentum AI"
+        ] = 0.75
+
+        weights[
+            "Volatility AI"
+        ] = 1.25
+
+    # Whale remains independent
+    # but is never allowed to decide alone.
+
+    weights[
+        "Whale AI"
+    ] = 1.05
+
+    weighted_score = (
+        sum(
+            scores[name]
+            * weights[name]
+            for name in scores
+        )
+        /
+        sum(
+            weights.values()
+        )
+    )
+
+    score_values = np.array(
+        list(scores.values()),
+        dtype=float
+    )
+
+    disagreement = float(
+        np.std(score_values)
+    )
+
+    confidence = (
+        50
+        + abs(
+            weighted_score
+            - 50
+        ) * 1.55
+        - disagreement * 0.22
+    )
+
+    confidence = float(
+        np.clip(
+            confidence,
+            50,
+            95
+        )
+    )
+
+    if (
+        weighted_score >= 58
+        and confidence >= 60
+    ):
+
+        signal = "SCALP UP"
+
+    elif (
+        weighted_score <= 42
+        and confidence >= 60
+    ):
+
+        signal = "SCALP DOWN"
+
+    else:
+
+        signal = "WAIT"
+
+    return (
+        signal,
+        confidence,
+        float(weighted_score),
+        disagreement
+    )
+
+
+# ============================================================
+# FORECAST
+# ============================================================
+
+def make_forecast(
+    candles,
+    signal,
+    confidence,
+    features
+):
+
+    last_price = float(
+        candles["close"].iloc[-1]
+    )
+
+    current_atr = max(
+        float(features["atr"]),
+        last_price * 0.0005
+    )
+
+    if signal == "SCALP UP":
+
+        direction = 1
+
+    elif signal == "SCALP DOWN":
+
+        direction = -1
+
+    else:
+
+        direction = 0
+
+    strength = max(
+        0.15,
+        (
+            confidence
+            - 50
+        ) / 45
+    )
+
+    expected = (
+        last_price
+        + direction
+        * current_atr
+        * (
+            0.8
+            + 1.4 * strength
+        )
+    )
+
+    future_times = pd.date_range(
+        start=(
+            candles["time"].iloc[-1]
+            + pd.Timedelta(minutes=1)
+        ),
+        periods=15,
+        freq="1min"
+    )
+
+    path = np.linspace(
+        last_price,
+        expected,
+        15
+    )
+
+    uncertainty = (
+        current_atr
+        * (
+            0.45
+            + 0.04
+            * np.arange(15)
+        )
+    )
+
+    upper = (
+        path
+        + uncertainty
+    )
+
+    lower = (
+        path
+        - uncertainty
+    )
+
+    return (
+        future_times,
+        path,
+        upper,
+        lower,
+        expected
+    )
+
+
+# ============================================================
+# RESAMPLE CANDLES
+# ============================================================
+
+def resample_candles(
+    df,
+    rule
+):
+
+    return (
+        df
+        .set_index("time")
+        .resample(rule)
+        .agg(
+            {
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum"
+            }
+        )
+        .dropna()
+        .reset_index()
+    )
+
+
+# ============================================================
+# LOAD LIVE DATA
+# ============================================================
+
+try:
+
+    candles = get_btc_candles()
+
+    trades = get_recent_trades()
+
+    live_price = get_live_price()
+
+    live_ok = True
+
+    data_error = ""
+
+except Exception as error:
+
+    live_ok = False
+
+    data_error = str(error)
+
+    # Demo fallback only if Binance fails.
+
+    rng = np.random.default_rng(7)
+
+    now = pd.Timestamp.now(
+        tz="UTC"
+    )
 
     times = pd.date_range(
         end=now,
@@ -247,821 +1135,173 @@ def create_demo_data():
     )
 
     price = (
-        77000
+        77500
         + np.cumsum(
-            demo_rng.normal(
+            rng.normal(
                 0,
-                35,
+                38,
                 len(times)
             )
         )
     )
 
-    open_ = np.r_[
+    open_prices = np.r_[
         price[0],
         price[:-1]
     ]
 
     high = (
-        np.maximum(open_, price)
-        + demo_rng.uniform(
+        np.maximum(
+            open_prices,
+            price
+        )
+        + rng.uniform(
             3,
-            25,
+            28,
             len(price)
         )
     )
 
     low = (
-        np.minimum(open_, price)
-        - demo_rng.uniform(
+        np.minimum(
+            open_prices,
+            price
+        )
+        - rng.uniform(
             3,
-            25,
+            28,
             len(price)
         )
     )
 
-    volume = demo_rng.lognormal(
+    volume = rng.lognormal(
         9.1,
         0.45,
         len(price)
     )
 
-    return pd.DataFrame({
-        "time": times,
-        "open": open_,
-        "high": high,
-        "low": low,
-        "close": price,
-        "volume": volume
-    })
-
-
-# ============================================================
-# INDICATORS
-# ============================================================
-
-def calculate_indicators(df):
-
-    data = df.copy()
-
-    close = data["close"]
-    high = data["high"]
-    low = data["low"]
-    volume = data["volume"]
-
-    # EMAs
-    data["ema_fast"] = (
-        close.ewm(span=9, adjust=False).mean()
+    candles = pd.DataFrame(
+        {
+            "time": times,
+            "open": open_prices,
+            "high": high,
+            "low": low,
+            "close": price,
+            "volume": volume
+        }
     )
 
-    data["ema_medium"] = (
-        close.ewm(span=21, adjust=False).mean()
-    )
-
-    data["ema_slow"] = (
-        close.ewm(span=50, adjust=False).mean()
-    )
-
-    # Returns
-    data["return_1"] = close.pct_change(1)
-    data["return_5"] = close.pct_change(5)
-    data["return_15"] = close.pct_change(15)
-
-    # RSI
-    delta = close.diff()
-
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = (
-        gain.rolling(14)
-        .mean()
-    )
-
-    avg_loss = (
-        loss.rolling(14)
-        .mean()
-    )
-
-    rs = avg_gain / avg_loss.replace(
-        0,
-        np.nan
-    )
-
-    data["rsi"] = (
-        100 - (100 / (1 + rs))
-    )
-
-    data["rsi"] = (
-        data["rsi"]
-        .fillna(50)
-    )
-
-    # ATR
-    previous_close = close.shift(1)
-
-    tr = pd.concat(
-        [
-            high - low,
-            (high - previous_close).abs(),
-            (low - previous_close).abs()
-        ],
-        axis=1
-    ).max(axis=1)
-
-    data["atr"] = (
-        tr.rolling(14)
-        .mean()
-        .bfill()
-    )
-
-    # Bollinger
-    data["bb_mid"] = (
-        close.rolling(20)
-        .mean()
-    )
-
-    data["bb_std"] = (
-        close.rolling(20)
-        .std()
-    )
-
-    data["bb_upper"] = (
-        data["bb_mid"]
-        + 2 * data["bb_std"]
-    )
-
-    data["bb_lower"] = (
-        data["bb_mid"]
-        - 2 * data["bb_std"]
-    )
-
-    # Volume
-    data["volume_avg"] = (
-        volume.rolling(20)
-        .mean()
-    )
-
-    # Momentum
-    data["momentum"] = (
-        data["return_5"] * 10000
-    )
-
-    # Support / resistance
-    data["support"] = (
-        low.rolling(50)
-        .min()
-    )
-
-    data["resistance"] = (
-        high.rolling(50)
-        .max()
-    )
-
-    return data
-
-
-# ============================================================
-# SPECIALIST MODELS
-# ============================================================
-
-def trend_ai(d):
-
-    if (
-        d["ema_fast"]
-        > d["ema_medium"]
-        > d["ema_slow"]
-    ):
-        return 72.0, "UP"
-
-    if (
-        d["ema_fast"]
-        < d["ema_medium"]
-        < d["ema_slow"]
-    ):
-        return 72.0, "DOWN"
-
-    return 50.0, "WAIT"
-
-
-def momentum_ai(d):
-
-    score = 50.0
-
-    if d["return_5"] > 0:
-        score += 15
-
-    if d["return_15"] > 0:
-        score += 15
-
-    if d["rsi"] > 55:
-        score += 10
-
-    if d["rsi"] > 70:
-        score -= 8
-
-    if d["return_5"] < 0:
-        score -= 15
-
-    if d["return_15"] < 0:
-        score -= 15
-
-    if d["rsi"] < 45:
-        score -= 10
-
-    score = float(
-        np.clip(score, 5, 95)
-    )
-
-    direction = (
-        "UP" if score > 55
-        else "DOWN" if score < 45
-        else "WAIT"
-    )
-
-    return score, direction
-
-
-def volume_ai(d, buy_pressure):
-
-    score = 50.0
-
-    if buy_pressure > 55:
-        score += 20
-
-    elif buy_pressure < 45:
-        score -= 20
-
-    if (
-        d["volume"]
-        > d["volume_avg"] * 1.25
-    ):
-        if buy_pressure > 50:
-            score += 12
-        else:
-            score -= 12
-
-    score = float(
-        np.clip(score, 5, 95)
-    )
-
-    direction = (
-        "UP" if score > 55
-        else "DOWN" if score < 45
-        else "WAIT"
-    )
-
-    return score, direction
-
-
-def pattern_ai(d):
-
-    body = d["close"] - d["open"]
-
-    candle_range = (
-        d["high"] - d["low"]
-    )
-
-    if candle_range <= 0:
-        return 50.0, "WAIT"
-
-    body_ratio = (
-        abs(body) / candle_range
-    )
-
-    if body > 0 and body_ratio > 0.65:
-        return 68.0, "UP"
-
-    if body < 0 and body_ratio > 0.65:
-        return 68.0, "DOWN"
-
-    return 50.0, "WAIT"
-
-
-def support_resistance_ai(d):
-
-    price = d["close"]
-    support = d["support"]
-    resistance = d["resistance"]
-
-    if pd.isna(support) or pd.isna(resistance):
-        return 50.0, "WAIT"
-
-    distance_support = (
-        price - support
-    ) / price
-
-    distance_resistance = (
-        resistance - price
-    ) / price
-
-    if distance_support < 0.002:
-        return 68.0, "UP"
-
-    if distance_resistance < 0.002:
-        return 68.0, "DOWN"
-
-    return 50.0, "WAIT"
-
-
-def volatility_ai(d):
-
-    atr_pct = (
-        d["atr"] / d["close"]
-    )
-
-    if atr_pct < 0.0008:
-        return 55.0, "WAIT"
-
-    if atr_pct > 0.004:
-        return 42.0, "WAIT"
-
-    if d["close"] > d["bb_mid"]:
-        return 62.0, "UP"
-
-    return 62.0, "DOWN"
-
-
-def regime_ai(d):
-
-    spread = (
-        abs(
-            d["ema_fast"]
-            - d["ema_slow"]
-        )
-        / d["close"]
-    )
-
-    if spread > 0.003:
-
-        if d["ema_fast"] > d["ema_slow"]:
-            return 75.0, "UP"
-
-        return 75.0, "DOWN"
-
-    return 50.0, "WAIT"
-
-
-def historical_ai(df):
-
-    if len(df) < 30:
-        return 50.0, "WAIT"
-
-    recent = (
-        df["close"]
-        .pct_change(15)
-        .iloc[-1]
-    )
-
-    if recent > 0.002:
-        return 65.0, "UP"
-
-    if recent < -0.002:
-        return 65.0, "DOWN"
-
-    return 50.0, "WAIT"
-
-
-# ============================================================
-# MASTER COMBINATION ENGINE
-# ============================================================
-
-def master_prediction(scores):
-
-    up_votes = []
-    down_votes = []
-
-    for score, direction in scores.values():
-
-        if direction == "UP":
-            up_votes.append(score)
-
-        elif direction == "DOWN":
-            down_votes.append(score)
-
-    if up_votes:
-        up_strength = np.mean(up_votes)
-    else:
-        up_strength = 50.0
-
-    if down_votes:
-        down_strength = np.mean(down_votes)
-    else:
-        down_strength = 50.0
-
-    total_directional = (
-        len(up_votes)
-        + len(down_votes)
-    )
-
-    if total_directional == 0:
-
-        return (
-            "WAIT",
-            50.0,
-            up_strength,
-            down_strength
-        )
-
-    if up_strength > down_strength:
-
-        confidence = (
-            up_strength
-            + min(
-                15,
-                len(up_votes) * 2
-            )
-        )
-
-        signal = (
-            "SCALP UP"
-            if confidence >= MIN_TRADE_CONFIDENCE
-            else "WAIT"
-        )
-
-    elif down_strength > up_strength:
-
-        confidence = (
-            down_strength
-            + min(
-                15,
-                len(down_votes) * 2
-            )
-        )
-
-        signal = (
-            "SCALP DOWN"
-            if confidence >= MIN_TRADE_CONFIDENCE
-            else "WAIT"
-        )
-
-    else:
-
-        signal = "WAIT"
-        confidence = 50.0
-
-    confidence = float(
-        np.clip(confidence, 50, 95)
-    )
-
-    return (
-        signal,
-        confidence,
-        up_strength,
-        down_strength
-    )
-
-
-# ============================================================
-# PAPER TRADING
-# ============================================================
-
-def open_paper_trade(
-    signal,
-    confidence,
-    price
-):
-
-    if signal not in [
-        "SCALP UP",
-        "SCALP DOWN"
-    ]:
-        return
-
-    if confidence < MIN_TRADE_CONFIDENCE:
-        return
-
-    if st.session_state.current_paper_trade is not None:
-        return
-
-    direction = (
-        "LONG"
-        if signal == "SCALP UP"
-        else "SHORT"
-    )
-
-    if direction == "LONG":
-
-        target = (
-            price
-            * (1 + TAKE_PROFIT_PCT)
-        )
-
-        stop = (
-            price
-            * (1 - STOP_LOSS_PCT)
-        )
-
-    else:
-
-        target = (
-            price
-            * (1 - TAKE_PROFIT_PCT)
-        )
-
-        stop = (
-            price
-            * (1 + STOP_LOSS_PCT)
-        )
-
-    st.session_state.current_paper_trade = {
-
-        "opened": datetime.now(
-            timezone.utc
-        ).isoformat(),
-
-        "direction": direction,
-
-        "signal": signal,
-
-        "confidence": confidence,
-
-        "entry": price,
-
-        "target": target,
-
-        "stop": stop
-    }
-
-
-def update_paper_trade(price):
-
-    trade = (
-        st.session_state.current_paper_trade
-    )
-
-    if trade is None:
-        return
-
-    direction = trade["direction"]
-
-    exit_reason = None
-
-    if direction == "LONG":
-
-        if price >= trade["target"]:
-            exit_reason = "TAKE PROFIT"
-
-        elif price <= trade["stop"]:
-            exit_reason = "STOP LOSS"
-
-    else:
-
-        if price <= trade["target"]:
-            exit_reason = "TAKE PROFIT"
-
-        elif price >= trade["stop"]:
-            exit_reason = "STOP LOSS"
-
-    if exit_reason is None:
-        return
-
-    entry = trade["entry"]
-
-    if direction == "LONG":
-
-        pnl_pct = (
-            (price - entry)
-            / entry
-        )
-
-    else:
-
-        pnl_pct = (
-            (entry - price)
-            / entry
-        )
-
-    paper_size = 1000.00
-
-    pnl = paper_size * pnl_pct
-
-    st.session_state.paper_balance += pnl
-
-    completed = {
-        **trade,
-        "exit": price,
-        "exit_time": datetime.now(
-            timezone.utc
-        ).isoformat(),
-        "reason": exit_reason,
-        "pnl": pnl,
-        "pnl_pct": pnl_pct * 100
-    }
-
-    st.session_state.paper_trades.append(
-        completed
-    )
-
-    st.session_state.current_paper_trade = None
-
-
-# ============================================================
-# LOAD DATA
-# ============================================================
-
-try:
-
-    candles = get_btc_candles()
-    trades = get_recent_trades()
-
-    live_ok = True
-
-except Exception as e:
-
-    candles = create_demo_data()
     trades = pd.DataFrame()
 
-    live_ok = False
-
-    data_error = str(e)
-
-
-# ============================================================
-# SHORT-TERM DATA
-# ============================================================
-
-bars_1s = (
-    build_trade_bars(trades, 1)
-    if live_ok
-    else pd.DataFrame()
-)
-
-bars_3s = (
-    build_trade_bars(trades, 3)
-    if live_ok
-    else pd.DataFrame()
-)
-
-bars_5s = (
-    build_trade_bars(trades, 5)
-    if live_ok
-    else pd.DataFrame()
-)
+    live_price = float(
+        candles["close"].iloc[-1]
+    )
 
 
 # ============================================================
-# INDICATORS
+# SHORT-TERM BARS
 # ============================================================
 
-indicators = calculate_indicators(
-    candles
-)
+if live_ok:
 
-d = indicators.iloc[-1]
+    bars_1s = build_trade_bars(
+        trades,
+        1
+    )
+
+    bars_3s = build_trade_bars(
+        trades,
+        3
+    )
+
+    bars_5s = build_trade_bars(
+        trades,
+        5
+    )
+
+else:
+
+    bars_1s = pd.DataFrame()
+
+    bars_3s = pd.DataFrame()
+
+    bars_5s = pd.DataFrame()
 
 
 # ============================================================
-# TRADE PRESSURE
+# LIVE TRADE PRESSURE
 # ============================================================
 
 if not trades.empty:
 
     total_volume = (
-        trades["quantity"].sum()
+        trades["quantity"]
+        .sum()
     )
 
-    buy_volume = trades.loc[
-        ~trades["buyer_maker"],
-        "quantity"
-    ].sum()
+    buy_volume = (
+        trades
+        .loc[
+            ~trades["buyer_maker"],
+            "quantity"
+        ]
+        .sum()
+    )
+
+    sell_volume = (
+        trades
+        .loc[
+            trades["buyer_maker"],
+            "quantity"
+        ]
+        .sum()
+    )
 
     if total_volume > 0:
 
         buy_pressure = (
             buy_volume
             / total_volume
-            * 100
-        )
+        ) * 100
 
     else:
 
         buy_pressure = 50.0
 
+    trade_count = len(
+        trades
+    )
+
 else:
 
     buy_pressure = 50.0
 
-
-# ============================================================
-# SPECIALISTS
-# ============================================================
-
-specialist_scores = {
-
-    "Trend AI":
-        trend_ai(d),
-
-    "Momentum AI":
-        momentum_ai(d),
-
-    "Volume AI":
-        volume_ai(
-            d,
-            buy_pressure
-        ),
-
-    "Pattern AI":
-        pattern_ai(d),
-
-    "S/R AI":
-        support_resistance_ai(d),
-
-    "Volatility AI":
-        volatility_ai(d),
-
-    "Regime AI":
-        regime_ai(d),
-
-    "Historical AI":
-        historical_ai(indicators),
-
-    # These remain independent until their
-    # actual external data feeds are connected.
-    "Whale AI":
-        (
-            buy_pressure,
-            "UP"
-            if buy_pressure > 55
-            else "DOWN"
-            if buy_pressure < 45
-            else "WAIT"
-        ),
-
-    "Liquidity AI":
-        (
-            50.0,
-            "WAIT"
-        ),
-
-    "Derivatives AI":
-        (
-            50.0,
-            "WAIT"
-        ),
-
-    "Event AI":
-        (
-            50.0,
-            "WAIT"
-        )
-}
+    trade_count = 0
 
 
 # ============================================================
-# MASTER
+# CALCULATE SPECIALISTS
 # ============================================================
 
-signal, confidence, up_strength, down_strength = (
-    master_prediction(
-        specialist_scores
-    )
-)
-
-last_price = float(
-    candles["close"].iloc[-1]
-)
-
-previous_price = float(
-    candles["close"].iloc[-2]
-)
-
-price_change_pct = (
-    (
-        last_price
-        - previous_price
-    )
-    / previous_price
-    * 100
+scores, features = calculate_specialists(
+    candles,
+    buy_pressure
 )
 
 
 # ============================================================
-# PAPER TRADE ENGINE
+# MASTER DECISION
 # ============================================================
 
-update_paper_trade(
-    last_price
+(
+    signal,
+    confidence,
+    master_score,
+    disagreement
+) = master_decision(
+    scores,
+    features
 )
-
-if (
-    signal != st.session_state.last_signal
-):
-
-    st.session_state.prediction_history.append({
-
-        "time": datetime.now(
-            timezone.utc
-        ),
-
-        "price": last_price,
-
-        "signal": signal,
-
-        "confidence": confidence
-    })
-
-    st.session_state.last_signal = signal
 
 
 # ============================================================
@@ -1074,7 +1314,8 @@ st.title(
 
 st.caption(
     "Live multi-agent BTC market engine • "
-    "15-minute primary horizon • PAPER TRADING"
+    "15-minute primary horizon • "
+    "PAPER TRADING ONLY"
 )
 
 if live_ok:
@@ -1089,6 +1330,10 @@ else:
         "🟡 DEMO DATA — BINANCE CONNECTION FAILED"
     )
 
+    st.caption(
+        f"Connection error: {data_error}"
+    )
+
 
 # ============================================================
 # SIDEBAR
@@ -1096,7 +1341,9 @@ else:
 
 with st.sidebar:
 
-    st.header("Controls")
+    st.header(
+        "Controls"
+    )
 
     timeframe = st.selectbox(
         "Chart timeframe",
@@ -1113,40 +1360,20 @@ with st.sidebar:
         ]
     )
 
-    st.divider()
-
-    st.subheader(
-        "Paper Account"
+    refresh = st.button(
+        "🔄 Refresh live data"
     )
 
-    st.metric(
-        "Virtual Balance",
-        f"${st.session_state.paper_balance:,.2f}"
-    )
+    if refresh:
 
-    st.caption(
-        "Virtual money only. "
-        "No deposits or real orders."
-    )
+        st.cache_data.clear()
+
+        st.rerun()
 
     st.divider()
 
     st.subheader(
-        "Prediction"
-    )
-
-    st.write(
-        f"Signal: **{signal}**"
-    )
-
-    st.write(
-        f"Confidence: **{confidence:.1f}%**"
-    )
-
-    st.divider()
-
-    st.subheader(
-        "Data"
+        "Market Data"
     )
 
     st.write(
@@ -1154,7 +1381,7 @@ with st.sidebar:
     )
 
     st.write(
-        "Binance 1m candles: "
+        "1-minute candles: "
         + (
             "LIVE"
             if live_ok
@@ -1171,6 +1398,93 @@ with st.sidebar:
         )
     )
 
+    st.divider()
+
+    st.subheader(
+        "Prediction Window"
+    )
+
+    now = pd.Timestamp.now(
+        tz="UTC"
+    )
+
+    seconds_into_window = (
+        (now.minute % 15)
+        * 60
+        + now.second
+    )
+
+    elapsed = (
+        seconds_into_window
+        / 900
+    )
+
+    st.progress(
+        float(
+            np.clip(
+                elapsed,
+                0,
+                1
+            )
+        ),
+        text=(
+            f"{elapsed * 100:.0f}% "
+            "of current 15m window elapsed"
+        )
+    )
+
+    st.divider()
+
+    st.subheader(
+        "Short-Term Engine"
+    )
+
+    st.write(
+        "1-second bars: "
+        + (
+            "ACTIVE"
+            if not bars_1s.empty
+            else "WAITING"
+        )
+    )
+
+    st.write(
+        "3-second bars: "
+        + (
+            "ACTIVE"
+            if not bars_3s.empty
+            else "WAITING"
+        )
+    )
+
+    st.write(
+        "5-second bars: "
+        + (
+            "ACTIVE"
+            if not bars_5s.empty
+            else "WAITING"
+        )
+    )
+
+    st.divider()
+
+    st.caption(
+        "No API key is required. "
+        "This app cannot place trades."
+    )
+
+
+# ============================================================
+# LIVE MODE LOCK
+# ============================================================
+
+if mode == "LIVE (LOCKED)":
+
+    st.info(
+        "🔒 LIVE trading is intentionally locked. "
+        "No real orders can be placed by this app."
+    )
+
 
 # ============================================================
 # MASTER PREDICTION
@@ -1180,210 +1494,263 @@ st.subheader(
     "Master Prediction"
 )
 
+signal_text = (
+    f"{signal} • "
+    f"{confidence:.1f}% confidence"
+)
+
 if signal == "SCALP UP":
 
     st.success(
-        f"🟢 SCALP UP • {confidence:.1f}% confidence"
+        f"🟢 {signal_text}"
     )
 
 elif signal == "SCALP DOWN":
 
     st.error(
-        f"🔴 SCALP DOWN • {confidence:.1f}% confidence"
+        f"🔴 {signal_text}"
     )
 
 else:
 
     st.warning(
-        f"🟡 WAIT • {confidence:.1f}% confidence"
+        f"🟡 {signal_text}"
     )
 
 
-c1, c2, c3, c4 = st.columns(4)
+# ============================================================
+# MASTER METRICS
+# ============================================================
 
-with c1:
+master_cols = st.columns(4)
+
+with master_cols[0]:
 
     st.metric(
         "BTC Price",
-        f"${last_price:,.2f}",
-        f"{price_change_pct:+.3f}%"
+        f"${live_price:,.2f}"
     )
 
-with c2:
+with master_cols[1]:
 
     st.metric(
-        "Bullish Strength",
-        f"{up_strength:.1f}%"
+        "Master Bullish Score",
+        f"{master_score:.1f}%"
     )
 
-with c3:
+with master_cols[2]:
 
     st.metric(
-        "Bearish Strength",
-        f"{down_strength:.1f}%"
+        "Live Trade Pressure",
+        f"{buy_pressure:.1f}%",
+        f"{buy_pressure - 50:+.1f} pts"
     )
 
-with c4:
+with master_cols[3]:
 
     st.metric(
-        "Buy Pressure",
-        f"{buy_pressure:.1f}%"
+        "AI Disagreement",
+        f"{disagreement:.1f} pts"
     )
+
+
+st.caption(
+    "Scores are calculated from current market features. "
+    "They are not trained-model probabilities and do not "
+    "guarantee future price movement."
+)
 
 
 # ============================================================
-# PAPER POSITION
+# TRADE PLAN
 # ============================================================
 
 st.subheader(
-    "Paper Trading Position"
+    "Trade Plan — Paper Only"
 )
 
-paper_trade = (
-    st.session_state.current_paper_trade
+entry_low = (
+    live_price
+    - features["atr"] * 0.20
 )
 
-if paper_trade is None:
+entry_high = (
+    live_price
+    + features["atr"] * 0.20
+)
 
-    st.info(
-        "No open paper position."
+if signal == "SCALP UP":
+
+    target = (
+        live_price
+        + features["atr"] * 1.4
     )
 
-    if (
-        signal in [
-            "SCALP UP",
-            "SCALP DOWN"
-        ]
-        and confidence >= MIN_TRADE_CONFIDENCE
-    ):
+    invalidation = (
+        live_price
+        - features["atr"] * 0.8
+    )
 
-        open_paper_trade(
-            signal,
-            confidence,
-            last_price
-        )
+elif signal == "SCALP DOWN":
 
-        st.rerun()
+    target = (
+        live_price
+        - features["atr"] * 1.4
+    )
+
+    invalidation = (
+        live_price
+        + features["atr"] * 0.8
+    )
 
 else:
 
-    pc1, pc2, pc3, pc4 = st.columns(4)
+    target = None
 
-    with pc1:
+    invalidation = None
 
-        st.metric(
-            "Direction",
-            paper_trade["direction"]
+
+plan_cols = st.columns(4)
+
+with plan_cols[0]:
+
+    st.metric(
+        "Entry Zone",
+        (
+            f"${entry_low:,.0f}"
+            f"–"
+            f"${entry_high:,.0f}"
         )
+    )
 
-    with pc2:
+with plan_cols[1]:
 
-        st.metric(
-            "Entry",
-            f"${paper_trade['entry']:,.2f}"
+    st.metric(
+        "Target",
+        (
+            f"${target:,.0f}"
+            if target is not None
+            else "—"
         )
+    )
 
-    with pc3:
+with plan_cols[2]:
 
-        st.metric(
-            "Target",
-            f"${paper_trade['target']:,.2f}"
+    st.metric(
+        "Invalidation",
+        (
+            f"${invalidation:,.0f}"
+            if invalidation is not None
+            else "—"
         )
+    )
 
-    with pc4:
+with plan_cols[3]:
 
-        st.metric(
-            "Stop",
-            f"${paper_trade['stop']:,.2f}"
-        )
+    st.metric(
+        "ATR (1m)",
+        f"${features['atr']:,.2f}"
+    )
 
 
 # ============================================================
-# SHORT-TERM ENGINE
+# SHORT-TERM MARKET ENGINE
 # ============================================================
 
 st.subheader(
     "Short-Term BTC Market Engine"
 )
 
-sc1, sc2, sc3, sc4 = st.columns(4)
+short_cols = st.columns(4)
 
-with sc1:
+with short_cols[0]:
 
     st.metric(
         "Recent Trades",
-        f"{len(trades):,}"
+        f"{trade_count:,}"
     )
 
-with sc2:
+with short_cols[1]:
 
     st.metric(
         "Buy Pressure",
         f"{buy_pressure:.1f}%"
     )
 
-with sc3:
+with short_cols[2]:
 
     st.metric(
         "Sell Pressure",
-        f"{100-buy_pressure:.1f}%"
+        f"{100 - buy_pressure:.1f}%"
     )
 
-with sc4:
+with short_cols[3]:
 
     st.metric(
-        "Feed",
-        "LIVE" if live_ok else "DEMO"
+        "Data Feed",
+        "LIVE"
+        if live_ok
+        else "DEMO"
     )
 
 
 # ============================================================
-# SELECT CHART DATA
+# MARKET CHART DATA
 # ============================================================
 
 if timeframe == "1 second":
 
-    chart_df = bars_1s.tail(120)
+    chart_df = (
+        bars_1s.tail(180)
+    )
 
 elif timeframe == "3 seconds":
 
-    chart_df = bars_3s.tail(120)
+    chart_df = (
+        bars_3s.tail(180)
+    )
 
 elif timeframe == "5 seconds":
 
-    chart_df = bars_5s.tail(120)
+    chart_df = (
+        bars_5s.tail(180)
+    )
+
+elif timeframe == "1 minute":
+
+    chart_df = (
+        candles.tail(240)
+    )
+
+elif timeframe == "3 minutes":
+
+    chart_df = (
+        resample_candles(
+            candles,
+            "3min"
+        )
+        .tail(160)
+    )
+
+elif timeframe == "5 minutes":
+
+    chart_df = (
+        resample_candles(
+            candles,
+            "5min"
+        )
+        .tail(120)
+    )
 
 else:
 
-    chart_df = candles.copy()
-
-    rule = None
-
-    if timeframe == "3 minutes":
-        rule = "3min"
-
-    elif timeframe == "5 minutes":
-        rule = "5min"
-
-    elif timeframe == "15 minutes":
-        rule = "15min"
-
-    if rule:
-
-        chart_df = (
-            chart_df
-            .set_index("time")
-            .resample(rule)
-            .agg({
-                "open": "first",
-                "high": "max",
-                "low": "min",
-                "close": "last",
-                "volume": "sum"
-            })
-            .dropna()
-            .reset_index()
+    chart_df = (
+        resample_candles(
+            candles,
+            "15min"
         )
+        .tail(80)
+    )
 
 
 # ============================================================
@@ -1397,7 +1764,8 @@ st.subheader(
 if chart_df.empty:
 
     st.info(
-        "Waiting for enough Binance trade data."
+        "Waiting for enough recent Binance "
+        "trade data to build this timeframe."
     )
 
 else:
@@ -1433,53 +1801,29 @@ else:
 
 
 # ============================================================
-# INDICATOR PANEL
+# 15-MINUTE PREDICTION
 # ============================================================
 
 st.subheader(
-    "Live Calculated Market Features"
+    "15-Minute AI Prediction"
 )
 
-i1, i2, i3, i4 = st.columns(4)
-
-with i1:
-
-    st.metric(
-        "RSI",
-        f"{d['rsi']:.1f}"
-    )
-
-with i2:
-
-    st.metric(
-        "EMA 9",
-        f"${d['ema_fast']:,.0f}"
-    )
-
-with i3:
-
-    st.metric(
-        "EMA 21",
-        f"${d['ema_medium']:,.0f}"
-    )
-
-with i4:
-
-    st.metric(
-        "ATR",
-        f"${d['atr']:,.2f}"
-    )
-
-
-# ============================================================
-# 15-MINUTE PROJECTION
-# ============================================================
-
-st.subheader(
-    "15-Minute Projection"
+recent = candles.tail(
+    120
 )
 
-recent = candles.tail(90)
+(
+    future,
+    forecast,
+    upper,
+    lower,
+    expected
+) = make_forecast(
+    candles,
+    signal,
+    confidence,
+    features
+)
 
 prediction_fig = go.Figure()
 
@@ -1494,87 +1838,46 @@ prediction_fig.add_trace(
     )
 )
 
-last = float(
-    recent["close"].iloc[-1]
-)
-
-future_t = pd.date_range(
-    start=(
-        recent["time"].iloc[-1]
-        + pd.Timedelta(minutes=1)
-    ),
-    periods=15,
-    freq="1min"
-)
-
-direction_bias = (
-    1
-    if signal == "SCALP UP"
-    else -1
-    if signal == "SCALP DOWN"
-    else 0
-)
-
-projected_move = (
-    direction_bias
-    * max(
-        0.0005,
-        min(
-            0.004,
-            abs(
-                d["return_15"]
-            ) * 1.5
-        )
-    )
-)
-
-forecast = (
-    last
-    * (
-        1
-        + np.linspace(
-            0,
-            projected_move,
-            15
-        )
-    )
-)
-
-band_size = (
-    max(
-        d["atr"] * 0.8,
-        last * 0.001
-    )
-)
-
-upper = forecast + band_size
-lower = forecast - band_size
-
 prediction_fig.add_trace(
     go.Scatter(
-        x=future_t,
+        x=future,
         y=forecast,
         mode="lines",
-        name="Calculated projection",
-        line=dict(width=3)
+        name="Live feature forecast",
+        line=dict(
+            width=3
+        )
     )
 )
 
 prediction_fig.add_trace(
     go.Scatter(
-        x=list(future_t)
-        + list(future_t[::-1]),
-
-        y=list(upper)
-        + list(lower[::-1]),
-
+        x=(
+            list(future)
+            + list(future[::-1])
+        ),
+        y=(
+            list(upper)
+            + list(lower[::-1])
+        ),
         fill="toself",
-
-        line=dict(width=0),
-
-        name="Projection range",
-
+        line=dict(
+            width=0
+        ),
+        name="Uncertainty band",
         opacity=0.18
+    )
+)
+
+prediction_fig.add_trace(
+    go.Scatter(
+        x=[future[-1]],
+        y=[expected],
+        mode="markers",
+        name="15m endpoint",
+        marker=dict(
+            size=10
+        )
     )
 )
 
@@ -1600,308 +1903,384 @@ st.plotly_chart(
 # ============================================================
 
 st.subheader(
-    "🐋 Whale AI — Independent Specialist"
+    "🐋 Whale AI — Independent Indicator"
 )
 
-st.info(
-    "Whale AI is intentionally kept independent. "
-    "The current version uses live trade-pressure information "
-    "as a temporary proxy. Actual whale-transfer, exchange-flow "
-    "and entity data will be connected separately."
-)
+whale_score = scores[
+    "Whale AI"
+]
 
-whale_bull = float(
-    np.clip(
-        buy_pressure,
-        5,
-        95
-    )
-)
+whale_cols = st.columns(2)
 
-whale_bear = (
-    100
-    - whale_bull
-)
-
-wc1, wc2 = st.columns(2)
-
-with wc1:
+with whale_cols[0]:
 
     st.metric(
-        "Whale Bullish Probability",
-        f"{whale_bull:.1f}%"
+        "Whale Bullish Pressure",
+        f"{whale_score:.1f}%"
     )
 
-with wc2:
+with whale_cols[1]:
 
     st.metric(
-        "Whale Bearish Probability",
-        f"{whale_bear:.1f}%"
+        "Whale Bearish Pressure",
+        f"{100 - whale_score:.1f}%"
     )
+
+st.progress(
+    whale_score / 100
+)
+
+st.caption(
+    "Important: free Binance public spot data does not "
+    "contain blockchain whale-transfer information. "
+    "This independent Whale AI currently uses large-trade "
+    "and aggressor-pressure information as a proxy. "
+    "It does not claim to see on-chain whale transfers."
+)
+
+st.caption(
+    "A future on-chain data adapter can be connected to "
+    "this specialist without changing the master architecture."
+)
 
 
 # ============================================================
-# SPECIALIST NETWORK
+# SPECIALIST AI NETWORK
 # ============================================================
 
 st.subheader(
-    "Specialist Market AIs"
+    "Specialist AI Network"
 )
 
-specialist_rows = []
+specialist_descriptions = {
 
-for name, result in specialist_scores.items():
+    "Trend AI":
+        "EMA structure + price trend",
 
-    score, direction = result
+    "Momentum AI":
+        "RSI + ROC + MACD",
 
-    specialist_rows.append({
+    "Volume AI":
+        "Volume expansion + trade pressure",
 
-        "Specialist":
+    "Pattern AI":
+        "Recent candle behavior",
+
+    "S/R AI":
+        "Recent support/resistance",
+
+    "Volatility AI":
+        "ATR + volatility regime",
+
+    "Regime AI":
+        "Directional vs non-directional regime",
+
+    "Whale AI":
+        "Independent large-trade pressure proxy",
+
+    "Liquidity AI":
+        "Aggressor-side trade imbalance",
+
+    "Derivatives AI":
+        "Short-term price/momentum proxy",
+
+    "Event AI":
+        "Neutral until verified event feed",
+
+    "Historical AI":
+        "Recent return-pattern proxy"
+}
+
+
+grid = st.columns(3)
+
+for i, (
+    name,
+    score_value
+) in enumerate(
+    scores.items()
+):
+
+    with grid[
+        i % 3
+    ]:
+
+        if score_value >= 55:
+
+            direction = "UP"
+
+        elif score_value <= 45:
+
+            direction = "DOWN"
+
+        else:
+
+            direction = "MIXED"
+
+        st.metric(
             name,
+            (
+                f"{direction} • "
+                f"{score_value:.1f}%"
+            ),
+            specialist_descriptions[
+                name
+            ]
+        )
 
-        "Direction":
-            direction,
 
-        "Probability / Strength":
-            f"{score:.1f}%"
+# ============================================================
+# AI COMBINATION LAYER
+# ============================================================
 
-    })
+st.subheader(
+    "AI Communication & Combination Layer"
+)
 
-specialist_df = pd.DataFrame(
-    specialist_rows
+combinations = [
+
+    (
+        "Trend + Momentum + Regime",
+
+        np.mean(
+            [
+                scores["Trend AI"],
+                scores["Momentum AI"],
+                scores["Regime AI"]
+            ]
+        ),
+
+        "Directional structure"
+    ),
+
+    (
+        "Volume + Liquidity + Whale",
+
+        np.mean(
+            [
+                scores["Volume AI"],
+                scores["Liquidity AI"],
+                scores["Whale AI"]
+            ]
+        ),
+
+        "Aggressor-side pressure"
+    ),
+
+    (
+        "S/R + Volatility",
+
+        np.mean(
+            [
+                scores["S/R AI"],
+                scores["Volatility AI"]
+            ]
+        ),
+
+        "Location + risk"
+    ),
+
+    (
+        "Historical + Pattern",
+
+        np.mean(
+            [
+                scores["Historical AI"],
+                scores["Pattern AI"]
+            ]
+        ),
+
+        "Recent setup similarity"
+    )
+]
+
+
+interaction_rows = []
+
+for (
+    combination_name,
+    combination_score,
+    comment
+) in combinations:
+
+    if combination_score >= 58:
+
+        combination_signal = "UP"
+
+    elif combination_score <= 42:
+
+        combination_signal = "DOWN"
+
+    else:
+
+        combination_signal = "WAIT"
+
+    interaction_rows.append(
+        [
+            combination_name,
+            combination_signal,
+            round(
+                combination_score,
+                1
+            ),
+            comment
+        ]
+    )
+
+
+interaction = pd.DataFrame(
+    interaction_rows,
+    columns=[
+        "Combination",
+        "Signal",
+        "Score",
+        "Comment"
+    ]
 )
 
 st.dataframe(
-    specialist_df,
+    interaction,
     use_container_width=True,
     hide_index=True
 )
 
 
 # ============================================================
-# MASTER REASONING
+# MASTER AI EXPLANATION
 # ============================================================
 
 st.subheader(
-    "Master AI Combination Layer"
+    "Why the Master AI Chose This"
 )
 
-up_names = [
-    name
-    for name, result
-    in specialist_scores.items()
-    if result[1] == "UP"
+dominant_specialists = sorted(
+    scores.items(),
+    key=lambda item:
+        abs(
+            item[1] - 50
+        ),
+    reverse=True
+)[:4]
+
+
+reason_lines = [
+    (
+        f"• {name}: "
+        f"{score_value:.1f}%"
+    )
+    for name, score_value
+    in dominant_specialists
 ]
 
-down_names = [
-    name
-    for name, result
-    in specialist_scores.items()
-    if result[1] == "DOWN"
-]
 
-col1, col2 = st.columns(2)
+explanation = (
+    f"Master bullish score: "
+    f"{master_score:.1f}%\n\n"
 
-with col1:
+    f"Confidence: "
+    f"{confidence:.1f}%\n\n"
 
-    st.write(
-        "**UP specialists**"
+    f"AI disagreement: "
+    f"{disagreement:.1f} points\n\n"
+
+    + "\n".join(
+        reason_lines
     )
 
-    if up_names:
+    + "\n\n"
 
-        for name in up_names:
-            st.write(
-                f"🟢 {name}"
-            )
+    "The master layer gives more weight to "
+    "directional specialists when the market "
+    "appears directional. It reduces confidence "
+    "when the specialists disagree. Whale AI "
+    "remains independent and cannot decide the "
+    "master signal by itself."
+)
 
-    else:
-
-        st.write(
-            "None"
-        )
-
-with col2:
-
-    st.write(
-        "**DOWN specialists**"
-    )
-
-    if down_names:
-
-        for name in down_names:
-            st.write(
-                f"🔴 {name}"
-            )
-
-    else:
-
-        st.write(
-            "None"
-        )
-
-
-st.caption(
-    "The combination layer is currently a transparent "
-    "feature-based ensemble. It is not yet a trained machine "
-    "learning model. Its scores will later become inputs to "
-    "trained models and walk-forward evaluation."
+st.info(
+    explanation
 )
 
 
 # ============================================================
-# PAPER TRADING HISTORY
+# LIVE FEATURES
 # ============================================================
 
 st.subheader(
-    "Paper Trading Performance"
+    "Live Feature Snapshot"
 )
 
-completed = st.session_state.paper_trades
+feature_cols = st.columns(4)
 
-if completed:
+with feature_cols[0]:
 
-    total_pnl = sum(
-        trade["pnl"]
-        for trade in completed
+    st.metric(
+        "RSI",
+        f"{features['rsi']:.1f}"
     )
 
-    wins = sum(
-        1
-        for trade in completed
-        if trade["pnl"] > 0
+with feature_cols[1]:
+
+    st.metric(
+        "EMA 9",
+        f"${features['ema9']:,.2f}"
     )
 
-    losses = sum(
-        1
-        for trade in completed
-        if trade["pnl"] <= 0
+with feature_cols[2]:
+
+    st.metric(
+        "EMA 21",
+        f"${features['ema21']:,.2f}"
     )
 
-    win_rate = (
-        wins / len(completed) * 100
-    )
+with feature_cols[3]:
 
-    p1, p2, p3, p4 = st.columns(4)
-
-    with p1:
-
-        st.metric(
-            "Paper P&L",
-            f"${total_pnl:+,.2f}"
-        )
-
-    with p2:
-
-        st.metric(
-            "Trades",
-            len(completed)
-        )
-
-    with p3:
-
-        st.metric(
-            "Win Rate",
-            f"{win_rate:.1f}%"
-        )
-
-    with p4:
-
-        st.metric(
-            "Virtual Balance",
-            f"${st.session_state.paper_balance:,.2f}"
-        )
-
-    history_df = pd.DataFrame(
-        completed
-    )
-
-    display_columns = [
-        "direction",
-        "confidence",
-        "entry",
-        "exit",
-        "reason",
-        "pnl",
-        "pnl_pct"
-    ]
-
-    st.dataframe(
-        history_df[
-            display_columns
-        ],
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-
-    st.info(
-        "No completed paper trades yet. "
-        "The system will record trades when a qualifying "
-        "signal opens and reaches its target or stop."
+    st.metric(
+        "Volume Ratio",
+        f"{features['volume_ratio']:.2f}x"
     )
 
 
 # ============================================================
-# PREDICTION JOURNAL
+# MODEL PERFORMANCE
 # ============================================================
 
 st.subheader(
-    "Prediction Journal"
+    "Model Performance"
 )
 
-if st.session_state.prediction_history:
+performance_cols = st.columns(4)
 
-    journal_df = pd.DataFrame(
-        st.session_state.prediction_history
+with performance_cols[0]:
+
+    st.metric(
+        "Model Win Rate",
+        "—",
+        "Needs scored predictions"
     )
 
-    st.dataframe(
-        journal_df.tail(20),
-        use_container_width=True,
-        hide_index=True
+with performance_cols[1]:
+
+    st.metric(
+        "Profit Factor",
+        "—",
+        "Needs backtesting"
     )
 
-else:
+with performance_cols[2]:
 
-    st.info(
-        "Prediction journal is waiting for signal changes."
+    st.metric(
+        "Max Drawdown",
+        "—",
+        "Needs paper trading"
     )
 
+with performance_cols[3]:
 
-# ============================================================
-# EXTERNAL FEEDS — NEXT CONNECTIONS
-# ============================================================
-
-st.subheader(
-    "External Intelligence Feeds"
-)
-
-feed1, feed2, feed3 = st.columns(3)
-
-with feed1:
-
-    st.info(
-        "📊 AGGR\n\n"
-        "Planned connection:\n"
-        "market aggregation / additional BTC intelligence"
-    )
-
-with feed2:
-
-    st.info(
-        "🎲 KALSHI\n\n"
-        "Planned connection:\n"
-        "event-market probability signals"
-    )
-
-with feed3:
-
-    st.success(
-        "₿ BINANCE\n\n"
-        "CONNECTED\n"
-        "Live BTC market data"
+    st.metric(
+        "Calibration",
+        "—",
+        "Needs scored predictions"
     )
 
 
@@ -1913,32 +2292,46 @@ st.subheader(
     "System Status"
 )
 
-s1, s2, s3, s4 = st.columns(4)
+status_cols = st.columns(4)
 
-with s1:
+with status_cols[0]:
 
     if live_ok:
+
         st.success(
             "BTC DATA — LIVE"
         )
+
     else:
+
         st.warning(
             "BTC DATA — DEMO"
         )
 
-with s2:
 
-    st.success(
-        "MARKET FEATURES — LIVE"
-    )
+with status_cols[1]:
 
-with s3:
+    if not bars_1s.empty:
+
+        st.success(
+            "1s / 3s / 5s ENGINE"
+        )
+
+    else:
+
+        st.warning(
+            "SHORT DATA — WAITING"
+        )
+
+
+with status_cols[2]:
 
     st.warning(
-        "TRAINED AI — NOT YET"
+        "SPECIALIST ENGINE — LIVE FEATURES"
     )
 
-with s4:
+
+with status_cols[3]:
 
     st.info(
         "TRADING — PAPER ONLY"
@@ -1946,20 +2339,23 @@ with s4:
 
 
 # ============================================================
-# SAFETY
+# FOOTER
 # ============================================================
 
 st.divider()
 
-st.warning(
-    "⚠️ PAPER TRADING ONLY. "
-    "This application does not place real trades. "
-    "The calculated signals are experimental and are not "
-    "financial advice. Historical or paper performance does "
-    "not guarantee future results."
+st.caption(
+    "Last data refresh: "
+    + datetime.now(
+        timezone.utc
+    ).strftime(
+        "%Y-%m-%d %H:%M:%S UTC"
+    )
 )
 
 st.caption(
-    "No Binance API key is required for this market-data feed. "
-    "Do not add exchange credentials to the public GitHub repository."
+    "⚠️ Educational/paper-trading prototype. "
+    "Not financial advice. "
+    "No real trades are placed. "
+    "Live trading is locked."
 )
