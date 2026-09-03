@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 import json
+from datetime import datetime, timezone
 
 # ============================================================
 # PAGE CONFIG
@@ -32,35 +33,28 @@ TIMEFRAMES = [
     "15 minutes"
 ]
 
-# Used only for demo/placeholder sections.
-# This does NOT generate the live BTC price.
 rng = np.random.default_rng(7)
 
 
 # ============================================================
-# LIVE BTC MARKET DATA
+# BINANCE REQUEST HELPER
 # ============================================================
 
-def get_btc_data():
+def binance_get(endpoint, params):
     """
-    Pull the latest BTC/USDT 1-minute candles
-    from Binance public market data.
+    Public Binance market-data request.
 
     No API key.
-    No Binance account.
+    No account.
     No trading permissions.
     """
 
-    url = f"{BINANCE_BASE_URL}/api/v3/klines"
+    query = urlencode(params)
 
-    params = urlencode({
-        "symbol": "BTCUSDT",
-        "interval": "1m",
-        "limit": 240
-    })
+    url = f"{BINANCE_BASE_URL}{endpoint}?{query}"
 
     request = Request(
-        f"{url}?{params}",
+        url,
         headers={
             "Accept": "application/json",
             "User-Agent": "BTC-AI-Command-Center/1.0"
@@ -68,9 +62,25 @@ def get_btc_data():
     )
 
     with urlopen(request, timeout=10) as response:
-        data = json.loads(
+        return json.loads(
             response.read().decode("utf-8")
         )
+
+
+# ============================================================
+# 1-MINUTE BTC CANDLES
+# ============================================================
+
+def get_btc_candles():
+
+    data = binance_get(
+        "/api/v3/klines",
+        {
+            "symbol": "BTCUSDT",
+            "interval": "1m",
+            "limit": 240
+        }
+    )
 
     if not data:
         raise ValueError(
@@ -80,6 +90,7 @@ def get_btc_data():
     rows = []
 
     for candle in data:
+
         rows.append({
             "time": pd.to_datetime(
                 candle[0],
@@ -93,20 +104,146 @@ def get_btc_data():
             "volume": float(candle[5])
         })
 
-    return pd.DataFrame(rows).sort_values(
-        "time"
-    ).reset_index(drop=True)
+    return (
+        pd.DataFrame(rows)
+        .sort_values("time")
+        .reset_index(drop=True)
+    )
 
 
 # ============================================================
-# SAFE DEMO FALLBACK
+# RECENT BINANCE AGGREGATED TRADES
+# ============================================================
+
+def get_recent_trades():
+
+    data = binance_get(
+        "/api/v3/aggTrades",
+        {
+            "symbol": "BTCUSDT",
+            "limit": 1000
+        }
+    )
+
+    if not data:
+        raise ValueError(
+            "Binance returned no recent trades."
+        )
+
+    rows = []
+
+    for trade in data:
+
+        price = float(trade["p"])
+        quantity = float(trade["q"])
+
+        rows.append({
+            "time": pd.to_datetime(
+                trade["T"],
+                unit="ms",
+                utc=True
+            ),
+            "price": price,
+            "quantity": quantity,
+
+            # Binance field:
+            # m = buyer is market maker
+            "buyer_maker": bool(trade["m"])
+        })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("time")
+        .reset_index(drop=True)
+    )
+
+
+# ============================================================
+# BUILD SHORT-TERM BARS
+# ============================================================
+
+def build_trade_bars(trades, seconds):
+
+    if trades.empty:
+        return pd.DataFrame()
+
+    temp = trades.copy()
+
+    temp["notional"] = (
+        temp["price"]
+        * temp["quantity"]
+    )
+
+    # If buyer_maker is True, the aggressor was a seller.
+    temp["sell_volume"] = np.where(
+        temp["buyer_maker"],
+        temp["quantity"],
+        0.0
+    )
+
+    temp["buy_volume"] = np.where(
+        ~temp["buyer_maker"],
+        temp["quantity"],
+        0.0
+    )
+
+    temp = temp.set_index("time")
+
+    rule = f"{seconds}s"
+
+    bars = temp["price"].resample(rule).ohlc()
+
+    bars["volume"] = (
+        temp["quantity"]
+        .resample(rule)
+        .sum()
+    )
+
+    bars["buy_volume"] = (
+        temp["buy_volume"]
+        .resample(rule)
+        .sum()
+    )
+
+    bars["sell_volume"] = (
+        temp["sell_volume"]
+        .resample(rule)
+        .sum()
+    )
+
+    bars["trades"] = (
+        temp["quantity"]
+        .resample(rule)
+        .count()
+    )
+
+    bars = bars.dropna(
+        subset=["open", "high", "low", "close"]
+    )
+
+    bars["buy_pressure"] = np.where(
+        bars["volume"] > 0,
+        (
+            bars["buy_volume"]
+            / bars["volume"]
+        ) * 100,
+        50
+    )
+
+    return bars.reset_index()
+
+
+# ============================================================
+# DEMO FALLBACK
 # ============================================================
 
 def create_demo_data():
 
     demo_rng = np.random.default_rng(7)
 
-    now = pd.Timestamp.now(tz="UTC")
+    now = pd.Timestamp.now(
+        tz="UTC"
+    )
 
     times = pd.date_range(
         end=now,
@@ -125,7 +262,9 @@ def create_demo_data():
         )
     )
 
-    price[-1] = price[-2] + 22
+    price[-1] = (
+        price[-2] + 22
+    )
 
     open_ = np.r_[
         price[0],
@@ -173,20 +312,23 @@ def create_demo_data():
 
 
 # ============================================================
-# LOAD MARKET DATA
+# LOAD LIVE DATA
 # ============================================================
 
 try:
 
-    df = get_btc_data()
+    candles = get_btc_candles()
+    trades = get_recent_trades()
 
+    live_ok = True
     data_status = "🟢 LIVE BTC DATA — BINANCE"
-    data_error = None
 
 except Exception as e:
 
-    df = create_demo_data()
+    candles = create_demo_data()
+    trades = pd.DataFrame()
 
+    live_ok = False
     data_status = (
         "🟡 DEMO DATA — BINANCE CONNECTION FAILED"
     )
@@ -195,65 +337,106 @@ except Exception as e:
 
 
 # ============================================================
+# BUILD SHORT-TERM DATA
+# ============================================================
+
+if live_ok:
+
+    bars_1s = build_trade_bars(
+        trades,
+        1
+    )
+
+    bars_3s = build_trade_bars(
+        trades,
+        3
+    )
+
+    bars_5s = build_trade_bars(
+        trades,
+        5
+
+    )
+
+else:
+
+    bars_1s = pd.DataFrame()
+    bars_3s = pd.DataFrame()
+    bars_5s = pd.DataFrame()
+
+
+# ============================================================
 # SPECIALIST AI NETWORK
 # ============================================================
 
 specialists = [
+
     (
         "Trend AI",
         "EMA structure + market structure",
         74
     ),
+
     (
         "Momentum AI",
         "RSI + MACD + rate of change",
         69
     ),
+
     (
         "Volume AI",
         "Volume expansion + buying pressure",
         81
     ),
+
     (
         "Pattern AI",
         "Candles + recurring formations",
         63
     ),
+
     (
         "S/R AI",
         "Support/resistance reactions",
         71
     ),
+
     (
         "Volatility AI",
         "ATR + Bollinger regime",
         76
     ),
+
     (
         "Regime AI",
         "Trend / chop / breakout / reversal",
         82
     ),
+
     (
         "Whale AI",
         "Large transfers + exchange flow + accumulation",
         78
     ),
+
     (
         "Liquidity AI",
         "Order-book imbalance + liquidity zones",
         67
     ),
+
     (
         "Derivatives AI",
         "Funding + OI + liquidations",
         72
     ),
+
     (
         "Event AI",
         "Major BTC event/news pressure",
         61
     ),
+
     (
         "Historical AI",
         "Similar historical setups",
@@ -275,14 +458,20 @@ st.caption(
     "15-minute primary horizon • PAPER MODE"
 )
 
-st.success(
-    data_status
-)
+if live_ok:
 
-if data_error:
+    st.success(
+        "🟢 LIVE BTC DATA — BINANCE"
+    )
+
+else:
+
     st.warning(
-        "The public Binance connection failed. "
-        "The dashboard is safely using demo data."
+        "🟡 DEMO DATA — BINANCE CONNECTION FAILED"
+    )
+
+    st.caption(
+        f"Connection error: {data_error}"
     )
 
 
@@ -316,16 +505,33 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader("Market Data")
-
-    st.write(
-        data_status
+    st.subheader(
+        "Market Data"
     )
 
-    st.caption(
-        "Binance public market data requires "
-        "no API key. Trading is not connected."
-    )
+    if live_ok:
+
+        st.success(
+            "Binance connected"
+        )
+
+        st.write(
+            "BTC/USDT"
+        )
+
+        st.write(
+            "1-minute candles: LIVE"
+        )
+
+        st.write(
+            "Recent trades: LIVE"
+        )
+
+    else:
+
+        st.warning(
+            "Demo mode"
+        )
 
     st.divider()
 
@@ -342,36 +548,113 @@ with st.sidebar:
         text="62% of current window elapsed"
     )
 
-    st.caption(
-        "Current feed: BTC/USDT 1-minute candles."
+    st.divider()
+
+    st.subheader(
+        "Short-Term Engine"
+    )
+
+    st.write(
+        "1-second bars: "
+        + (
+            "ACTIVE"
+            if not bars_1s.empty
+            else "WAITING"
+        )
+    )
+
+    st.write(
+        "3-second bars: "
+        + (
+            "ACTIVE"
+            if not bars_3s.empty
+            else "WAITING"
+        )
+    )
+
+    st.write(
+        "5-second bars: "
+        + (
+            "ACTIVE"
+            if not bars_5s.empty
+            else "WAITING"
+        )
     )
 
 
 # ============================================================
-# CURRENT BTC PRICE
+# CURRENT PRICE
 # ============================================================
 
 last_price = float(
-    df["close"].iloc[-1]
+    candles["close"].iloc[-1]
 )
 
 previous_price = float(
-    df["close"].iloc[-2]
-)
-
-price_change = (
-    last_price
-    - previous_price
+    candles["close"].iloc[-2]
 )
 
 price_change_pct = (
-    price_change
+    (
+        last_price
+        - previous_price
+    )
     / previous_price
 ) * 100
 
 
 # ============================================================
-# MASTER SIGNAL
+# LIVE TRADE PRESSURE
+# ============================================================
+
+if not trades.empty:
+
+    total_volume = trades["quantity"].sum()
+
+    buy_volume = trades.loc[
+        ~trades["buyer_maker"],
+        "quantity"
+    ].sum()
+
+    sell_volume = trades.loc[
+        trades["buyer_maker"],
+        "quantity"
+    ].sum()
+
+    if total_volume > 0:
+
+        buy_pressure = (
+            buy_volume
+            / total_volume
+        ) * 100
+
+    else:
+
+        buy_pressure = 50
+
+    trade_count = len(trades)
+
+else:
+
+    buy_pressure = 50
+    trade_count = 0
+
+
+if buy_pressure >= 55:
+
+    pressure_label = "BUYING"
+
+elif buy_pressure <= 45:
+
+    pressure_label = "SELLING"
+
+else:
+
+    pressure_label = "BALANCED"
+
+
+# ============================================================
+# MASTER PREDICTION
 # ============================================================
 
 st.subheader(
@@ -405,9 +688,9 @@ with master_cols[1]:
 with master_cols[2]:
 
     st.metric(
-        "Whale Pressure",
-        "BULLISH",
-        "78%"
+        "Live Trade Pressure",
+        pressure_label,
+        f"{buy_pressure:.1f}% buy"
     )
 
 with master_cols[3]:
@@ -420,18 +703,176 @@ with master_cols[3]:
 
 
 # ============================================================
-# 15-MINUTE PREDICTION CHART
+# SHORT-TERM MARKET DATA
 # ============================================================
 
 st.subheader(
-    "15-minute prediction"
+    "Short-Term BTC Market Engine"
 )
 
-fig = go.Figure()
+short_cols = st.columns(4)
 
-recent = df.tail(90)
+with short_cols[0]:
 
-fig.add_trace(
+    st.metric(
+        "Recent Trades",
+        f"{trade_count:,}"
+    )
+
+with short_cols[1]:
+
+    st.metric(
+        "Buy Pressure",
+        f"{buy_pressure:.1f}%"
+    )
+
+with short_cols[2]:
+
+    st.metric(
+        "Sell Pressure",
+        f"{100 - buy_pressure:.1f}%"
+    )
+
+with short_cols[3]:
+
+    st.metric(
+        "Data Feed",
+        "LIVE" if live_ok else "DEMO"
+    )
+
+
+# ============================================================
+# SELECT CHART DATA
+# ============================================================
+
+if timeframe == "1 second":
+
+    chart_df = bars_1s.tail(120)
+
+elif timeframe == "3 seconds":
+
+    chart_df = bars_3s.tail(120)
+
+elif timeframe == "5 seconds":
+
+    chart_df = bars_5s.tail(120)
+
+else:
+
+    chart_df = candles.copy()
+
+    if timeframe == "3 minutes":
+
+        chart_df = (
+            chart_df
+            .set_index("time")
+            .resample("3min")
+            .agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum"
+            })
+            .dropna()
+            .reset_index()
+        )
+
+    elif timeframe == "5 minutes":
+
+        chart_df = (
+            chart_df
+            .set_index("time")
+            .resample("5min")
+            .agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum"
+            })
+            .dropna()
+            .reset_index()
+        )
+
+    elif timeframe == "15 minutes":
+
+        chart_df = (
+            chart_df
+            .set_index("time")
+            .resample("15min")
+            .agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum"
+            })
+            .dropna()
+            .reset_index()
+        )
+
+
+# ============================================================
+# MARKET CHART
+# ============================================================
+
+st.subheader(
+    f"BTC Market Chart — {timeframe}"
+)
+
+if chart_df.empty:
+
+    st.info(
+        "Waiting for enough recent trade data "
+        "to build this timeframe."
+    )
+
+else:
+
+    chart = go.Figure()
+
+    chart.add_trace(
+        go.Candlestick(
+            x=chart_df["time"],
+            open=chart_df["open"],
+            high=chart_df["high"],
+            low=chart_df["low"],
+            close=chart_df["close"],
+            name="BTC"
+        )
+    )
+
+    chart.update_layout(
+        height=450,
+        margin=dict(
+            l=10,
+            r=10,
+            t=10,
+            b=10
+        ),
+        xaxis_rangeslider_visible=False
+    )
+
+    st.plotly_chart(
+        chart,
+        use_container_width=True
+    )
+
+
+# ============================================================
+# 15-MINUTE PREDICTION
+# ============================================================
+
+st.subheader(
+    "15-Minute AI Prediction"
+)
+
+recent = candles.tail(90)
+
+prediction_fig = go.Figure()
+
+prediction_fig.add_trace(
     go.Candlestick(
         x=recent["time"],
         open=recent["open"],
@@ -442,7 +883,7 @@ fig.add_trace(
     )
 )
 
-last = float(
+prediction_last = float(
     recent["close"].iloc[-1]
 )
 
@@ -456,30 +897,30 @@ future_t = pd.date_range(
 )
 
 forecast = (
-    last
+    prediction_last
     + np.linspace(
         0,
-        last * 0.0042,
+        prediction_last * 0.0042,
         15
     )
     + rng.normal(
         0,
-        last * 0.00035,
+        prediction_last * 0.00035,
         15
     )
 )
 
 upper = (
     forecast
-    + last * 0.0025
+    + prediction_last * 0.0025
 )
 
 lower = (
     forecast
-    - last * 0.0025
+    - prediction_last * 0.0025
 )
 
-fig.add_trace(
+prediction_fig.add_trace(
     go.Scatter(
         x=future_t,
         y=forecast,
@@ -489,7 +930,7 @@ fig.add_trace(
     )
 )
 
-fig.add_trace(
+prediction_fig.add_trace(
     go.Scatter(
         x=(
             list(future_t)
@@ -506,8 +947,8 @@ fig.add_trace(
     )
 )
 
-fig.update_layout(
-    height=460,
+prediction_fig.update_layout(
+    height=450,
     margin=dict(
         l=10,
         r=10,
@@ -518,7 +959,7 @@ fig.update_layout(
 )
 
 st.plotly_chart(
-    fig,
+    prediction_fig,
     use_container_width=True
 )
 
@@ -528,11 +969,13 @@ st.plotly_chart(
 # ============================================================
 
 st.subheader(
-    "🐋 Whale AI — independent indicator"
+    "🐋 Whale AI — Independent Indicator"
 )
 
 wt = pd.date_range(
-    end=pd.Timestamp.now(tz="UTC"),
+    end=pd.Timestamp.now(
+        tz="UTC"
+    ),
     periods=48,
     freq="15min"
 )
@@ -559,34 +1002,32 @@ bear = (
     - bull
 )
 
-wf = go.Figure()
+whale_fig = go.Figure()
 
-wf.add_trace(
+whale_fig.add_trace(
     go.Scatter(
         x=wt,
         y=bull,
         mode="lines",
-        name="Bullish %",
-        line=dict(width=2)
+        name="Bullish %"
     )
 )
 
-wf.add_trace(
+whale_fig.add_trace(
     go.Scatter(
         x=wt,
         y=bear,
         mode="lines",
-        name="Bearish %",
-        line=dict(width=2)
+        name="Bearish %"
     )
 )
 
-wf.add_hline(
+whale_fig.add_hline(
     y=50,
     line_dash="dot"
 )
 
-wf.update_layout(
+whale_fig.update_layout(
     height=280,
     yaxis=dict(
         range=[0, 100],
@@ -601,15 +1042,15 @@ wf.update_layout(
 )
 
 st.plotly_chart(
-    wf,
+    whale_fig,
     use_container_width=True
 )
 
 st.caption(
-    "Whale AI is an independent model. "
-    "A large transfer is not automatically bullish or bearish. "
-    "The production model will evaluate whale-flow signals "
-    "against subsequent BTC price outcomes."
+    "Whale AI remains an independent specialist. "
+    "Large transfers are not automatically bullish or bearish. "
+    "The production version will learn the relationship between "
+    "whale-flow behavior and subsequent BTC price outcomes."
 )
 
 
@@ -683,7 +1124,7 @@ interaction = pd.DataFrame(
             "UP",
             79,
             "Similar trending setups"
-        ],
+        ]
     ],
     columns=[
         "Combination",
@@ -710,16 +1151,17 @@ st.subheader(
 
 st.info(
     """
-The current prototype favors UP because several independent
-specialists agree, with Trend, Volume, Whale, Regime, and
-Historical AIs providing the strongest support.
+The current master signal is still a prototype signal.
 
-In production, these weights will be learned from walk-forward
-backtests rather than hard-coded.
+Live Binance market data now feeds the market-data layer,
+including recent trade activity and short-term buying/selling
+pressure.
 
-The system will lower confidence when specialists disagree,
-when historical evidence is weak, or when market conditions
-change significantly.
+The specialist percentages are still placeholders.
+
+The next development stage will replace those hard-coded
+percentages with actual calculated features and eventually
+trained models evaluated through walk-forward backtesting.
 """
 )
 
@@ -770,16 +1212,52 @@ st.subheader(
 status_cols = st.columns(4)
 
 with status_cols[0]:
-    st.success("BTC MARKET DATA")
+
+    if live_ok:
+        st.success("BTC DATA — LIVE")
+    else:
+        st.warning("BTC DATA — DEMO")
 
 with status_cols[1]:
-    st.warning("SPECIALIST AIs — DEMO")
+
+    if not bars_1s.empty:
+        st.success("1s / 3s / 5s ENGINE")
+    else:
+        st.warning("SHORT DATA — WAITING")
 
 with status_cols[2]:
-    st.warning("WHALE AI — DEMO")
+
+    st.warning(
+        "SPECIALIST AIs — PROTOTYPE"
+    )
 
 with status_cols[3]:
-    st.info("TRADING — PAPER ONLY")
+
+    st.info(
+        "TRADING — PAPER ONLY"
+    )
+
+
+# ============================================================
+# REFRESH
+# ============================================================
+
+st.divider()
+
+if auto_refresh:
+
+    st.caption(
+        "Auto refresh is enabled. "
+        "Use the browser refresh button if the app does not "
+        "automatically update."
+    )
+
+else:
+
+    st.caption(
+        "Turn on Auto refresh in the sidebar or refresh the "
+        "page to pull the newest Binance trade data."
+    )
 
 
 # ============================================================
@@ -790,5 +1268,6 @@ st.divider()
 
 st.caption(
     "⚠️ Prototype / paper-trading interface. "
-    "Not financial advice. No real trades are placed."
+    "Not financial advice. "
+    "No real trades are placed."
 )
