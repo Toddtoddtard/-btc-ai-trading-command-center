@@ -1,0 +1,150 @@
+name: Apply R28 Align Direction Metric Cards
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/apply-r28-align-direction-metric-cards.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Align all custom decision cards with native metric cards
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('app.py')
+          s = p.read_text()
+
+          s = s.replace(
+              'APP_VERSION = "2026.09.04-single-file-r25-unified-council-style"',
+              'APP_VERSION = "2026.09.04-single-file-r28-aligned-direction-metrics"',
+          )
+
+          css_anchor = '''    .direction-card .direction-call {
+              min-width:150px; padding:10px 18px; font-size:1.08rem;
+          }
+          '''
+          css_repl = '''    .direction-card .direction-call {
+              min-width:150px; padding:10px 18px; font-size:1.08rem;
+          }
+          .direction-card.metric-direction-card {
+              min-height:92px;
+              padding:.72rem 1rem;
+              flex-direction:column;
+              align-items:flex-start;
+              justify-content:flex-start;
+              gap:.48rem;
+          }
+          .direction-card-label {
+              color:#9fb2ce;
+              font-size:.90rem;
+              line-height:1.15;
+              font-weight:500;
+          }
+          .direction-card-value {
+              width:100%;
+              display:flex;
+              align-items:center;
+              justify-content:center;
+              flex:1;
+          }
+          .direction-card.metric-direction-card .direction-call {
+              min-width:min(150px, 100%);
+              max-width:100%;
+              box-sizing:border-box;
+          }
+          '''
+          if css_anchor not in s:
+              raise SystemExit('direction card CSS anchor not found')
+          s = s.replace(css_anchor, css_repl, 1)
+
+          replacements = {
+          '''    with m3:
+              st.caption("Master")
+              st.markdown(
+                  f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+                  unsafe_allow_html=True,
+              )
+          ''': '''    with m3:
+              st.markdown(
+                  f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Master</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
+                  unsafe_allow_html=True,
+              )
+          ''',
+          '''            with call1:
+                          st.caption("CALL")
+                          st.markdown(
+                              f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+                              unsafe_allow_html=True,
+                          )
+          ''': '''            with call1:
+                          st.markdown(
+                              f'<div class="direction-card metric-direction-card"><div class="direction-card-label">CALL</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
+                              unsafe_allow_html=True,
+                          )
+          ''',
+          '''        with d1:
+                      st.caption("Call")
+                      st.markdown(
+                          f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+                          unsafe_allow_html=True,
+                      )
+          ''': '''        with d1:
+                      st.markdown(
+                          f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Call</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
+                          unsafe_allow_html=True,
+                      )
+          ''',
+          '''        with h3:
+                      st.caption("Direction")
+                      st.markdown(
+                          f'<div class="direction-card">{directional_badge_html(hourly_ai["direction"])}</div>',
+                          unsafe_allow_html=True,
+                      )
+          ''': '''        with h3:
+                      st.markdown(
+                          f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Direction</div><div class="direction-card-value">{directional_badge_html(hourly_ai["direction"])}</div></div>',
+                          unsafe_allow_html=True,
+                      )
+          ''',
+          }
+
+          changed = 0
+          for old, new in replacements.items():
+              if old in s:
+                  s = s.replace(old, new, 1)
+                  changed += 1
+
+          if changed != 4:
+              raise SystemExit(f'Expected 4 aligned direction-card replacements, got {changed}')
+
+          compile(s, 'app.py', 'exec')
+          p.write_text(s)
+          print('R28 applied: all custom directional metric cards now contain their labels inside the blue card and align with neighboring metric boxes.')
+          PY
+      - name: Validate syntax
+        run: python -m py_compile app.py
+      - name: Commit updated app
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes needed."
+            exit 0
+          fi
+          git config user.name "btc-ai-ui-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py
+          git commit -m "Align all directional decision cards with metric rows"
+          git push origin main
