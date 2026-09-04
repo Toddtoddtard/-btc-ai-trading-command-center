@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import copy
 import json
+import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 
@@ -28,6 +30,29 @@ def ensure_v31(state):
     return state
 
 
+def load_previous_state():
+    """Prefer a workflow-provided local copy of the private learning-state branch.
+
+    The repository is private, so unauthenticated raw.githubusercontent.com reads
+    can fail. GitHub Actions fetches the branch with its built-in token and writes
+    it to LEARNING_STATE_INPUT before this learner starts. This preserves live
+    samples across runs instead of silently resetting to a fresh state.
+    """
+    input_path = os.getenv("LEARNING_STATE_INPUT", "").strip()
+    if input_path:
+        try:
+            payload = json.loads(Path(input_path).read_text())
+            if isinstance(payload, dict) and "forecast" in payload:
+                payload = legacy.migrate_event_name(payload)
+                payload.setdefault("status", {})["loaded_from_private_branch"] = True
+                return payload
+        except Exception as exc:
+            print(f"Could not load LEARNING_STATE_INPUT: {exc}")
+    state = legacy.load()
+    state.setdefault("status", {})["loaded_from_private_branch"] = False
+    return state
+
+
 def strict_grade(state, df):
     pending = copy.deepcopy(state.get("pending"))
     if not pending:
@@ -43,13 +68,12 @@ def strict_grade(state, df):
     if not graded:
         return False
 
-    # Preserve the decision-time WAIT verdict so later analysis can measure
-    # whether abstaining protected the paper account or merely missed a move.
     if state.get("master_history"):
         last = state["master_history"][-1]
         last["would_wait"] = bool(pending.get("would_wait", False))
         last["master_base_score"] = safe_float(pending.get("master_base_score"), 0.0)
         last["snapshot_available"] = bool(pending.get("snapshot"))
+    state.setdefault("status", {}).pop("last_grade_skipped_reason", None)
     return True
 
 
@@ -184,7 +208,8 @@ def register_with_snapshot(state, df, market_info):
 
 
 def main():
-    state = ensure_v31(legacy.load())
+    state = ensure_v31(load_previous_state())
+    before_samples = int(state.get("forecast", {}).get("samples", 0))
     df = legacy.history()
     market_info = legacy.market()
     graded = strict_grade(state, df)
@@ -205,6 +230,8 @@ def main():
         "registered_this_run": registered,
         "champion_promoted": state.get("champion_challenger", {}).get("promoted", False),
         "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),
+        "samples_before_run": before_samples,
+        "samples_after_run": int(state.get("forecast", {}).get("samples", 0)),
     })
     legacy.OUT.parent.mkdir(parents=True, exist_ok=True)
     legacy.OUT.write_text(json.dumps(state, indent=2, sort_keys=True))
