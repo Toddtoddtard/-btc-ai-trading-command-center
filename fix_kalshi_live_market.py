@@ -1,36 +1,96 @@
 from pathlib import Path
 import re
 
+p = Path('app.py')
+s = p.read_text()
 
-def patch_app():
-    p = Path('app.py')
-    s = p.read_text()
+pattern = re.compile(
+    r'@st\.cache_data\(ttl=3, show_spinner=False\)\ndef fetch_kalshi_bitcoin_markets\(\):\n.*?\n\ndef kalshi_probability\(',
+    re.S,
+)
+m = pattern.search(s)
+if not m:
+    raise SystemExit('Kalshi market function anchor not found')
 
-    old = '''@st.cache_data(ttl=3, show_spinner=False)\ndef fetch_kalshi_bitcoin_markets():\n    \"\"\"Read-only lookup for the live Kalshi KXBTC15M market.\"\"\"\n    errors = []\n    for base in KALSHI_BASES:\n        try:\n            payload, ms = http_json(\n                base + \"/markets\",\n                {\"limit\": 100, \"status\": \"open\", \"series_ticker\": \"KXBTC15M\"},\n                timeout=3.0,\n            )\n            markets = payload.get(\"markets\", []) if isinstance(payload, dict) else []\n            hits = []\n            now_ts = time.time()\n\n            for market in markets:\n                blob = \" \".join(\n                    str(market.get(k, \"\"))\n                    for k in [\n                        \"ticker\", \"title\", \"subtitle\", \"event_ticker\",\n                        \"yes_sub_title\", \"no_sub_title\"\n                    ]\n                ).lower()\n                if not any(word in blob for word in [\"bitcoin\", \"btc\"]):\n                    continue\n\n                target = kalshi_numeric_target(market)\n                if pd.isna(target) or target <= 0:\n                    continue\n\n                close_ts = kalshi_close_timestamp(market)\n\n                row = dict(market)\n                row[\"_target\"] = target\n                row[\"_close_ts\"] = close_ts\n                row[\"_seconds_remaining\"] = (\n                    max(0, int(close_ts - now_ts))\n                    if pd.notna(close_ts) else np.nan\n                )\n                hits.append(row)\n\n            future = [\n                row for row in hits\n                if pd.notna(row[\"_close_ts\"]) and row[\"_close_ts\"] > now_ts\n            ]\n            current = (\n                min(future, key=lambda row: (row[\"_close_ts\"], str(row.get(\"ticker\", \"\"))))\n                if future else (hits[0] if hits else None)\n            )\n\n            if current:\n                exact = fetch_exact_kalshi_market(current.get(\"ticker\", \"\"))\n                if exact:\n                    exact_target = kalshi_numeric_target(exact)\n                    exact_close_ts = kalshi_close_timestamp(exact)\n                    merged = dict(current)\n                    merged.update(exact)\n                    if pd.notna(exact_target):\n                        merged[\"_target\"] = exact_target\n                    if pd.notna(exact_close_ts):\n                        merged[\"_close_ts\"] = exact_close_ts\n                        merged[\"_seconds_remaining\"] = max(0, int(exact_close_ts - now_ts))\n                    current = merged\n\n            return {\n                \"ok\": True,\n                \"markets\": hits[:25],\n                \"current\": current,\n                \"feed_ms\": ms,\n                \"error\": None,\n            }\n        except Exception as exc:\n            errors.append(str(exc))\n\n    return {\n        \"ok\": False,\n        \"markets\": [],\n        \"current\": None,\n        \"feed_ms\": np.nan,\n        \"error\": \" | \".join(errors[-2:]),\n    }\n'''
+replacement = '''@st.cache_data(ttl=3, show_spinner=False)
+def fetch_kalshi_bitcoin_markets():
+    """Find the active KXBTC15M contract first, then exact-fetch its target."""
+    errors = []
+    for base in KALSHI_BASES:
+        for params in (
+            {"limit": 100, "status": "open", "series_ticker": "KXBTC15M"},
+            {"limit": 100, "series_ticker": "KXBTC15M"},
+        ):
+            try:
+                payload, ms = http_json(base + "/markets", params, timeout=3.0)
+                markets = payload.get("markets", []) if isinstance(payload, dict) else []
+                now_ts = time.time()
+                hits = []
 
-    new = '''@st.cache_data(ttl=3, show_spinner=False)\ndef fetch_kalshi_bitcoin_markets():\n    \"\"\"Read-only lookup for the live Kalshi KXBTC15M market.\n\n    Important: choose the active contract from ticker + close time FIRST, then\n    re-fetch that exact ticker and parse its Target Price. Kalshi's list payload\n    can omit subtitle/target fields, so filtering list rows by target can make the\n    live market disappear even though it exists.\n    \"\"\"\n    errors = []\n    for base in KALSHI_BASES:\n        # Prefer open markets, but fall back to the unfiltered series response.\n        # This keeps us resilient if Kalshi changes/briefly lags the status flag.\n        queries = [\n            {\"limit\": 100, \"status\": \"open\", \"series_ticker\": \"KXBTC15M\"},\n            {\"limit\": 100, \"series_ticker\": \"KXBTC15M\"},\n        ]\n        for params in queries:\n            try:\n                payload, ms = http_json(base + \"/markets\", params, timeout=3.0)\n                markets = payload.get(\"markets\", []) if isinstance(payload, dict) else []\n                now_ts = time.time()\n                hits = []\n\n                for market in markets:\n                    ticker = str(market.get(\"ticker\") or \"\")\n                    if not ticker.upper().startswith(\"KXBTC15M-\"):\n                        continue\n                    close_ts = kalshi_close_timestamp(market)\n                    row = dict(market)\n                    row[\"_close_ts\"] = close_ts\n                    row[\"_seconds_remaining\"] = (\n                        max(0, int(close_ts - now_ts))\n                        if pd.notna(close_ts) else np.nan\n                    )\n                    # Parse a target if the list happens to include it, but do NOT\n                    # require it here. Exact-market lookup below is canonical.\n                    list_target = kalshi_numeric_target(market)\n                    row[\"_target\"] = list_target\n                    hits.append(row)\n\n                future = [\n                    row for row in hits\n                    if pd.notna(row[\"_close_ts\"]) and row[\"_close_ts\"] > now_ts\n                ]\n                current = (\n                    min(future, key=lambda row: (row[\"_close_ts\"], str(row.get(\"ticker\", \"\"))))\n                    if future else None\n                )\n\n                if current:\n                    exact = fetch_exact_kalshi_market(current.get(\"ticker\", \"\"))\n                    if exact:\n                        merged = dict(current)\n                        merged.update(exact)\n                        exact_target = kalshi_numeric_target(exact)\n                        exact_close_ts = kalshi_close_timestamp(exact)\n                        if pd.notna(exact_target) and exact_target > 0:\n                            merged[\"_target\"] = float(exact_target)\n                        if pd.notna(exact_close_ts):\n                            merged[\"_close_ts\"] = exact_close_ts\n                            merged[\"_seconds_remaining\"] = max(0, int(exact_close_ts - now_ts))\n                        current = merged\n\n                    # Only declare success when we have the actual active ticker.\n                    return {\n                        \"ok\": True,\n                        \"markets\": hits[:25],\n                        \"current\": current,\n                        \"feed_ms\": ms,\n                        \"error\": None,\n                    }\n\n                if hits:\n                    errors.append(\"KXBTC15M rows found but no future close_time\")\n            except Exception as exc:\n                errors.append(str(exc))\n\n    return {\n        \"ok\": False,\n        \"markets\": [],\n        \"current\": None,\n        \"feed_ms\": np.nan,\n        \"error\": \" | \".join(errors[-4:]),\n    }\n'''
+                for market in markets:
+                    ticker = str(market.get("ticker") or "")
+                    if not ticker.upper().startswith("KXBTC15M-"):
+                        continue
+                    close_ts = kalshi_close_timestamp(market)
+                    row = dict(market)
+                    row["_close_ts"] = close_ts
+                    row["_seconds_remaining"] = (
+                        max(0, int(close_ts - now_ts)) if pd.notna(close_ts) else np.nan
+                    )
+                    row["_target"] = kalshi_numeric_target(market)
+                    hits.append(row)
 
-    if old not in s:
-        raise SystemExit('app Kalshi market function anchor not found')
-    s = s.replace(old, new, 1)
-    s = s.replace('APP_VERSION = "2026.09.04-r31-kalshi-timer-reliable"', 'APP_VERSION = "2026.09.04-r32-kalshi-live-market-fix"')
-    compile(s, 'app.py', 'exec')
-    p.write_text(s)
+                future = [
+                    row for row in hits
+                    if pd.notna(row["_close_ts"]) and row["_close_ts"] > now_ts
+                ]
+                if not future:
+                    continue
+
+                current = min(
+                    future,
+                    key=lambda row: (row["_close_ts"], str(row.get("ticker", ""))),
+                )
+
+                exact = fetch_exact_kalshi_market(current.get("ticker", ""))
+                if exact:
+                    merged = dict(current)
+                    merged.update(exact)
+                    exact_target = kalshi_numeric_target(exact)
+                    exact_close_ts = kalshi_close_timestamp(exact)
+                    if pd.notna(exact_target) and exact_target > 0:
+                        merged["_target"] = float(exact_target)
+                    if pd.notna(exact_close_ts):
+                        merged["_close_ts"] = exact_close_ts
+                        merged["_seconds_remaining"] = max(0, int(exact_close_ts - now_ts))
+                    current = merged
+
+                return {
+                    "ok": True,
+                    "markets": hits[:25],
+                    "current": current,
+                    "feed_ms": ms,
+                    "error": None,
+                }
+            except Exception as exc:
+                errors.append(str(exc))
+
+    return {
+        "ok": False,
+        "markets": [],
+        "current": None,
+        "feed_ms": np.nan,
+        "error": " | ".join(errors[-4:]),
+    }
 
 
-def patch_learner():
-    p = Path('learner.py')
-    s = p.read_text()
-    # Stop requiring target fields in the list payload. Pick current ticker by close\n    # time, then exact-fetch it before parsing target. This mirrors app.py semantics.\n    pattern = re.compile(r'def market\(\):\n.*?\n\ndef kalshi_context\(', re.S)
-    m = pattern.search(s)
-    if not m:
-        raise SystemExit('learner market() anchor not found')
-    replacement = '''def market():\n    now = time.time()\n    rows = []\n    for params in (\n        {\"limit\": 100, \"status\": \"open\", \"series_ticker\": \"KXBTC15M\"},\n        {\"limit\": 100, \"series_ticker\": \"KXBTC15M\"},\n    ):\n        try:\n            rows = get(KALSHI + \"/markets\", params).get(\"markets\", [])\n        except Exception:\n            continue\n        candidates = []\n        for mkt in rows:\n            ticker = str(mkt.get(\"ticker\") or \"\")\n            if not ticker.upper().startswith(\"KXBTC15M-\"):\n                continue\n            raw = mkt.get(\"close_time\") or mkt.get(\"expiration_time\") or mkt.get(\"expected_expiration_time\")\n            try:\n                expires = datetime.fromisoformat(str(raw).replace(\"Z\", \"+00:00\")).timestamp()\n            except Exception:\n                continue\n            if expires > now:\n                candidates.append((expires, ticker, mkt))\n        if not candidates:\n            continue\n        expires, ticker, list_market = min(candidates, key=lambda x: (x[0], x[1]))\n        exact = list_market\n        try:\n            payload = get(KALSHI + \"/markets/\" + ticker)\n            if isinstance(payload, dict) and isinstance(payload.get(\"market\"), dict):\n                exact = payload[\"market\"]\n        except Exception:\n            pass\n        target = strike(exact)\n        if target is None:\n            target = strike(list_market)\n        if target is None:\n            return None\n        vals = []\n        for key in (\"yes_bid_dollars\", \"yes_ask_dollars\", \"last_price_dollars\"):\n            try:\n                v = float(exact.get(key))\n                if 0 <= v <= 1:\n                    vals.append(v)\n            except Exception:\n                pass\n        prob = sum(vals) / len(vals) if vals else 0.5\n        return {\"ticker\": ticker, \"expires_at\": expires, \"target\": float(target), \"prob\": prob}\n    return None\n\n\ndef kalshi_context('''
-    s = s[:m.start()] + replacement + s[m.end():]
-    compile(s, 'learner.py', 'exec')
-    p.write_text(s)
+def kalshi_probability('''
 
-
-patch_app()
-patch_learner()
-print('R32 Kalshi active market selection fixed: select ticker first, exact-fetch target second.')
+s = s[:m.start()] + replacement + s[m.end():]
+s = s.replace(
+    'APP_VERSION = "2026.09.04-r31-kalshi-timer-reliable"',
+    'APP_VERSION = "2026.09.04-r32-kalshi-live-market-fix"',
+)
+compile(s, 'app.py', 'exec')
+p.write_text(s)
+print('R32 app repair applied: active ticker first, exact Kalshi target second.')
