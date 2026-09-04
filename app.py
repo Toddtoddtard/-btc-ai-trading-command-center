@@ -14,6 +14,8 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 from access_control import require_owner_approval
+from market_guide import render_market_guide
+from shared_learning import fetch_shared_learning_state
 
 from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
 from reliability_v31 import (
@@ -51,7 +53,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r38-private-access"
+APP_VERSION = "2026.09.04-r39-onboarding-shared-learning"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -273,36 +275,9 @@ def try_bases(bases, endpoint, params=None, timeout=2.8):
 
 
 def fetch_remote_learning_state(ttl=20.0):
-    now = time.monotonic()
-    cached = _REMOTE_LEARNING_CACHE.get("data")
+    """Compatibility wrapper around the private-repo-safe shared loader."""
+    return fetch_shared_learning_state(ttl=ttl)
 
-    if (
-        cached is not None
-        and now - float(_REMOTE_LEARNING_CACHE.get("ts", 0.0)) < ttl
-    ):
-        return cached
-
-    try:
-        req = Request(
-            REMOTE_LEARNING_URL,
-            headers={
-                "User-Agent": "BTC-AI-Command-Center/24x7-learning",
-                "Accept": "application/json",
-                "Cache-Control": "no-cache",
-            },
-        )
-        with urlopen(req, timeout=3.0) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-
-        if isinstance(payload, dict):
-            _REMOTE_LEARNING_CACHE["ts"] = now
-            _REMOTE_LEARNING_CACHE["data"] = payload
-            return payload
-    except Exception:
-        pass
-
-    _REMOTE_LEARNING_CACHE["ts"] = now
-    return cached if isinstance(cached, dict) else None
 
 # ============================================================
 # DATABASE
@@ -3262,6 +3237,7 @@ init_db()
 st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
 st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine • 24/7 remote learner • rolling 100/500/1000-window accuracy • paper-only")
+render_market_guide()
 
 # ============================================================
 # SIDEBAR
