@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import copy
 import json
-import math
+import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -9,7 +9,12 @@ import numpy as np
 import learner as legacy
 import learner_v3 as v3
 from ai_core import forecast_path_core
-from reliability_v31 import exact_expiry_row, safe_float, snapshot_payload
+from reliability_v31 import exact_expiry_row, safe_float
+
+PROMOTION_MIN_SAMPLES = 20
+PROMOTION_REQUIRED_STREAK = 3
+PROMOTION_ACCURACY_MARGIN = 0.05
+PROMOTION_MAX_ERROR_MULTIPLIER = 1.10
 
 
 def ensure_v31(state):
@@ -27,29 +32,41 @@ def strict_grade(state, df):
     pending = copy.deepcopy(state.get("pending"))
     if not pending:
         return False
-    if legacy.time.time() < safe_float(pending.get("expires_at"), float("inf")):
+    if time.time() < safe_float(pending.get("expires_at"), float("inf")):
         return False
     row = exact_expiry_row(df, pending.get("expires_at"), tolerance_seconds=75)
     if row is None:
         state.setdefault("status", {})["last_grade_skipped_reason"] = "No candle within 75s of exact expiry"
         return False
-    return v3.enhanced_grade(state, df)
+
+    graded = v3.enhanced_grade(state, df)
+    if not graded:
+        return False
+
+    # Preserve the decision-time WAIT verdict so later analysis can measure
+    # whether abstaining protected the paper account or merely missed a move.
+    if state.get("master_history"):
+        last = state["master_history"][-1]
+        last["would_wait"] = bool(pending.get("would_wait", False))
+        last["master_base_score"] = safe_float(pending.get("master_base_score"), 0.0)
+        last["snapshot_available"] = bool(pending.get("snapshot"))
+    return True
 
 
 def update_wait_counterfactual(state):
     hist = state.get("master_history", [])
-    pending_history = state.setdefault("wait_counterfactual", {"samples": 0, "profitable_waits": 0, "avoided_losses": 0})
+    metrics = state.setdefault("wait_counterfactual", {"samples": 0, "profitable_waits": 0, "avoided_losses": 0})
     rows = [r for r in hist if r.get("would_wait") is not None and not r.get("wait_cf_counted")]
     for row in rows:
         move = abs(safe_float(row.get("realized_return"), 0.0))
         waited = bool(row.get("would_wait"))
         hit = int(safe_float(row.get("direction_correct"), 0.0))
         if waited:
-            pending_history["samples"] += 1
+            metrics["samples"] += 1
             if hit and move >= 0.0015:
-                pending_history["profitable_waits"] += 1
+                metrics["profitable_waits"] += 1
             if (not hit) and move >= 0.0010:
-                pending_history["avoided_losses"] += 1
+                metrics["avoided_losses"] += 1
         row["wait_cf_counted"] = True
 
 
@@ -57,7 +74,7 @@ def evaluate_cfg(df, cfg):
     if df is None or len(df) < 120:
         return {"samples": 0, "accuracy": None, "median_error": None}
     outcomes = []
-    start = max(60, len(df) - 240)
+    start = max(60, len(df) - 420)
     for end in range(start, len(df) - 15, 15):
         train = df.iloc[: end + 1]
         rows = legacy.rows_for_forecast(train)
@@ -77,8 +94,24 @@ def evaluate_cfg(df, cfg):
     }
 
 
+def challenger_qualifies(champ, challenger):
+    if champ.get("samples", 0) < PROMOTION_MIN_SAMPLES or challenger.get("samples", 0) < PROMOTION_MIN_SAMPLES:
+        return False
+    champ_acc = champ.get("accuracy")
+    challenger_acc = challenger.get("accuracy")
+    champ_err = champ.get("median_error")
+    challenger_err = challenger.get("median_error")
+    if None in (champ_acc, challenger_acc, champ_err, challenger_err):
+        return False
+    return bool(
+        challenger_acc >= champ_acc + PROMOTION_ACCURACY_MARGIN
+        and challenger_err <= champ_err * PROMOTION_MAX_ERROR_MULTIPLIER
+    )
+
+
 def champion_challenger(state, df):
     forecast = state.get("forecast", {})
+    previous = state.get("champion_challenger", {}) if isinstance(state.get("champion_challenger"), dict) else {}
     champion_cfg = {k: safe_float(forecast.get(k), d) for k, d in {
         "w_ret3": 0.46, "w_ret8": 0.34, "w_ret15": 0.20,
         "momentum_scale": 2.2, "target_influence": 0.18, "bias": 0.0,
@@ -90,29 +123,36 @@ def champion_challenger(state, df):
         cfg["w_ret3"] = float(np.clip(cfg["w_ret3"] + short_shift, 0.05, 0.90))
         cfg["w_ret15"] = float(np.clip(cfg["w_ret15"] - short_shift, 0.05, 0.90))
         total = cfg["w_ret3"] + cfg["w_ret8"] + cfg["w_ret15"]
-        for k in ("w_ret3", "w_ret8", "w_ret15"):
-            cfg[k] /= total
+        for key in ("w_ret3", "w_ret8", "w_ret15"):
+            cfg[key] /= total
         challengers.append(cfg)
 
     champ = evaluate_cfg(df, champion_cfg)
     scored = [(evaluate_cfg(df, cfg), cfg) for cfg in challengers]
-    best_metrics, best_cfg = max(scored, key=lambda x: ((x[0]["accuracy"] or 0.0), -(x[0]["median_error"] or 1e18)))
+    best_metrics, best_cfg = max(
+        scored,
+        key=lambda x: ((x[0]["accuracy"] or 0.0), -(x[0]["median_error"] or 1e18)),
+    )
+
+    qualifies = challenger_qualifies(champ, best_metrics)
+    streak = int(previous.get("qualification_streak", 0)) + 1 if qualifies else 0
     promoted = False
-    if champ["samples"] >= 8 and best_metrics["samples"] >= 8:
-        champ_acc = champ["accuracy"] or 0.0
-        best_acc = best_metrics["accuracy"] or 0.0
-        champ_err = champ["median_error"] or 1e18
-        best_err = best_metrics["median_error"] or 1e18
-        if best_acc >= champ_acc + 0.05 and best_err <= champ_err * 1.10:
-            for key, value in best_cfg.items():
-                forecast[key] = value
-            promoted = True
+    if qualifies and streak >= PROMOTION_REQUIRED_STREAK:
+        for key, value in best_cfg.items():
+            forecast[key] = value
+        promoted = True
+        streak = 0
+
     state["champion_challenger"] = {
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "champion": champ,
         "best_challenger": best_metrics,
+        "qualification_streak": streak,
         "promoted": promoted,
-        "minimum_margin": 0.05,
+        "minimum_samples": PROMOTION_MIN_SAMPLES,
+        "required_streak": PROMOTION_REQUIRED_STREAK,
+        "minimum_margin": PROMOTION_ACCURACY_MARGIN,
+        "max_error_multiplier": PROMOTION_MAX_ERROR_MULTIPLIER,
     }
 
 
@@ -130,6 +170,7 @@ def register_with_snapshot(state, df, market_info):
             "regime": p.get("regime", "UNKNOWN"),
             "master_confidence": safe_float(p.get("master_confidence"), 0.5),
             "master_base_score": safe_float(p.get("master_base_score"), 0.0),
+            "would_wait": bool(p.get("would_wait", False)),
             "specialists": p.get("specialists", {}),
         }
         state.setdefault("prediction_snapshots", []).append({
@@ -163,6 +204,7 @@ def main():
         "official_results_resolved": official_resolved,
         "registered_this_run": registered,
         "champion_promoted": state.get("champion_challenger", {}).get("promoted", False),
+        "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),
     })
     legacy.OUT.parent.mkdir(parents=True, exist_ok=True)
     legacy.OUT.write_text(json.dumps(state, indent=2, sort_keys=True))
