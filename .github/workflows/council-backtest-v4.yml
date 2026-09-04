@@ -1,0 +1,66 @@
+name: Council v4 Historical Replay
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'council_backtest_v4.py'
+      - 'council_v4.py'
+      - 'ai_core.py'
+      - 'tests/test_council_backtest_v4.py'
+      - '.github/workflows/council-backtest-v4.yml'
+  schedule:
+    - cron: '20 6 1 * *'
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r learner-requirements.txt
+      - run: python -m py_compile council_backtest_v4.py council_v4.py ai_core.py
+      - run: python -m unittest tests.test_council_backtest_v4 -v
+
+  five-year-replay:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r learner-requirements.txt
+      - name: Run five-year council replay
+        env:
+          COUNCIL_BACKTEST_OUTPUT: /tmp/council_backtest_v4.json
+        run: python council_backtest_v4.py
+      - name: Publish report to learning-state branch
+        shell: bash
+        run: |
+          set -e
+          git config user.name 'btc-ai-backtest-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git fetch origin learning-state:refs/remotes/origin/learning-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
+            git checkout -B learning-state refs/remotes/origin/learning-state
+          else
+            git checkout --orphan learning-state
+            git rm -rf . || true
+          fi
+          cp /tmp/council_backtest_v4.json ./council_backtest_v4.json
+          git add council_backtest_v4.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'Update Council v4 five-year historical replay'
+          git push origin learning-state --force-with-lease
