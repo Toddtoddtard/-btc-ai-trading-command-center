@@ -1,0 +1,52 @@
+name: BTC AI 24x7 Learner
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: btc-ai-learning-state
+  cancel-in-progress: false
+
+jobs:
+  learn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Checkout app code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install learner dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Run BTC AI learner
+        env:
+          LEARNING_STATE_OUTPUT: /tmp/learning_state.json
+        run: python learner.py
+      - name: Publish learning state
+        shell: bash
+        run: |
+          set -e
+          git config user.name "btc-ai-learning-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin learning-state:refs/remotes/origin/learning-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
+            git checkout -B learning-state refs/remotes/origin/learning-state
+          else
+            git checkout --orphan learning-state
+            git rm -rf . || true
+          fi
+          cp /tmp/learning_state.json ./learning_state.json
+          git add learning_state.json
+          if git diff --cached --quiet; then
+            echo "No learning-state change to publish."
+            exit 0
+          fi
+          git commit -m "Update BTC AI learning state"
+          git push origin learning-state --force-with-lease
