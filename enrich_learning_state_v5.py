@@ -11,9 +11,34 @@ from specialist_knowledge_v5 import specialist_posterior
 PATH = Path(os.getenv("LEARNING_STATE_OUTPUT", "/tmp/learning_state.json"))
 
 
+def resolve_current_regime(state):
+    """Resolve the freshest real regime label available in the state.
+
+    Older v5 code looked for validation.current_regime, but walk-forward validation
+    does not emit that field, so the knowledge layer silently fell back to UNKNOWN.
+    Prefer the active pending window, then learner status, then the latest graded row.
+    """
+    pending = state.get("pending") if isinstance(state.get("pending"), dict) else {}
+    regime = str((pending or {}).get("regime") or "").strip()
+    if regime and regime != "UNKNOWN":
+        return regime
+    status = state.get("status") if isinstance(state.get("status"), dict) else {}
+    regime = str((status or {}).get("current_regime") or "").strip()
+    if regime and regime != "UNKNOWN":
+        return regime
+    history = state.get("master_history") if isinstance(state.get("master_history"), list) else []
+    for row in reversed(history):
+        if not isinstance(row, dict):
+            continue
+        regime = str(row.get("regime") or "").strip()
+        if regime and regime != "UNKNOWN":
+            return regime
+    return "UNKNOWN"
+
+
 def main():
     state = json.loads(PATH.read_text())
-    regime = str(((state.get("validation") or {}).get("current_regime")) or "UNKNOWN")
+    regime = resolve_current_regime(state)
     names = [n for n in SPECIALIST_NAMES if n != "Combination AI"]
     knowledge = {}
     for name in names:
@@ -34,9 +59,11 @@ def main():
     }
     state.setdefault("status", {})["intelligence_version"] = 5
     state["status"]["specialist_self_learning_v5"] = True
+    state["status"]["specialist_knowledge_regime"] = regime
     PATH.write_text(json.dumps(state, indent=2, sort_keys=True))
     print(json.dumps({
         "intelligence_version": 5,
+        "regime": regime,
         "top_bots": state["specialist_knowledge_v5"]["ranking"][:5],
     }, indent=2))
 
