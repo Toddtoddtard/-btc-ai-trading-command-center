@@ -60,4 +60,6 @@ jobs:
             exit 0
           fi
           git commit -m 'Integrate specialist self-learning v5 and precision gate'
-          git push origin specialist-self-learning-v5
+          git fetch origin specialist-self-learning-v5
+          git rebase origin/specialist-self-learning-v5
+          git push origin HEAD:specialist-self-learning-v5
