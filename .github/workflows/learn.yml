@@ -16,6 +16,7 @@ on:
       - 'specialist_knowledge_v5.py'
       - 'enrich_learning_state_v5.py'
       - 'profitability_v5.py'
+      - 'audit_scorecard_v7.py'
       - 'tests/test_audit_v6.py'
       - '.github/workflows/learn.yml'
   schedule:
@@ -44,7 +45,7 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py tests/test_audit_v6.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py audit_scorecard_v7.py tests/test_audit_v6.py
       - name: Run audit v6 regression tests
         run: python -m unittest tests.test_audit_v6 -v
       - name: Load previous private learning state and historical priors
@@ -94,6 +95,10 @@ jobs:
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
           HISTORICAL_SPECIALIST_INPUT: /tmp/historical_specialist_knowledge_v7.json
         run: python enrich_learning_state_v5.py
+      - name: Update Audit v6 milestone scorecard
+        env:
+          LEARNING_STATE_OUTPUT: /tmp/learning_state.json
+        run: python audit_scorecard_v7.py
       - name: Validate generated learning state
         run: |
           python - <<'PY'
@@ -128,6 +133,8 @@ jobs:
           assert isinstance(data.get('bot_intelligence_v4', {}).get('ranking', []), list)
           assert 'specialist_knowledge_v5' in data
           assert isinstance(data.get('specialist_knowledge_v5', {}).get('bots', {}), dict)
+          assert data.get('audit_v6_scorecard', {}).get('baseline_total_samples') == 15
+          assert data.get('audit_v6_scorecard', {}).get('milestones') == [25, 50, 100, 250, 500, 1000]
           before=int(data.get('status', {}).get('samples_before_run', 0))
           after=int(data.get('status', {}).get('samples_after_run', 0))
           assert after >= before, (before, after)
