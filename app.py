@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r11-hourly-kalshi-ai"
+APP_VERSION = "2026.09.04-single-file-r12-no-market-flash"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -2112,6 +2112,59 @@ if st.sidebar.button("Reset paper account", use_container_width=True):
 # A fragment reruns independently from the rest of the Streamlit app.
 # This avoids the full-page rebuild/flash caused by time.sleep()+st.rerun().
 live_run_every = refresh_seconds if auto_refresh else None
+
+# ============================================================
+# LIVE CHART ANTI-FLASH
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+    /* Streamlit marks old fragment elements as stale while the replacement
+       is being computed. Keep the market chart fully visible instead of
+       dimming/fading during that short interval. */
+    [data-testid="stPlotlyChart"],
+    [data-testid="stPlotlyChart"] *,
+    [data-stale="true"] [data-testid="stPlotlyChart"],
+    [data-stale="true"] [data-testid="stPlotlyChart"] *,
+    [data-testid="stPlotlyChart"][data-stale="true"],
+    [data-testid="stPlotlyChart"][data-stale="true"] *,
+    .js-plotly-plot,
+    .js-plotly-plot *,
+    .plot-container,
+    .plot-container *,
+    .svg-container,
+    .svg-container * {
+        opacity: 1 !important;
+        filter: none !important;
+        transition: none !important;
+        animation: none !important;
+        -webkit-transition: none !important;
+        -webkit-animation: none !important;
+    }
+
+    /* Keep the old canvas/SVG visible until the new candle data replaces it. */
+    [data-stale="true"] .js-plotly-plot,
+    [data-stale="true"] .plot-container,
+    [data-stale="true"] .svg-container {
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
+
+    /* Plotly trace layers should snap to the new values rather than fade. */
+    .js-plotly-plot .trace,
+    .js-plotly-plot .scatterlayer,
+    .js-plotly-plot .candlesticklayer,
+    .js-plotly-plot .overplot,
+    .js-plotly-plot .cartesianlayer,
+    .js-plotly-plot .modebar {
+        transition: none !important;
+        animation: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ============================================================
 # DASHBOARD THEME
