@@ -13,6 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
+from access_control import require_owner_approval
 
 from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
 from reliability_v31 import (
@@ -33,6 +34,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+require_owner_approval()
+
 SYMBOL = "BTCUSDT"
 SPOT_BASES = [
     "https://data-api.binance.vision",
@@ -47,7 +51,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r37-reliability-v31"
+APP_VERSION = "2026.09.04-r38-private-access"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
