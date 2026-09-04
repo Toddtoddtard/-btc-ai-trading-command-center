@@ -9,7 +9,6 @@ on:
       - 'profitability_v5.py'
       - 'enrich_learning_state_v5.py'
       - 'tools/apply_specialist_v5.py'
-      - 'tools/apply_learning_v5.py'
       - 'tests/test_specialist_v5.py'
       - '.github/workflows/specialist-self-learning-v5.yml'
   workflow_dispatch:
@@ -35,10 +34,8 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r learner-requirements.txt
-      - name: Apply app and learner integrations
-        run: |
-          python tools/apply_specialist_v5.py
-          python tools/apply_learning_v5.py
+      - name: Apply app integration
+        run: python tools/apply_specialist_v5.py
       - name: Compile critical files
         run: python -m py_compile app.py specialist_knowledge_v5.py profitability_v5.py enrich_learning_state_v5.py council_v4.py
       - name: Run v5 tests
@@ -60,6 +57,4 @@ jobs:
             exit 0
           fi
           git commit -m 'Integrate specialist self-learning v5 and precision gate'
-          git fetch origin specialist-self-learning-v5
-          git rebase origin/specialist-self-learning-v5
           git push origin HEAD:specialist-self-learning-v5
