@@ -53,7 +53,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r39-onboarding-shared-learning"
+APP_VERSION = "2026.09.04-r40-journal-dark-ui"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5099,7 +5099,104 @@ def live_dashboard():
         j4.metric("Avg |15m move|", "N/A" if pd.isna(stats["avg_abs_move"]) else f"{stats['avg_abs_move']:.3f}%")
         journal_df = recent_predictions(150)
         if not journal_df.empty:
-            st.dataframe(journal_df, use_container_width=True, hide_index=True)
+            if dark_mode:
+                # Match the AI Council table: dark card, blue outline, and
+                # directional visual cues. This is presentation-only.
+                journal_view = journal_df.copy()
+
+                def _journal_action_badge(value):
+                    label = str(value or "HOLD").upper().strip()
+                    if label in {"SCALP UP", "LOCK UP", "UP", "BULLISH"}:
+                        cls, icon = "journal-up", "▲"
+                    elif label in {"SCALP DOWN", "LOCK DOWN", "DOWN", "BEARISH"}:
+                        cls, icon = "journal-down", "▼"
+                    else:
+                        cls, icon = "journal-neutral", "•"
+                    return f'<span class="journal-badge {cls}">{icon}&nbsp;&nbsp;{label}</span>'
+
+                def _journal_result_badge(value):
+                    try:
+                        if pd.isna(value):
+                            return '<span class="journal-result journal-pending">PENDING</span>'
+                        return (
+                            '<span class="journal-result journal-win">✓ CORRECT</span>'
+                            if int(float(value)) == 1
+                            else '<span class="journal-result journal-loss">✕ WRONG</span>'
+                        )
+                    except Exception:
+                        return '<span class="journal-result journal-pending">PENDING</span>'
+
+                def _journal_resolved_badge(value):
+                    try:
+                        resolved = int(float(value)) == 1
+                    except Exception:
+                        resolved = False
+                    cls = "journal-resolved" if resolved else "journal-pending"
+                    text = "RESOLVED" if resolved else "OPEN"
+                    return f'<span class="journal-result {cls}">{text}</span>'
+
+                journal_html = journal_view.to_html(
+                    index=False,
+                    border=0,
+                    classes="prediction-journal-table",
+                    escape=False,
+                    formatters={
+                        "action": _journal_action_badge,
+                        "resolved": _journal_resolved_badge,
+                        "correct": _journal_result_badge,
+                    },
+                )
+                st.markdown(
+                    """
+                    <style>
+                    .prediction-journal-wrap {
+                        width:100%; overflow-x:auto; border:1px solid #1687ff;
+                        border-radius:12px; background:#0b1220;
+                    }
+                    .prediction-journal-table {
+                        width:100%; border-collapse:collapse; color:#e8eef8;
+                        background:#0b1220; font-size:.93rem; margin:0;
+                    }
+                    .prediction-journal-table thead th {
+                        position:sticky; top:0; z-index:1; text-align:left;
+                        color:#b8cff7; background:#111c2e; font-weight:700;
+                        border-bottom:1px solid #2b3b52; padding:10px 12px;
+                        white-space:nowrap;
+                    }
+                    .prediction-journal-table tbody td {
+                        color:#e7edf7; background:#0b1220;
+                        border-bottom:1px solid #1e2b3d; padding:9px 12px;
+                        vertical-align:middle; white-space:nowrap;
+                    }
+                    .prediction-journal-table tbody tr:nth-child(even) td {background:#0f1828;}
+                    .prediction-journal-table tbody tr:hover td {background:#15243a;}
+                    .journal-badge, .journal-result {
+                        display:inline-block; min-width:92px; text-align:center;
+                        padding:4px 10px; border-radius:7px; font-weight:800;
+                        letter-spacing:.02em; line-height:1.2; box-sizing:border-box;
+                    }
+                    .journal-up, .journal-win, .journal-resolved {
+                        color:#00f0b5; background:rgba(0,240,181,.13);
+                        border:1px solid rgba(0,240,181,.80);
+                    }
+                    .journal-down, .journal-loss {
+                        color:#ff536b; background:rgba(255,83,107,.13);
+                        border:1px solid rgba(255,83,107,.85);
+                    }
+                    .journal-neutral, .journal-pending {
+                        color:#b8c6dc; background:rgba(184,198,220,.09);
+                        border:1px solid rgba(184,198,220,.42);
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f'<div class="prediction-journal-wrap">{journal_html}</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.dataframe(journal_df, use_container_width=True, hide_index=True)
         else:
             st.info("No predictions recorded yet.")
 
