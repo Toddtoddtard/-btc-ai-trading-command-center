@@ -1,0 +1,50 @@
+name: Apply onboarding + shared learning
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'market_guide.py'
+      - 'shared_learning.py'
+      - 'tools/apply_onboarding_shared_learning.py'
+      - '.github/workflows/onboarding-shared-learning.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Apply upgrade
+        run: python tools/apply_onboarding_shared_learning.py
+      - name: Compile
+        run: python -m py_compile app.py market_guide.py shared_learning.py
+      - name: Verify markers
+        run: |
+          grep -q 'r39-onboarding-shared-learning' app.py
+          grep -q 'render_market_guide()' app.py
+          grep -q 'fetch_shared_learning_state' app.py
+      - name: Commit patched app
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          if git diff --cached --quiet; then
+            echo 'No app.py changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Apply onboarding and shared learning upgrade'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
