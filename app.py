@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r6-no-flash-tabs"
+APP_VERSION = "2026.09.04-single-file-r7b-kalshi-lock-persistent"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -501,23 +501,48 @@ def manage_auto_paper(decision, risk, price, hist):
         elapsed = now_ts - entry_ts
 
         exit_reason = None
-        if side == "LONG":
-            if price <= stop:
-                exit_reason = "stop-loss"
-            elif price >= target:
-                exit_reason = "take-profit"
-            elif decision["action"] == "SELL" and decision["confidence"] >= 0.68 and decision["consensus"] >= 0.35:
-                exit_reason = "strong master reversal"
-        else:
-            if price >= stop:
-                exit_reason = "stop-loss"
-            elif price <= target:
-                exit_reason = "take-profit"
-            elif decision["action"] == "BUY" and decision["confidence"] >= 0.68 and decision["consensus"] >= 0.35:
-                exit_reason = "strong master reversal"
 
-        if exit_reason is None and elapsed >= PREDICTION_HORIZON_MIN * 60:
-            exit_reason = f"{PREDICTION_HORIZON_MIN}-minute horizon"
+        if decision["action"] == "LOCK":
+            if (
+                pd.notna(decision.get("seconds_remaining"))
+                and decision["seconds_remaining"] <= 0
+            ):
+                exit_reason = "Kalshi market expiration"
+        else:
+            if side == "LONG":
+                if price <= stop:
+                    exit_reason = "stop-loss"
+                elif price >= target:
+                    exit_reason = "take-profit"
+                elif (
+                    decision["action"] == "SCALP DOWN"
+                    and decision["confidence"] >= 0.68
+                    and decision["consensus"] >= 0.35
+                ):
+                    exit_reason = "strong master reversal"
+            else:
+                if price >= stop:
+                    exit_reason = "stop-loss"
+                elif price <= target:
+                    exit_reason = "take-profit"
+                elif (
+                    decision["action"] == "SCALP UP"
+                    and decision["confidence"] >= 0.68
+                    and decision["consensus"] >= 0.35
+                ):
+                    exit_reason = "strong master reversal"
+
+            if (
+                exit_reason is None
+                and pd.notna(decision.get("seconds_remaining"))
+                and decision["seconds_remaining"] <= 0
+            ):
+                exit_reason = "Kalshi market expiration"
+            elif (
+                exit_reason is None
+                and elapsed >= PREDICTION_HORIZON_MIN * 60
+            ):
+                exit_reason = f"{PREDICTION_HORIZON_MIN}-minute horizon"
 
         if exit_reason:
             result = close_paper_position(price, exit_reason)
@@ -535,9 +560,10 @@ def manage_auto_paper(decision, risk, price, hist):
     if now_ts - last_exit_ts < 60:
         return {"event": False, "message": f"Auto paper cooldown: {60 - (now_ts-last_exit_ts)}s."}
 
-    if risk["approved"] and decision["action"] in {"BUY", "SELL"}:
+    if risk["approved"] and decision["action"] in {"SCALP UP", "SCALP DOWN"}:
+        internal_action = "BUY" if decision["action"] == "SCALP UP" else "SELL"
         result = open_paper_position(
-            decision["action"],
+            internal_action,
             price,
             risk["position_pct"],
             hist,
@@ -652,9 +678,9 @@ def fetch_futures_snapshot():
     return out
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=3, show_spinner=False)
 def fetch_kalshi_bitcoin_markets():
-    """Public read-only Kalshi market lookup. Never places orders."""
+    """Read-only lookup for the live Kalshi KXBTC15M market."""
     errors = []
     for base in KALSHI_BASES:
         try:
@@ -665,17 +691,129 @@ def fetch_kalshi_bitcoin_markets():
             )
             markets = payload.get("markets", []) if isinstance(payload, dict) else []
             hits = []
-            for m in markets:
-                text = " ".join(
-                    str(m.get(k, ""))
-                    for k in ["ticker", "title", "subtitle", "event_ticker", "yes_sub_title", "no_sub_title"]
+            now_ts = time.time()
+
+            for market in markets:
+                blob = " ".join(
+                    str(market.get(k, ""))
+                    for k in [
+                        "ticker", "title", "subtitle", "event_ticker",
+                        "yes_sub_title", "no_sub_title"
+                    ]
                 ).lower()
-                if any(word in text for word in ["bitcoin", "btc"]):
-                    hits.append(m)
-            return {"ok": True, "markets": hits[:25], "feed_ms": ms, "error": None}
+                if not any(word in blob for word in ["bitcoin", "btc"]):
+                    continue
+
+                target = safe_float(market.get("floor_strike"))
+                if pd.isna(target) or target <= 0:
+                    target = safe_float(market.get("cap_strike"))
+                if pd.isna(target) or target <= 0:
+                    continue
+
+                raw_close = (
+                    market.get("close_time")
+                    or market.get("expiration_time")
+                    or market.get("expected_expiration_time")
+                )
+                close_ts = np.nan
+                if raw_close:
+                    try:
+                        close_ts = pd.Timestamp(raw_close).timestamp()
+                    except Exception:
+                        pass
+
+                row = dict(market)
+                row["_target"] = target
+                row["_close_ts"] = close_ts
+                row["_seconds_remaining"] = (
+                    max(0, int(close_ts - now_ts))
+                    if pd.notna(close_ts) else np.nan
+                )
+                hits.append(row)
+
+            future = [
+                row for row in hits
+                if pd.notna(row["_close_ts"]) and row["_close_ts"] > now_ts
+            ]
+            current = (
+                min(future, key=lambda row: row["_close_ts"])
+                if future else (hits[0] if hits else None)
+            )
+
+            return {
+                "ok": True,
+                "markets": hits[:25],
+                "current": current,
+                "feed_ms": ms,
+                "error": None,
+            }
         except Exception as exc:
             errors.append(str(exc))
-    return {"ok": False, "markets": [], "feed_ms": np.nan, "error": " | ".join(errors[-2:])}
+
+    return {
+        "ok": False,
+        "markets": [],
+        "current": None,
+        "feed_ms": np.nan,
+        "error": " | ".join(errors[-2:]),
+    }
+
+
+def kalshi_probability(market):
+    if not market:
+        return np.nan
+
+    bid = safe_float(market.get("yes_bid_dollars"))
+    ask = safe_float(market.get("yes_ask_dollars"))
+    last = safe_float(market.get("last_price_dollars"))
+
+    if pd.notna(bid) and pd.notna(ask):
+        return clamp((bid + ask) / 2.0, 0.0, 1.0)
+    if pd.notna(last):
+        return clamp(last, 0.0, 1.0)
+    if pd.notna(ask):
+        return clamp(ask, 0.0, 1.0)
+    if pd.notna(bid):
+        return clamp(bid, 0.0, 1.0)
+    return np.nan
+
+
+def current_kalshi_context(kalshi, spot_price):
+    market = kalshi.get("current") if kalshi else None
+    if not market:
+        return {
+            "available": False,
+            "ticker": "",
+            "target": np.nan,
+            "seconds_remaining": np.nan,
+            "up_probability": np.nan,
+            "distance": np.nan,
+            "distance_pct": np.nan,
+        }
+
+    target = safe_float(market.get("_target"))
+    remaining = safe_float(market.get("_seconds_remaining"))
+    probability = kalshi_probability(market)
+
+    distance = spot_price - target if pd.notna(target) else np.nan
+    distance_pct = distance / target if pd.notna(distance) and target else np.nan
+
+    return {
+        "available": True,
+        "ticker": market.get("ticker", ""),
+        "title": market.get("title", "BTC 15 min"),
+        "target": target,
+        "seconds_remaining": remaining,
+        "close_time": (
+            market.get("close_time")
+            or market.get("expiration_time")
+            or market.get("expected_expiration_time")
+        ),
+        "up_probability": probability,
+        "distance": distance,
+        "distance_pct": distance_pct,
+        "market": market,
+    }
 
 # ============================================================
 # INDICATORS
@@ -813,16 +951,28 @@ def run_specialists(hist, agg, futures, kalshi):
     deriv_score = clamp(book * 1.6 - np.sign(funding) * min(abs(funding) / 0.0005, 1.0) * 0.25)
     out["Derivatives AI"] = specialist("Derivatives AI", deriv_score, f"Funding {funding*100:.4f}%; OI {safe_float(futures.get('open_interest'), 0):,.0f} BTC")
 
-    # Event / Kalshi
-    km = kalshi.get("markets", []) if kalshi else []
-    probs = []
-    for m in km:
-        yes = m.get("yes_ask_dollars", m.get("yes_bid_dollars", m.get("last_price_dollars")))
-        v = safe_float(yes)
-        if pd.notna(v):
-            probs.append(v)
-    event_score = clamp((np.mean(probs) - 0.5) * 1.2) if probs else 0.0
-    out["Event AI"] = specialist("Event AI", event_score, f"{len(km)} open BTC-related Kalshi markets found")
+    # Event / Kalshi 15-minute market
+    kctx = current_kalshi_context(kalshi, px)
+    if kctx["available"]:
+        probability = kctx["up_probability"]
+        market_score = clamp((probability - 0.5) * 2.0) if pd.notna(probability) else 0.0
+        target_distance_score = clamp(
+            (px - kctx["target"]) / max(px * 0.0025, 1.0)
+        )
+        event_score = clamp(0.55 * market_score + 0.45 * target_distance_score)
+        event_reason = (
+            f"Kalshi target ${kctx['target']:,.2f}; BTC {kctx['distance']:+,.2f} "
+            f"({kctx['distance_pct']*100:+.3f}%) vs target; "
+            + (
+                f"UP market ~{probability*100:.1f}%"
+                if pd.notna(probability)
+                else "UP market price unavailable"
+            )
+        )
+    else:
+        event_score = 0.0
+        event_reason = "Live KXBTC15M target unavailable"
+    out["Event AI"] = specialist("Event AI", event_score, event_reason)
 
     # Historical pattern
     rets = hist["ret1"].dropna()
@@ -845,43 +995,174 @@ def run_specialists(hist, agg, futures, kalshi):
 # ============================================================
 
 
-def master_decision(results, hist):
+def master_decision(results, hist, kalshi=None):
     weighted_sum = 0.0
     total_weight = 0.0
     signs = []
+
     for name, result in results.items():
         weight = SPECIALIST_WEIGHTS.get(name, 1.0)
         weighted_sum += result["score"] * result["confidence"] * weight
         total_weight += result["confidence"] * weight
         signs.append(np.sign(result["score"]))
-    score = clamp(weighted_sum / total_weight if total_weight else 0.0)
+
+    base_score = clamp(weighted_sum / total_weight if total_weight else 0.0)
     directional = [s for s in signs if s != 0]
     consensus = abs(sum(directional)) / len(directional) if directional else 0.0
-    confidence = min(0.97, max(0.45, 0.48 + abs(score) * 0.34 + consensus * 0.15))
-
-    if score >= 0.16 and confidence >= 0.58:
-        action = "BUY"
-    elif score <= -0.16 and confidence >= 0.58:
-        action = "SELL"
-    else:
-        action = "HOLD"
 
     px = float(hist["close"].iloc[-1])
     atr = safe_float(hist["atr14"].iloc[-1], px * 0.002)
-    target_move = max(atr * 1.2, px * 0.0015) * score
-    target_price = px + target_move
-    risk_level = "LOW" if confidence > 0.78 and consensus > 0.55 else "MEDIUM" if confidence > 0.62 else "HIGH"
+    kctx = current_kalshi_context(kalshi or {}, px)
 
-    strongest = sorted(results.values(), key=lambda r: abs(r["score"] * r["confidence"]), reverse=True)[:3]
-    reason = "; ".join(f"{r['name']}: {r['signal']} ({r['score']:+.2f})" for r in strongest)
+    forecast_move = max(atr * 1.25, px * 0.0012) * base_score
+    projected_end = px + forecast_move
+
+    target = kctx["target"]
+    remaining = kctx["seconds_remaining"]
+    market_prob = kctx["up_probability"]
+
+    if kctx["available"] and pd.notna(target):
+        projected_edge = projected_end - target
+        target_scale = max(atr * 0.8, px * 0.0008)
+        target_score = clamp(projected_edge / target_scale)
+        current_edge_score = clamp(
+            (px - target) / max(atr * 0.65, px * 0.0006)
+        )
+        market_score = (
+            clamp((market_prob - 0.5) * 2.0)
+            if pd.notna(market_prob) else 0.0
+        )
+
+        score = clamp(
+            0.50 * base_score
+            + 0.28 * target_score
+            + 0.14 * current_edge_score
+            + 0.08 * market_score
+        )
+
+        distance_strength = min(
+            1.0, abs(projected_edge) / max(target_scale, 1.0)
+        )
+        confidence = min(
+            0.97,
+            max(
+                0.45,
+                0.49
+                + abs(score) * 0.29
+                + consensus * 0.12
+                + distance_strength * 0.10,
+            ),
+        )
+
+        raw_side = "UP" if projected_end >= target else "DOWN"
+
+        lock_now = (
+            (confidence >= 0.72 and abs(score) >= 0.28)
+            or (
+                pd.notna(remaining)
+                and remaining <= 240
+                and confidence >= 0.66
+                and abs(score) >= 0.18
+            )
+        )
+
+        # Persistent LOCK state for the current Kalshi contract.
+        # Once locked, the side cannot flip on later fragment refreshes.
+        lock_ticker = st.session_state.get("kalshi_lock_ticker", "")
+        lock_side = st.session_state.get("kalshi_lock_side")
+        current_ticker = kctx.get("ticker", "")
+
+        # New contract or expired contract clears the previous lock.
+        if lock_ticker and (
+            lock_ticker != current_ticker
+            or (pd.notna(remaining) and remaining <= 0)
+        ):
+            st.session_state.pop("kalshi_lock_ticker", None)
+            st.session_state.pop("kalshi_lock_side", None)
+            lock_ticker = ""
+            lock_side = None
+
+        if lock_ticker == current_ticker and lock_side in {"UP", "DOWN"}:
+            action = "LOCK"
+            locked_side = lock_side
+        elif lock_now:
+            st.session_state["kalshi_lock_ticker"] = current_ticker
+            st.session_state["kalshi_lock_side"] = raw_side
+            action = "LOCK"
+            locked_side = raw_side
+        elif score >= 0.13 and confidence >= 0.57:
+            action = "SCALP UP"
+            locked_side = None
+        elif score <= -0.13 and confidence >= 0.57:
+            action = "SCALP DOWN"
+            locked_side = None
+        else:
+            action = "HOLD"
+            locked_side = None
+
+        target_price = target
+        prediction_label = f"{raw_side} @ settlement"
+    else:
+        score = base_score
+        confidence = min(
+            0.97,
+            max(0.45, 0.48 + abs(score) * 0.34 + consensus * 0.15),
+        )
+        projected_end = px + forecast_move
+        target_price = projected_end
+        locked_side = None
+
+        if score >= 0.16 and confidence >= 0.58:
+            action = "SCALP UP"
+        elif score <= -0.16 and confidence >= 0.58:
+            action = "SCALP DOWN"
+        else:
+            action = "HOLD"
+
+        prediction_label = "Kalshi target unavailable"
+
+    risk_level = (
+        "LOW"
+        if confidence > 0.78 and consensus > 0.55
+        else "MEDIUM"
+        if confidence > 0.62
+        else "HIGH"
+    )
+
+    strongest = sorted(
+        results.values(),
+        key=lambda result: abs(result["score"] * result["confidence"]),
+        reverse=True,
+    )[:3]
+
+    reason_parts = [
+        "; ".join(
+            f"{result['name']}: {result['signal']} ({result['score']:+.2f})"
+            for result in strongest
+        )
+    ]
+
+    if kctx["available"]:
+        reason_parts.append(
+            f"Kalshi target ${target:,.2f}; projected settlement ${projected_end:,.2f}"
+        )
+
     return {
         "action": action,
+        "locked_side": locked_side,
         "score": score,
+        "base_score": base_score,
         "confidence": confidence,
         "consensus": consensus,
         "target_price": target_price,
+        "projected_end": projected_end,
+        "prediction_label": prediction_label,
         "risk_level": risk_level,
-        "reason": reason,
+        "reason": " • ".join(reason_parts),
+        "kalshi_ticker": kctx.get("ticker", ""),
+        "seconds_remaining": remaining,
+        "up_probability": market_prob,
+        "kalshi_available": kctx["available"],
     }
 
 
@@ -891,8 +1172,9 @@ def risk_evaluate(decision, account, hist, futures):
     confidence = decision["confidence"]
     consensus = decision["consensus"]
 
-    if decision["action"] == "HOLD":
-        return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": "HOLD signal"}
+    if decision["action"] in {"HOLD", "LOCK"}:
+        reason = "LOCK: hold current Kalshi call to expiration" if decision["action"] == "LOCK" else "HOLD signal"
+        return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": reason}
     if confidence < 0.62:
         return {"approved": False, "position_pct": 0.0, "risk_score": 0.9, "reason": "Confidence below 62%"}
     if consensus < 0.30:
@@ -957,10 +1239,22 @@ def resolve_predictions(current_price):
             start_price = float(row["price"])
             ret = (current_price / start_price - 1) * 100
             action = row["action"]
-            if action == "BUY":
-                correct = int(current_price > start_price)
-            elif action == "SELL":
-                correct = int(current_price < start_price)
+            strike = safe_float(row["target_price"])
+
+            if action == "SCALP UP":
+                correct = (
+                    int(current_price >= strike)
+                    if pd.notna(strike)
+                    else int(current_price > start_price)
+                )
+            elif action == "SCALP DOWN":
+                correct = (
+                    int(current_price < strike)
+                    if pd.notna(strike)
+                    else int(current_price < start_price)
+                )
+            elif action == "LOCK":
+                correct = None
             else:
                 correct = int(abs(ret) < 0.15)
             conn.execute(
@@ -1049,9 +1343,10 @@ def walk_forward_backtest(hist, horizon=15):
 # ============================================================
 
 
-def candle_chart(hist):
+def candle_chart(hist, kalshi_target=np.nan):
     tail = hist.tail(180)
     fig = go.Figure()
+
     fig.add_trace(
         go.Candlestick(
             x=tail["time"],
@@ -1062,9 +1357,92 @@ def candle_chart(hist):
             name="BTC",
         )
     )
-    fig.add_trace(go.Scatter(x=tail["time"], y=tail["ema9"], name="EMA 9", line=dict(width=1)))
-    fig.add_trace(go.Scatter(x=tail["time"], y=tail["ema21"], name="EMA 21", line=dict(width=1)))
-    fig.update_layout(height=430, margin=dict(l=10, r=10, t=30, b=10), xaxis_rangeslider_visible=False, legend_orientation="h")
+    fig.add_trace(
+        go.Scatter(
+            x=tail["time"], y=tail["ema9"],
+            name="EMA 9", line=dict(width=1)
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=tail["time"], y=tail["ema21"],
+            name="EMA 21", line=dict(width=1)
+        )
+    )
+
+    if pd.notna(kalshi_target):
+        fig.add_hline(
+            y=kalshi_target,
+            line_dash="dash",
+            annotation_text=f"KALSHI TARGET  ${kalshi_target:,.2f}",
+            annotation_position="top left",
+        )
+
+    fig.update_layout(
+        height=430,
+        margin=dict(l=10, r=10, t=30, b=10),
+        xaxis_rangeslider_visible=False,
+        legend_orientation="h",
+    )
+    return fig
+
+
+def kalshi_15m_chart(hist, spot_price, kctx, projected_end=np.nan):
+    tail = hist.tail(16).copy()
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
+            x=tail["time"],
+            y=tail["close"],
+            mode="lines+markers",
+            name="BTC live proxy",
+            line=dict(width=3),
+        )
+    )
+
+    now = pd.Timestamp.now(tz="UTC")
+    fig.add_trace(
+        go.Scatter(
+            x=[now],
+            y=[spot_price],
+            mode="markers",
+            marker=dict(size=10),
+            name="BTC now",
+        )
+    )
+
+    target = kctx.get("target", np.nan)
+    if pd.notna(target):
+        fig.add_hline(
+            y=target,
+            line_dash="dash",
+            line_width=2,
+            annotation_text=f"KALSHI TARGET  ${target:,.2f}",
+            annotation_position="top left",
+        )
+
+    if pd.notna(projected_end):
+        fig.add_trace(
+            go.Scatter(
+                x=[now],
+                y=[projected_end],
+                mode="markers+text",
+                text=["AI projected end"],
+                textposition="top center",
+                marker=dict(size=11, symbol="diamond"),
+                name="AI projected end",
+            )
+        )
+
+    fig.update_layout(
+        height=390,
+        margin=dict(l=10, r=10, t=30, b=10),
+        xaxis_title="Current 15-minute window",
+        yaxis_title="BTC price",
+        legend_orientation="h",
+        hovermode="x unified",
+    )
     return fig
 
 # ============================================================
@@ -1075,7 +1453,7 @@ init_db()
 
 st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
-st.caption(f"Single-file build {APP_VERSION} • 15-minute prediction engine • specialist council • journal • backtest • Kalshi read-only signal")
+st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute target engine • SCALP UP / SCALP DOWN / LOCK • specialist council • paper-only")
 
 # ============================================================
 # SIDEBAR
@@ -1161,7 +1539,7 @@ def live_dashboard():
         price = float(hist["close"].iloc[-1])
 
     results = run_specialists(hist, agg, futures, kalshi)
-    decision = master_decision(results, hist)
+    decision = master_decision(results, hist, kalshi)
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
 
@@ -1190,7 +1568,7 @@ def live_dashboard():
 
     st.caption(
         f"Dashboard cycle {full_cycle_ms:.0f} ms • kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "
-        f"futures snapshot {futures.get('feed_ms', np.nan):.0f} ms • Kalshi cache 30s"
+        f"futures snapshot {futures.get('feed_ms', np.nan):.0f} ms • Kalshi target cache 3s"
     )
 
     # ============================================================
@@ -1202,22 +1580,125 @@ def live_dashboard():
     )
 
     with tab_market:
-        st.plotly_chart(candle_chart(hist), use_container_width=True)
+        kctx = current_kalshi_context(kalshi, price)
+
+        st.subheader("Kalshi BTC 15-minute target tracker")
+
+        if kctx["available"]:
+            rem = (
+                int(kctx["seconds_remaining"])
+                if pd.notna(kctx["seconds_remaining"]) else 0
+            )
+            minutes, seconds = divmod(max(0, rem), 60)
+
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.metric("Kalshi target", fmt_money(kctx["target"]))
+            k2.metric("BTC now", fmt_money(price))
+            k3.metric("Vs target", f"${kctx['distance']:+,.2f}")
+            k4.metric("Time left", f"{minutes:02d}:{seconds:02d}")
+            k5.metric(
+                "Kalshi UP odds",
+                (
+                    "N/A"
+                    if pd.isna(kctx["up_probability"])
+                    else f"{kctx['up_probability']*100:.1f}%"
+                ),
+            )
+
+            st.plotly_chart(
+                kalshi_15m_chart(
+                    hist, price, kctx, decision["projected_end"]
+                ),
+                use_container_width=True,
+                key="kalshi_15m_live_chart",
+            )
+
+            side_text = (
+                decision["locked_side"]
+                if decision["action"] == "LOCK"
+                else "UP"
+                if decision["action"] == "SCALP UP"
+                else "DOWN"
+                if decision["action"] == "SCALP DOWN"
+                else "WAIT"
+            )
+
+            call1, call2, call3, call4 = st.columns(4)
+            call1.metric("CALL", decision["action"])
+            call2.metric("Side", side_text)
+            call3.metric(
+                "AI projected end", fmt_money(decision["projected_end"])
+            )
+            call4.metric(
+                "Confidence", f"{decision['confidence']*100:.1f}%"
+            )
+
+            if decision["action"] == "SCALP UP":
+                st.success("SCALP UP → paper signal is to BUY UP.")
+            elif decision["action"] == "SCALP DOWN":
+                st.error("SCALP DOWN → paper signal is to BUY DOWN.")
+            elif decision["action"] == "LOCK":
+                st.warning(
+                    f"LOCK {decision['locked_side']} → hold this call "
+                    "to the end of the current Kalshi 15-minute market."
+                )
+            else:
+                st.info("HOLD → no Kalshi side has enough edge yet.")
+
+            st.caption(
+                f"Live Kalshi market: {kctx['ticker']} • target comes "
+                "from Kalshi. The BTC line uses this app's Binance feed "
+                "as a real-time proxy; official Kalshi settlement follows "
+                "Kalshi's stated reference methodology."
+            )
+        else:
+            st.warning(
+                "Live Kalshi KXBTC15M target is temporarily unavailable."
+            )
+            st.plotly_chart(
+                candle_chart(hist),
+                use_container_width=True,
+                key="fallback_market_chart",
+            )
+
+        st.divider()
+        st.subheader("Broader BTC market chart")
+
+        st.plotly_chart(
+            candle_chart(
+                hist,
+                kctx["target"] if kctx["available"] else np.nan
+            ),
+            use_container_width=True,
+            key="btc_market_chart",
+        )
+
         c1, c2, c3, c4 = st.columns(4)
         last = hist.iloc[-1]
         c1.metric("RSI 14", f"{safe_float(last['rsi'], 50):.1f}")
         c2.metric("ATR 14", f"${safe_float(last['atr14'], 0):,.2f}")
-        c3.metric("24h quote volume", f"${safe_float(ticker.get('quote_volume_24h'), 0):,.0f}")
-        c4.metric("Target (15m)", fmt_money(decision["target_price"]))
+        c3.metric(
+            "24h quote volume",
+            f"${safe_float(ticker.get('quote_volume_24h'), 0):,.0f}",
+        )
+        c4.metric(
+            "Kalshi target",
+            fmt_money(kctx["target"]) if kctx["available"] else "N/A",
+        )
 
     with tab_ai:
-        st.subheader("Master 15-minute Prediction AI")
+        st.subheader("Master Kalshi 15-minute Prediction AI")
         d1, d2, d3, d4, d5 = st.columns(5)
-        d1.metric("Action", decision["action"])
+        d1.metric("Call", decision["action"])
         d2.metric("Master score", f"{decision['score']:+.3f}")
         d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
         d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
         d5.metric("Risk level", decision["risk_level"])
+        if decision["action"] == "LOCK":
+            st.warning(
+                f"LOCKED SIDE: {decision['locked_side']} — "
+                "hold call until Kalshi market expiration."
+            )
         st.info(decision["reason"])
 
         rows = []
@@ -1259,10 +1740,29 @@ def live_dashboard():
         q4.metric("Futures status", "LIVE" if futures.get("ok") else "UNAVAILABLE")
 
         st.divider()
-        st.subheader("Kalshi — read-only BTC event signal")
+        st.subheader("Kalshi — live BTC 15-minute market")
+        kctx = current_kalshi_context(kalshi, price)
+        if kctx["available"]:
+            rr1, rr2, rr3, rr4 = st.columns(4)
+            rr1.metric("Ticker", kctx["ticker"])
+            rr2.metric("Target", fmt_money(kctx["target"]))
+            rr3.metric("BTC vs target", f"${kctx['distance']:+,.2f}")
+            rr4.metric(
+                "UP odds",
+                (
+                    "N/A"
+                    if pd.isna(kctx["up_probability"])
+                    else f"{kctx['up_probability']*100:.1f}%"
+                ),
+            )
+        st.caption(
+            "Read-only Kalshi market data. The app does not place Kalshi orders."
+        )
+
+        st.subheader("Kalshi market-data details")
         if kalshi.get("ok"):
             markets = kalshi.get("markets", [])
-            st.caption(f"Public market-data lookup • {len(markets)} BTC-related open markets found • cached for 30 seconds")
+            st.caption(f"Public market-data lookup • {len(markets)} BTC-related open markets found • target-polled every ~3 seconds")
             if markets:
                 krows = []
                 for m in markets:
@@ -1291,7 +1791,7 @@ def live_dashboard():
         status1, status2, status3, status4 = st.columns(4)
         status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
         status2.metric("Position", auto_state["side"])
-        status3.metric("Master", decision["action"])
+        status3.metric("Kalshi call", decision["action"])
         status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
 
         if bool(auto_state["enabled"]):
@@ -1351,12 +1851,21 @@ def live_dashboard():
         if not bool(auto_state["enabled"]) and auto_state["side"] == "NONE":
             if st.button("Execute Approved Paper Trade", type="primary", use_container_width=True):
                 if risk["approved"]:
+                    internal_action = (
+                        "BUY"
+                        if decision["action"] == "SCALP UP"
+                        else "SELL"
+                    )
                     result = execute_paper_trade(
-                        decision["action"],
+                        internal_action,
                         price,
                         risk["position_pct"],
                         hist,
-                        note=f"MANUAL master={decision['score']:+.3f}, confidence={decision['confidence']:.3f}",
+                        note=(
+                            f"MANUAL Kalshi-call={decision['action']}, "
+                            f"master={decision['score']:+.3f}, "
+                            f"confidence={decision['confidence']:.3f}"
+                        ),
                     )
                     if result["ok"]:
                         st.success(result["message"])
