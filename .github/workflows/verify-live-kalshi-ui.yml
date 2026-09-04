@@ -1,6 +1,9 @@
 name: Verify Live Kalshi UI
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/verify-live-kalshi-ui.yml'
 permissions:
   contents: read
 jobs:
@@ -18,7 +21,7 @@ jobs:
       - name: Verify Kalshi market and deployed UI
         run: |
           python - <<'PY'
-          import json, re, time, urllib.parse, urllib.request
+          import json, re, urllib.parse, urllib.request
           from playwright.sync_api import sync_playwright
 
           BASE='https://external-api.kalshi.com/trade-api/v2'
