@@ -11,7 +11,7 @@ import numpy as np
 import learner as legacy
 import learner_v3 as v3
 from ai_core import forecast_path_core
-from reliability_v31 import exact_expiry_row, safe_float
+from reliability_v31 import detect_regime, exact_expiry_row, safe_float
 
 PROMOTION_MIN_SAMPLES = 20
 PROMOTION_REQUIRED_STREAK = 3
@@ -53,6 +53,26 @@ def load_previous_state():
     return state
 
 
+def _tag_latest_specialist_history_with_regime(state, pending):
+    """Attach the market regime to the just-graded specialist records.
+
+    Legacy grading stores per-bot correctness but historically omitted regime,
+    preventing v5 from learning that a bot can be strong in one market regime
+    and weak in another. Only the matching latest ticker is modified.
+    """
+    ticker = str((pending or {}).get("ticker") or "")
+    regime = str((pending or {}).get("regime") or "UNKNOWN")
+    if not ticker:
+        return
+    histories = state.get("specialist_history", {}) or {}
+    for rows in histories.values():
+        if not isinstance(rows, list) or not rows:
+            continue
+        row = rows[-1]
+        if isinstance(row, dict) and str(row.get("ticker") or "") == ticker:
+            row.setdefault("regime", regime)
+
+
 def strict_grade(state, df):
     pending = copy.deepcopy(state.get("pending"))
     if not pending:
@@ -67,6 +87,8 @@ def strict_grade(state, df):
     graded = v3.enhanced_grade(state, df)
     if not graded:
         return False
+
+    _tag_latest_specialist_history_with_regime(state, pending)
 
     if state.get("master_history"):
         last = state["master_history"][-1]
@@ -220,6 +242,7 @@ def main():
     champion_challenger(state, df)
     update_wait_counterfactual(state)
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    current_regime = detect_regime(df)
     state["status"].update({
         "worker_ok": True,
         "shared_core": True,
@@ -232,6 +255,8 @@ def main():
         "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),
         "samples_before_run": before_samples,
         "samples_after_run": int(state.get("forecast", {}).get("samples", 0)),
+        "current_regime": current_regime,
+        "regime_tagged_specialist_history": True,
     })
     legacy.OUT.parent.mkdir(parents=True, exist_ok=True)
     legacy.OUT.write_text(json.dumps(state, indent=2, sort_keys=True))
