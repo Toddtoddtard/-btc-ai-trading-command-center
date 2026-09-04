@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r5-no-dim-refresh"
+APP_VERSION = "2026.09.04-single-file-r6-no-flash-tabs"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -83,6 +83,35 @@ st.markdown(
         filter: none !important;
         transition: none !important;
         animation: none !important;
+    }
+
+    /* Keep the Market / AI Council / Order Flow / Paper Trading tab bar
+       visually frozen while the live fragment updates underneath it. */
+    [data-testid="stTabs"],
+    [data-testid="stTabs"] *,
+    [data-baseweb="tab-list"],
+    [data-baseweb="tab-list"] *,
+    [data-baseweb="tab"],
+    [data-baseweb="tab"] *,
+    [role="tablist"],
+    [role="tablist"] *,
+    [role="tab"],
+    [role="tab"] * {
+        opacity: 1 !important;
+        filter: none !important;
+        transition: none !important;
+        animation: none !important;
+        -webkit-transition: none !important;
+        -webkit-animation: none !important;
+    }
+
+    /* Prevent the active-tab underline itself from fading/sliding. */
+    [data-baseweb="tab-highlight"],
+    [data-baseweb="tab-border"],
+    [data-testid="stTabs"] div[role="tablist"] > div {
+        transition: none !important;
+        animation: none !important;
+        opacity: 1 !important;
     }
     </style>
     """,
