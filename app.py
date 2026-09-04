@@ -38,7 +38,14 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r17-learning-accuracy-windows"
+APP_VERSION = "2026.09.04-single-file-r18-remote-24x7-learning"
+
+REMOTE_LEARNING_URL = (
+    "https://raw.githubusercontent.com/"
+    "Toddtoddtard/-btc-ai-trading-command-center/"
+    "learning-state/learning_state.json"
+)
+_REMOTE_LEARNING_CACHE = {"ts": 0.0, "data": None}
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -175,6 +182,39 @@ def try_bases(bases, endpoint, params=None, timeout=2.8):
         except Exception as exc:
             last_error = exc
     raise RuntimeError(str(last_error) if last_error else "All data endpoints failed")
+
+
+def fetch_remote_learning_state(ttl=20.0):
+    now = time.monotonic()
+    cached = _REMOTE_LEARNING_CACHE.get("data")
+
+    if (
+        cached is not None
+        and now - float(_REMOTE_LEARNING_CACHE.get("ts", 0.0)) < ttl
+    ):
+        return cached
+
+    try:
+        req = Request(
+            REMOTE_LEARNING_URL,
+            headers={
+                "User-Agent": "BTC-AI-Command-Center/24x7-learning",
+                "Accept": "application/json",
+                "Cache-Control": "no-cache",
+            },
+        )
+        with urlopen(req, timeout=3.0) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        if isinstance(payload, dict):
+            _REMOTE_LEARNING_CACHE["ts"] = now
+            _REMOTE_LEARNING_CACHE["data"] = payload
+            return payload
+    except Exception:
+        pass
+
+    _REMOTE_LEARNING_CACHE["ts"] = now
+    return cached if isinstance(cached, dict) else None
 
 # ============================================================
 # DATABASE
@@ -1741,6 +1781,32 @@ def learning_db():
 
 
 def get_learning_state():
+    remote = fetch_remote_learning_state()
+    if isinstance(remote, dict):
+        r = remote.get("forecast")
+        if isinstance(r, dict):
+            defaults = {
+                "w_ret3": 0.46,
+                "w_ret8": 0.34,
+                "w_ret15": 0.20,
+                "momentum_scale": 2.20,
+                "target_influence": 0.18,
+                "bias": 0.0,
+                "learning_rate": 0.08,
+                "samples": 0,
+                "direction_hits": 0,
+                "avg_abs_error": 0.0,
+                "avg_path_error": 0.0,
+            }
+            state = {k: r.get(k, v) for k, v in defaults.items()}
+            state["samples"] = int(state["samples"])
+            state["direction_hits"] = int(state["direction_hits"])
+            state["direction_accuracy"] = (
+                state["direction_hits"] / state["samples"]
+                if state["samples"] else np.nan
+            )
+            return state
+
     conn = learning_db()
     row = conn.execute("""
         SELECT
@@ -1763,7 +1829,6 @@ def get_learning_state():
         if state["samples"] else np.nan
     )
     return state
-
 
 def save_learning_state(state):
     conn = learning_db()
@@ -2185,6 +2250,28 @@ def specialist_learning_db():
 
 
 def get_specialist_learning_state():
+    remote = fetch_remote_learning_state()
+    if isinstance(remote, dict):
+        specialists = remote.get("specialists")
+        if isinstance(specialists, dict) and specialists:
+            state = {}
+            for name in SPECIALIST_WEIGHTS.keys():
+                item = specialists.get(name, {})
+                samples = int(item.get("samples", 0))
+                direction_hits = int(item.get("direction_hits", 0))
+                state[name] = {
+                    "adaptive_weight": float(item.get("adaptive_weight", 1.0)),
+                    "samples": samples,
+                    "direction_hits": direction_hits,
+                    "accuracy": (
+                        direction_hits / samples if samples else np.nan
+                    ),
+                    "ewma_accuracy": float(item.get("ewma_accuracy", 0.50)),
+                    "ewma_edge": float(item.get("ewma_edge", 0.0)),
+                    "ewma_calibration": float(item.get("ewma_calibration", 0.0)),
+                }
+            return state
+
     conn = specialist_learning_db()
     rows = conn.execute("""
         SELECT
@@ -2216,8 +2303,7 @@ def get_specialist_learning_state():
             "samples": int(samples),
             "direction_hits": int(direction_hits),
             "accuracy": (
-                direction_hits / samples
-                if samples else np.nan
+                direction_hits / samples if samples else np.nan
             ),
             "ewma_accuracy": float(ewma_accuracy),
             "ewma_edge": float(ewma_edge),
@@ -2225,7 +2311,6 @@ def get_specialist_learning_state():
         }
 
     return state
-
 
 def adaptive_specialist_weight(name):
     state = get_specialist_learning_state().get(name, {})
@@ -2536,20 +2621,38 @@ def specialist_learning_dataframe():
 # ============================================================
 
 def rolling_master_accuracy(window):
-    conn = learning_db()
+    remote = fetch_remote_learning_state()
+    if isinstance(remote, dict):
+        history = remote.get("master_history")
+        if isinstance(history, list) and history:
+            rows = history[-int(window):]
+            correct = pd.to_numeric(
+                pd.Series([r.get("direction_correct") for r in rows]),
+                errors="coerce",
+            ).dropna()
+            abs_error = pd.to_numeric(
+                pd.Series([r.get("abs_error") for r in rows]),
+                errors="coerce",
+            )
+            path_error = pd.to_numeric(
+                pd.Series([r.get("path_error") for r in rows]),
+                errors="coerce",
+            )
+            return {
+                "samples": int(len(correct)),
+                "accuracy": float(correct.mean()) if len(correct) else np.nan,
+                "avg_abs_error": float(abs_error.mean()) if abs_error.notna().any() else np.nan,
+                "avg_path_error": float(path_error.mean()) if path_error.notna().any() else np.nan,
+            }
 
+    conn = learning_db()
     df = pd.read_sql_query("""
-        SELECT
-            direction_correct,
-            abs_error,
-            path_error,
-            expires_at
+        SELECT direction_correct, abs_error, path_error, expires_at
         FROM forecast_windows
         WHERE resolved = 1
         ORDER BY expires_at DESC
         LIMIT ?
     """, conn, params=(int(window),))
-
     conn.close()
 
     if df.empty:
@@ -2560,21 +2663,9 @@ def rolling_master_accuracy(window):
             "avg_path_error": np.nan,
         }
 
-    df["direction_correct"] = pd.to_numeric(
-        df["direction_correct"],
-        errors="coerce",
-    )
-
-    df["abs_error"] = pd.to_numeric(
-        df["abs_error"],
-        errors="coerce",
-    )
-
-    df["path_error"] = pd.to_numeric(
-        df["path_error"],
-        errors="coerce",
-    )
-
+    df["direction_correct"] = pd.to_numeric(df["direction_correct"], errors="coerce")
+    df["abs_error"] = pd.to_numeric(df["abs_error"], errors="coerce")
+    df["path_error"] = pd.to_numeric(df["path_error"], errors="coerce")
     valid = df["direction_correct"].dropna()
 
     return {
@@ -2583,7 +2674,6 @@ def rolling_master_accuracy(window):
         "avg_abs_error": float(df["abs_error"].mean()),
         "avg_path_error": float(df["path_error"].mean()),
     }
-
 
 def rolling_master_accuracy_table():
     rows = []
@@ -2607,62 +2697,67 @@ def rolling_master_accuracy_table():
 
 
 def rolling_specialist_accuracy(window):
-    conn = specialist_learning_db()
+    remote = fetch_remote_learning_state()
+    if isinstance(remote, dict):
+        histories = remote.get("specialist_history")
+        if isinstance(histories, dict) and histories:
+            out = []
+            for specialist, history in histories.items():
+                if not isinstance(history, list):
+                    continue
+                rows = history[-int(window):]
+                correct = pd.to_numeric(
+                    pd.Series([r.get("direction_correct") for r in rows]),
+                    errors="coerce",
+                ).dropna()
+                edge = pd.to_numeric(
+                    pd.Series([r.get("signed_edge") for r in rows]),
+                    errors="coerce",
+                )
+                out.append({
+                    "Specialist": specialist,
+                    "Samples": int(len(correct)),
+                    "Accuracy %": (
+                        np.nan if len(correct) == 0
+                        else float(correct.mean() * 100.0)
+                    ),
+                    "Avg Signed Edge": (
+                        float(edge.mean()) if edge.notna().any() else np.nan
+                    ),
+                })
+            return pd.DataFrame(out)
 
+    conn = specialist_learning_db()
     df = pd.read_sql_query("""
-        SELECT
-            specialist,
-            direction_correct,
-            signed_edge,
-            resolved_at
+        SELECT specialist, direction_correct, signed_edge, resolved_at
         FROM specialist_window_predictions
         WHERE resolved = 1
         ORDER BY resolved_at DESC
     """, conn)
-
     conn.close()
 
     if df.empty:
         return pd.DataFrame(
-            columns=[
-                "Specialist",
-                "Samples",
-                "Accuracy %",
-                "Avg Signed Edge",
-            ]
+            columns=["Specialist", "Samples", "Accuracy %", "Avg Signed Edge"]
         )
 
-    df["direction_correct"] = pd.to_numeric(
-        df["direction_correct"],
-        errors="coerce",
-    )
-
-    df["signed_edge"] = pd.to_numeric(
-        df["signed_edge"],
-        errors="coerce",
-    )
+    df["direction_correct"] = pd.to_numeric(df["direction_correct"], errors="coerce")
+    df["signed_edge"] = pd.to_numeric(df["signed_edge"], errors="coerce")
 
     out = []
-
     for specialist, group in df.groupby("specialist"):
         g = group.head(int(window)).copy()
         valid = g["direction_correct"].dropna()
-
         out.append({
             "Specialist": specialist,
             "Samples": int(len(valid)),
             "Accuracy %": (
-                np.nan
-                if len(valid) == 0
-                else float(valid.mean() * 100.0)
+                np.nan if len(valid) == 0 else float(valid.mean() * 100.0)
             ),
-            "Avg Signed Edge": float(
-                g["signed_edge"].mean()
-            ) if len(g) else np.nan,
+            "Avg Signed Edge": float(g["signed_edge"].mean()) if len(g) else np.nan,
         })
 
     return pd.DataFrame(out)
-
 
 def specialist_multiwindow_accuracy():
     merged = None
@@ -3108,7 +3203,7 @@ init_db()
 
 st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
-st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine • rolling 100/500/1000-window accuracy • every specialist adapts after completed windows • paper-only")
+st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine • 24/7 remote learner • rolling 100/500/1000-window accuracy • paper-only")
 
 # ============================================================
 # SIDEBAR
