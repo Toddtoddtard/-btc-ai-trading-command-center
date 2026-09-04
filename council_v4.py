@@ -1,7 +1,7 @@
 """BTC AI Council v4.
 
 Centralizes specialist weighting, consensus, confidence, trade gating, and
-leave-one-specialist-out contribution analysis.  This module is deliberately
+leave-one-specialist-out contribution analysis. This module is deliberately
 pure: callers supply specialist results and learning state, which makes the
 same council logic reusable by the live app, learner, and backtests.
 """
@@ -53,16 +53,40 @@ def _specialist_state(state, name):
     return (state.get("specialists", {}) or {}).get(name, {}) or {}
 
 
+def _contribution_multiplier(state, name):
+    """Softly reward useful bots and suppress proven harmful ones.
+
+    Bot Intelligence v4 measures leave-one-out contribution. We shrink the
+    multiplier toward 1.0 until enough live samples exist, then let repeated
+    harmful flips reduce influence instead of waiting for global accuracy alone.
+    """
+    state = state if isinstance(state, dict) else {}
+    intel = state.get("bot_intelligence_v4", {}) if isinstance(state.get("bot_intelligence_v4", {}), dict) else {}
+    ranking = intel.get("ranking", []) if isinstance(intel.get("ranking", []), list) else []
+    row = next((r for r in ranking if isinstance(r, dict) and r.get("name") == name), None)
+    if not row:
+        return 1.0
+    samples = max(0, int(_safe_float(row.get("samples"), 0)))
+    contribution = float(np.clip(_safe_float(row.get("contribution_score"), 0.0), -0.75, 0.50))
+    # At 20 samples the contribution signal has full effect; before that it is
+    # intentionally shrunk to reduce overreaction to a tiny early sample.
+    shrink = min(1.0, samples / 20.0)
+    adjustment = float(np.clip(2.0 * contribution, -0.60, 0.30))
+    return float(np.clip(1.0 + shrink * adjustment, 0.40, 1.30))
+
+
 def specialist_weight(name, state=None, regime="UNKNOWN"):
     base = _safe_float(BASE_WEIGHTS.get(name), 0.75)
-    return regime_specialist_weight(base, _specialist_state(state, name), regime or "UNKNOWN")
+    learned = regime_specialist_weight(base, _specialist_state(state, name), regime or "UNKNOWN")
+    return float(np.clip(learned * _contribution_multiplier(state or {}, name), 0.20, 2.35))
 
 
 def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
     """Return one authoritative weighted council decision.
 
     Scores are weighted by static domain importance, learned global reliability,
-    regime-specific reliability, and each specialist's own confidence.
+    regime-specific reliability, contribution value, and each specialist's own
+    confidence.
     """
     results = results or {}
     exclude = set(exclude or ()) | EXCLUDED_FROM_COUNCIL
@@ -90,6 +114,7 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
             "confidence": confidence,
             "weight": weight,
             "effective_weight": effective,
+            "contribution_multiplier": _contribution_multiplier(state or {}, name),
         })
 
     base_score = weighted_sum / denominator if denominator else 0.0
@@ -142,7 +167,7 @@ def analyze_bot_contributions(state, min_samples=12):
     """Measure each bot's independent value using historical snapshots.
 
     For every graded prediction snapshot, score the complete council and then
-    score it again with one specialist removed.  This exposes redundancy and
+    score it again with one specialist removed. This exposes redundancy and
     harmful specialists instead of rewarding raw agreement alone.
     """
     state = state if isinstance(state, dict) else {}
@@ -170,9 +195,6 @@ def analyze_bot_contributions(state, min_samples=12):
         if not specialists:
             continue
 
-        # master_history stores whether the production forecast direction hit.
-        # For v4 contribution analysis we reconstruct actual direction from the
-        # saved realized return when present, otherwise infer from the production hit.
         realized = outcome.get("realized_return")
         if realized is None:
             continue
