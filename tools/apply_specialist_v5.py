@@ -23,13 +23,11 @@ if anchor not in s:
 if 'v5 selective-precision gate' not in s:
     s = s.replace(anchor, insert + anchor)
 
-# Make v5 visible in the AI Council tab immediately before the v4 ranking panel.
-ui_anchor = '        render_bot_intelligence_dashboard(results, fetch_remote_learning_state() or {}, detect_regime(hist), dark_mode=dark_mode)\n'
-ui = '''        v5_state = fetch_remote_learning_state() or {}\n        v5k = (v5_state.get("specialist_knowledge_v5") or {})\n        v5bots = (v5k.get("bots") or {})\n        mature = [x for x in v5bots.values() if isinstance(x, dict) and x.get("mature")]\n        best_floor = max([safe_float(x.get("lower95_accuracy"), 0.0) for x in mature], default=0.0)\n        k1, k2, k3, k4 = st.columns(4)\n        k1.metric("V5 precision target", "90%")\n        k2.metric("Mature specialists", f"{len(mature)}/{len(v5bots) if v5bots else 12}")\n        k3.metric("Best bot 95% floor", f"{best_floor*100:.1f}%" if best_floor else "Learning")\n        k4.metric("Precision gate", "PASS" if v5_council.get("precision_gate_passed") else "WAIT")\n        st.caption(str(v5_council.get("precision_gate_reason", "V5 learning evidence unavailable")))\n\n        render_bot_intelligence_dashboard(results, v5_state, detect_regime(hist), dark_mode=dark_mode)\n'''
-if ui_anchor in s:
-    s = s.replace(ui_anchor, ui)
-elif 'V5 precision target' not in s:
-    print('warning: bot intelligence UI anchor not found; core v5 integration still applied')
+# Surface cost-aware paper profitability in the Paper Trading tab.
+paper_anchor = '    with tab_paper:\n        st.subheader("Automatic Paper Trading")\n'
+paper_ui = '''    with tab_paper:\n        st.subheader("Automatic Paper Trading")\n\n        # V5 profitability scorecard uses resolved paper/prediction outcomes and\n        # subtracts simulated fees/slippage before calculating expectancy.\n        _profit_rows = recent_predictions(300)\n        _profit_records = _profit_rows.to_dict("records") if _profit_rows is not None and not _profit_rows.empty else []\n        _profit = summarize_trades(_profit_records, cost_bps=6.5)\n        _profit_ok, _profit_reason = profitability_gate(_profit, min_samples=30)\n        p1, p2, p3, p4, p5 = st.columns(5)\n        p1.metric("Net win rate", "Learning" if _profit.get("win_rate") is None else f"{_profit['win_rate']*100:.1f}%")\n        p2.metric("Net expectancy", "Learning" if _profit.get("expectancy") is None else f"{_profit['expectancy']*100:+.3f}%")\n        _pf = _profit.get("profit_factor")\n        p3.metric("Profit factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))\n        p4.metric("Drawdown proxy", "Learning" if _profit.get("max_drawdown_proxy") is None else f"{_profit['max_drawdown_proxy']*100:.2f}%")\n        p5.metric("Profitability gate", "PASS" if _profit_ok else "WAIT")\n        st.caption(f"V5 net-of-cost analytics • {_profit.get('samples', 0)} resolved trade calls • simulated cost 6.5 bps • {_profit_reason}")\n'''
+if paper_anchor in s and 'V5 profitability scorecard' not in s:
+    s = s.replace(paper_anchor, paper_ui)
 
 s = s.replace('APP_VERSION = "2026.09.04-r42-bot-intelligence-v4"', 'APP_VERSION = "2026.09.04-r43-specialist-self-learning-v5"')
 p.write_text(s)
