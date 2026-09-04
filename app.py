@@ -42,7 +42,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r33-deterministic-kalshi-market"
+APP_VERSION = "2026.09.04-r34-atomic-kalshi-rollover"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -3663,6 +3663,10 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 
         let currentTarget = initial.target;
         let currentTicker = initial.ticker || "";
+        // Track the active UTC 15-minute window in the browser. At rollover we
+        // immediately clear the old Kalshi target so a previous contract can
+        // never remain visible while the new market is publishing.
+        let kalshiWindowKey = Math.floor(Date.now() / 900000);
         let lastCandleSignature = "";
         let busy = false;
 
@@ -4122,6 +4126,18 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }}
 
         async function updateTarget() {{
+            const windowKey = Math.floor(Date.now() / 900000);
+            if (windowKey !== kalshiWindowKey) {{
+                kalshiWindowKey = windowKey;
+                currentTicker = "";
+                currentTarget = NaN;
+                await Plotly.relayout(chart, {{
+                    shapes: [],
+                    annotations: []
+                }});
+                status.textContent = "Loading new Kalshi 15m target…";
+            }}
+
             const market = await fetchKalshiTarget();
             if (!market) return;
 
@@ -4154,7 +4170,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         const candleTimer = setInterval(updateCandles, 1500);
 
         // Kalshi target only changes when a new 15-minute contract becomes active.
-        const kalshiTimer = setInterval(updateTarget, 3000);
+        const kalshiTimer = setInterval(updateTarget, 1000);
 
         // Prime once after load.
         setTimeout(updateCandles, 250);
