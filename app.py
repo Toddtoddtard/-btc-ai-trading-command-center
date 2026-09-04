@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r21-dark-council-table"
+APP_VERSION = "2026.09.04-single-file-r22-signal-badges"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -4639,7 +4639,23 @@ def live_dashboard():
             # Streamlit's native dataframe canvas stays light even when our custom
             # dashboard dark-mode toggle is enabled, so render the council table
             # as a responsive HTML table in dark mode. Light mode keeps the native table.
-            table_html = council_df.to_html(index=False, border=0, classes="ai-council-table")
+            def _signal_badge(value):
+                label = str(value).upper()
+                if label == "BULLISH":
+                    cls = "signal-bullish"
+                elif label == "BEARISH":
+                    cls = "signal-bearish"
+                else:
+                    cls = "signal-neutral"
+                return f'<span class="signal-badge {cls}">{label}</span>'
+
+            table_html = council_df.to_html(
+                index=False,
+                border=0,
+                classes="ai-council-table",
+                escape=False,
+                formatters={"Signal": _signal_badge},
+            )
             st.markdown(
                 """
                 <style>
@@ -4665,6 +4681,25 @@ def live_dashboard():
                 .ai-council-table tbody tr:nth-child(even) td {background: #0f1828;}
                 .ai-council-table tbody tr:hover td {background: #15243a;}
                 .ai-council-table td:last-child {white-space: normal; min-width: 260px;}
+                .signal-badge {
+                    display:inline-block; min-width:92px; text-align:center;
+                    padding:4px 10px; border-radius:7px; font-weight:800;
+                    letter-spacing:.02em; line-height:1.2;
+                }
+                .signal-bullish {
+                    color:#00f0b5; background:rgba(0,240,181,.13);
+                    border:1px solid rgba(0,240,181,.80);
+                    box-shadow:0 0 12px rgba(0,240,181,.10) inset;
+                }
+                .signal-bearish {
+                    color:#ff536b; background:rgba(255,83,107,.13);
+                    border:1px solid rgba(255,83,107,.85);
+                    box-shadow:0 0 12px rgba(255,83,107,.10) inset;
+                }
+                .signal-neutral {
+                    color:#b8c6dc; background:rgba(184,198,220,.09);
+                    border:1px solid rgba(184,198,220,.42);
+                }
                 </style>
                 """,
                 unsafe_allow_html=True,
