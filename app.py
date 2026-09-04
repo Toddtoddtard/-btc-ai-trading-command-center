@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r10-lock-scalp-semantics"
+APP_VERSION = "2026.09.04-single-file-r11-hourly-kalshi-ai"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -871,6 +871,362 @@ def stable_kalshi_contract(kalshi, spot_price):
     return result
 
 
+
+@st.cache_data(ttl=10, show_spinner=False)
+def fetch_kalshi_hourly_bitcoin_markets():
+    """
+    Public/read-only lookup for Kalshi's hourly BTC series (KXBTCD).
+    Returns active strike markets for the nearest hourly event.
+    """
+    errors = []
+
+    for base in KALSHI_BASES:
+        try:
+            payload, ms = http_json(
+                base + "/markets",
+                {
+                    "limit": 200,
+                    "status": "open",
+                    "series_ticker": "KXBTCD",
+                },
+                timeout=3.0,
+            )
+
+            markets = payload.get("markets", []) if isinstance(payload, dict) else []
+            now_ts = time.time()
+            rows = []
+
+            for market in markets:
+                raw_close = (
+                    market.get("close_time")
+                    or market.get("expiration_time")
+                    or market.get("expected_expiration_time")
+                )
+
+                close_ts = np.nan
+                if raw_close:
+                    try:
+                        close_ts = pd.Timestamp(raw_close).timestamp()
+                    except Exception:
+                        pass
+
+                if pd.notna(close_ts) and close_ts <= now_ts:
+                    continue
+
+                strike = safe_float(market.get("floor_strike"))
+                if pd.isna(strike) or strike <= 0:
+                    strike = safe_float(market.get("cap_strike"))
+
+                # Some hourly BTC markets expose strike through functional_strike/title.
+                if pd.isna(strike) or strike <= 0:
+                    functional = str(market.get("functional_strike", ""))
+                    match = re.search(r'(\d[\d,]*\.?\d*)', functional)
+                    if match:
+                        try:
+                            strike = float(match.group(1).replace(",", ""))
+                        except Exception:
+                            pass
+
+                if pd.isna(strike) or strike <= 0:
+                    blob = " ".join(
+                        str(market.get(k, ""))
+                        for k in ["title", "subtitle", "yes_sub_title", "ticker"]
+                    )
+                    nums = re.findall(r'\$?(\d{2,3}(?:,\d{3})+(?:\.\d+)?)', blob)
+                    if nums:
+                        try:
+                            strike = float(nums[-1].replace(",", ""))
+                        except Exception:
+                            pass
+
+                if pd.isna(strike) or strike <= 0:
+                    continue
+
+                yes_bid = safe_float(market.get("yes_bid_dollars"))
+                yes_ask = safe_float(market.get("yes_ask_dollars"))
+                last = safe_float(market.get("last_price_dollars"))
+
+                if pd.notna(yes_bid) and pd.notna(yes_ask):
+                    yes_prob = clamp((yes_bid + yes_ask) / 2.0, 0.0, 1.0)
+                elif pd.notna(last):
+                    yes_prob = clamp(last, 0.0, 1.0)
+                elif pd.notna(yes_ask):
+                    yes_prob = clamp(yes_ask, 0.0, 1.0)
+                elif pd.notna(yes_bid):
+                    yes_prob = clamp(yes_bid, 0.0, 1.0)
+                else:
+                    yes_prob = np.nan
+
+                row = dict(market)
+                row["_strike"] = strike
+                row["_close_ts"] = close_ts
+                row["_seconds_remaining"] = (
+                    max(0, int(close_ts - now_ts))
+                    if pd.notna(close_ts)
+                    else np.nan
+                )
+                row["_yes_probability"] = yes_prob
+                rows.append(row)
+
+            if not rows:
+                return {
+                    "ok": True,
+                    "markets": [],
+                    "event_markets": [],
+                    "close_ts": np.nan,
+                    "feed_ms": ms,
+                    "error": None,
+                }
+
+            future_closes = sorted(
+                {
+                    row["_close_ts"]
+                    for row in rows
+                    if pd.notna(row["_close_ts"])
+                }
+            )
+
+            nearest_close = future_closes[0] if future_closes else np.nan
+
+            event_markets = [
+                row
+                for row in rows
+                if (
+                    pd.isna(nearest_close)
+                    or pd.isna(row["_close_ts"])
+                    or abs(row["_close_ts"] - nearest_close) <= 5
+                )
+            ]
+
+            event_markets = sorted(
+                event_markets,
+                key=lambda row: row["_strike"],
+            )
+
+            return {
+                "ok": True,
+                "markets": rows,
+                "event_markets": event_markets,
+                "close_ts": nearest_close,
+                "feed_ms": ms,
+                "error": None,
+            }
+
+        except Exception as exc:
+            errors.append(str(exc))
+
+    return {
+        "ok": False,
+        "markets": [],
+        "event_markets": [],
+        "close_ts": np.nan,
+        "feed_ms": np.nan,
+        "error": " | ".join(errors[-2:]),
+    }
+
+
+def hourly_kalshi_target_ai(hist, specialist_results, hourly_kalshi, spot_price):
+    """
+    Separate 60-minute forecast model.
+
+    Output:
+    - estimated BTC price at next hourly Kalshi settlement
+    - expected move in dollars / percent
+    - confidence
+    - nearest active Kalshi hourly strike
+    - model-vs-Kalshi comparison
+    """
+    px = float(spot_price)
+    last = hist.iloc[-1]
+
+    atr = safe_float(last.get("atr14"), px * 0.002)
+    ema9 = safe_float(last.get("ema9"), px)
+    ema21 = safe_float(last.get("ema21"), px)
+    rsi = safe_float(last.get("rsi"), 50.0)
+
+    # Multi-window returns from 1-minute candles.
+    closes = hist["close"].astype(float)
+    ret5 = (px / float(closes.iloc[-6]) - 1.0) if len(closes) >= 6 else 0.0
+    ret15 = (px / float(closes.iloc[-16]) - 1.0) if len(closes) >= 16 else 0.0
+    ret30 = (px / float(closes.iloc[-31]) - 1.0) if len(closes) >= 31 else ret15
+    ret60 = (px / float(closes.iloc[-61]) - 1.0) if len(closes) >= 61 else ret30
+
+    # Specialist council, but smoother than the 15-minute bot.
+    weighted = 0.0
+    weight_total = 0.0
+    for name, result in specialist_results.items():
+        weight = SPECIALIST_WEIGHTS.get(name, 1.0)
+        conf = safe_float(result.get("confidence"), 0.5)
+        score = safe_float(result.get("score"), 0.0)
+        weighted += score * conf * weight
+        weight_total += conf * weight
+
+    council_score = clamp(weighted / weight_total if weight_total else 0.0)
+
+    trend_score = clamp((ema9 - ema21) / max(px * 0.0015, 1.0))
+    momentum_score = clamp(
+        0.20 * (ret5 / 0.003)
+        + 0.30 * (ret15 / 0.006)
+        + 0.25 * (ret30 / 0.009)
+        + 0.25 * (ret60 / 0.014)
+    )
+    rsi_score = clamp((rsi - 50.0) / 25.0)
+
+    hourly_score = clamp(
+        0.45 * council_score
+        + 0.25 * trend_score
+        + 0.23 * momentum_score
+        + 0.07 * rsi_score
+    )
+
+    # Scale expected movement to a 60-minute horizon.
+    base_hour_move = max(
+        atr * 2.35,
+        px * 0.0022,
+    )
+
+    projected_move = base_hour_move * hourly_score
+    ai_target = px + projected_move
+
+    # Confidence increases with directional agreement and signal magnitude,
+    # but remains bounded because this is still a probabilistic forecast.
+    direction_votes = []
+    for result in specialist_results.values():
+        score = safe_float(result.get("score"), 0.0)
+        if abs(score) >= 0.05:
+            direction_votes.append(1 if score > 0 else -1)
+
+    agreement = (
+        abs(sum(direction_votes)) / len(direction_votes)
+        if direction_votes else 0.0
+    )
+
+    confidence = min(
+        0.92,
+        max(
+            0.45,
+            0.50
+            + abs(hourly_score) * 0.25
+            + agreement * 0.12,
+        ),
+    )
+
+    markets = hourly_kalshi.get("event_markets", []) if hourly_kalshi else []
+    nearest_market = None
+    nearest_strike = np.nan
+    nearest_distance = np.nan
+
+    if markets:
+        nearest_market = min(
+            markets,
+            key=lambda row: abs(row["_strike"] - ai_target),
+        )
+        nearest_strike = safe_float(nearest_market.get("_strike"))
+        nearest_distance = (
+            ai_target - nearest_strike
+            if pd.notna(nearest_strike)
+            else np.nan
+        )
+
+    close_ts = hourly_kalshi.get("close_ts", np.nan) if hourly_kalshi else np.nan
+    seconds_remaining = (
+        max(0, int(close_ts - time.time()))
+        if pd.notna(close_ts)
+        else np.nan
+    )
+
+    direction = (
+        "UP" if projected_move > px * 0.00025
+        else "DOWN" if projected_move < -px * 0.00025
+        else "FLAT"
+    )
+
+    return {
+        "target_price": ai_target,
+        "projected_move": projected_move,
+        "projected_move_pct": projected_move / px if px else 0.0,
+        "direction": direction,
+        "confidence": confidence,
+        "hourly_score": hourly_score,
+        "nearest_strike": nearest_strike,
+        "nearest_distance": nearest_distance,
+        "nearest_market": nearest_market,
+        "seconds_remaining": seconds_remaining,
+        "close_ts": close_ts,
+        "kalshi_available": bool(markets),
+    }
+
+
+def hourly_target_chart(hist, spot_price, hourly_ai):
+    tail = hist.tail(90).copy()
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Candlestick(
+            x=tail["time"],
+            open=tail["open"],
+            high=tail["high"],
+            low=tail["low"],
+            close=tail["close"],
+            name="BTC 1m",
+            increasing_line_width=1.6,
+            decreasing_line_width=1.6,
+            increasing_fillcolor="#12b886",
+            increasing_line_color="#12b886",
+            decreasing_fillcolor="#fa5252",
+            decreasing_line_color="#fa5252",
+        )
+    )
+
+    target = hourly_ai["target_price"]
+
+    fig.add_hline(
+        y=target,
+        line_dash="solid",
+        line_width=4,
+        line_color="#4dabf7",
+        annotation_text=f"HOURLY AI TARGET  ${target:,.2f}",
+        annotation_position="top left",
+        annotation_bgcolor="rgba(8,13,20,0.92)",
+        annotation_bordercolor="#4dabf7",
+        annotation_borderwidth=1,
+        annotation_font=dict(size=14, color="#d0ebff"),
+    )
+
+    nearest = hourly_ai.get("nearest_strike", np.nan)
+    if pd.notna(nearest):
+        fig.add_hline(
+            y=nearest,
+            line_dash="dash",
+            line_width=2,
+            line_color="#ffd43b",
+            annotation_text=f"NEAREST KALSHI HOURLY STRIKE  ${nearest:,.2f}",
+            annotation_position="bottom left",
+        )
+
+    fig.update_layout(
+        uirevision="hourly-kalshi-ai",
+        height=430,
+        margin=dict(l=8, r=8, t=18, b=8),
+        xaxis_rangeslider_visible=False,
+        transition_duration=0,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.01,
+            xanchor="left",
+            x=0,
+        ),
+    )
+
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(side="right", tickformat="$,.0f")
+
+    apply_plotly_theme(fig)
+    return fig
+
+
 # ============================================================
 # INDICATORS
 # ============================================================
@@ -1702,7 +2058,7 @@ init_db()
 
 st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
-st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute target engine • SCALP UP / SCALP DOWN / LOCK UP / LOCK DOWN • specialist council • paper-only")
+st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute engine + separate Hourly Target AI • SCALP UP / SCALP DOWN / LOCK UP / LOCK DOWN • paper-only")
 
 # ============================================================
 # SIDEBAR
@@ -1900,6 +2256,7 @@ def live_dashboard():
 
     futures = fetch_futures_snapshot()
     kalshi = fetch_kalshi_bitcoin_markets()
+    hourly_kalshi = fetch_kalshi_hourly_bitcoin_markets()
 
     if hist.empty:
         st.error("Price history is unavailable, so the AI engine cannot run safely right now.")
@@ -1913,6 +2270,7 @@ def live_dashboard():
 
     results = run_specialists(hist, agg, futures, kalshi)
     decision = master_decision(results, hist, kalshi)
+    hourly_ai = hourly_kalshi_target_ai(hist, results, hourly_kalshi, price)
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
 
@@ -1948,8 +2306,16 @@ def live_dashboard():
     # TABS
     # ============================================================
 
-    tab_market, tab_ai, tab_flow, tab_paper, tab_journal, tab_backtest = st.tabs(
-        ["Market", "AI Council", "Order Flow + Kalshi", "Paper Trading", "Prediction Journal", "Backtest"]
+    tab_market, tab_ai, tab_hourly, tab_flow, tab_paper, tab_journal, tab_backtest = st.tabs(
+        [
+            "Market",
+            "AI Council",
+            "Hourly Kalshi AI",
+            "Order Flow + Kalshi",
+            "Paper Trading",
+            "Prediction Journal",
+            "Backtest",
+        ]
     )
 
     with tab_market:
@@ -2104,6 +2470,98 @@ def live_dashboard():
                 "Reason": r["reason"],
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    with tab_hourly:
+        st.subheader("Hourly Kalshi BTC Target AI")
+        st.caption(
+            "Separate 60-minute model. It estimates BTC's most likely price "
+            "at the next hourly Kalshi settlement and compares that forecast "
+            "with the nearest active Kalshi hourly strike."
+        )
+
+        h1, h2, h3, h4 = st.columns(4)
+        h1.metric(
+            "1-hour AI target",
+            fmt_money(hourly_ai["target_price"]),
+        )
+        h2.metric(
+            "Expected move",
+            f"${hourly_ai['projected_move']:+,.2f}",
+            f"{hourly_ai['projected_move_pct']*100:+.3f}%",
+        )
+        h3.metric(
+            "Direction",
+            hourly_ai["direction"],
+        )
+        h4.metric(
+            "Confidence",
+            f"{hourly_ai['confidence']*100:.1f}%",
+        )
+
+        h5, h6, h7 = st.columns(3)
+        h5.metric(
+            "BTC now",
+            fmt_money(price),
+        )
+        h6.metric(
+            "Nearest Kalshi hourly strike",
+            (
+                fmt_money(hourly_ai["nearest_strike"])
+                if pd.notna(hourly_ai["nearest_strike"])
+                else "N/A"
+            ),
+        )
+
+        if pd.notna(hourly_ai["seconds_remaining"]):
+            hr_min, hr_sec = divmod(
+                max(0, int(hourly_ai["seconds_remaining"])),
+                60,
+            )
+            h7.metric(
+                "Hourly market time left",
+                f"{hr_min:02d}:{hr_sec:02d}",
+            )
+        else:
+            h7.metric("Hourly market time left", "N/A")
+
+        st.plotly_chart(
+            hourly_target_chart(hist, price, hourly_ai),
+            use_container_width=True,
+            key="hourly_kalshi_ai_chart",
+            config={
+                "displaylogo": False,
+                "scrollZoom": True,
+                "responsive": True,
+            },
+        )
+
+        if hourly_ai["direction"] == "UP":
+            st.success(
+                f"Hourly AI expects BTC near ${hourly_ai['target_price']:,.2f} "
+                "at the next hourly settlement."
+            )
+        elif hourly_ai["direction"] == "DOWN":
+            st.error(
+                f"Hourly AI expects BTC near ${hourly_ai['target_price']:,.2f} "
+                "at the next hourly settlement."
+            )
+        else:
+            st.info(
+                f"Hourly AI currently expects a relatively flat finish near "
+                f"${hourly_ai['target_price']:,.2f}."
+            )
+
+        if hourly_ai["kalshi_available"]:
+            st.caption(
+                "Yellow dashed line = nearest active Kalshi hourly strike. "
+                "Blue solid line = this bot's independent 1-hour BTC target forecast."
+            )
+        else:
+            st.warning(
+                "Kalshi hourly strikes are temporarily unavailable. "
+                "The Hourly AI target is still calculated from live BTC market data."
+            )
+
 
     with tab_flow:
         st.subheader("AGGR-style aggressor flow")
