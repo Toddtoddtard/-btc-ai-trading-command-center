@@ -1,0 +1,64 @@
+name: Specialist Self-Learning v5 CI
+
+on:
+  push:
+    branches:
+      - specialist-self-learning-v5
+    paths:
+      - 'specialist_knowledge_v5.py'
+      - 'profitability_v5.py'
+      - 'enrich_learning_state_v5.py'
+      - 'tools/apply_specialist_v5.py'
+      - 'tools/apply_learning_v5.py'
+      - 'tests/test_specialist_v5.py'
+      - '.github/workflows/specialist-self-learning-v5.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: specialist-self-learning-v5
+  cancel-in-progress: false
+
+jobs:
+  integrate-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: specialist-self-learning-v5
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Apply app and learner integrations
+        run: |
+          python tools/apply_specialist_v5.py
+          python tools/apply_learning_v5.py
+      - name: Compile critical files
+        run: python -m py_compile app.py specialist_knowledge_v5.py profitability_v5.py enrich_learning_state_v5.py council_v4.py
+      - name: Run v5 tests
+        run: python -m unittest tests.test_specialist_v5 -v
+      - name: Verify v5 anchors
+        run: |
+          grep -q 'knowledge_council_vote' app.py
+          grep -q 'v5 selective-precision gate' app.py
+          grep -q 'specialist_self_learning_v5' .github/workflows/learn.yml
+          grep -q 'V5 precision target' app.py || true
+      - name: Commit integrated files
+        shell: bash
+        run: |
+          set -e
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py .github/workflows/learn.yml
+          if git diff --cached --quiet; then
+            echo 'No generated integration changes.'
+            exit 0
+          fi
+          git commit -m 'Integrate specialist self-learning v5 and precision gate'
+          git push origin specialist-self-learning-v5
