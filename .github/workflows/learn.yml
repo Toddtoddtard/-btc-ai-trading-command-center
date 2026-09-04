@@ -29,6 +29,8 @@ jobs:
     steps:
       - name: Checkout app code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -37,8 +39,28 @@ jobs:
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
         run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py
+      - name: Load previous private learning state
+        shell: bash
+        run: |
+          set -e
+          rm -f /tmp/previous_learning_state.json
+          git fetch origin learning-state:refs/remotes/origin/learning-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
+            git show refs/remotes/origin/learning-state:learning_state.json > /tmp/previous_learning_state.json || true
+          fi
+          if [ -s /tmp/previous_learning_state.json ]; then
+            python - <<'PY'
+          import json
+          p='/tmp/previous_learning_state.json'
+          data=json.load(open(p))
+          print('Loaded previous learning state with', data.get('forecast', {}).get('samples', 0), 'graded samples')
+          PY
+          else
+            echo "No previous learning state found; learner will use fallback state."
+          fi
       - name: Run BTC AI learner v3.1
         env:
+          LEARNING_STATE_INPUT: /tmp/previous_learning_state.json
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
         run: python learner_v31.py
       - name: Validate generated learning state
@@ -65,7 +87,10 @@ jobs:
           assert data.get('champion_challenger', {}).get('required_streak') == 3
           assert 'prediction_snapshots' in data
           assert 'wait_counterfactual' in data
-          print('learning-state v3.1 validation passed')
+          before=int(data.get('status', {}).get('samples_before_run', 0))
+          after=int(data.get('status', {}).get('samples_after_run', 0))
+          assert after >= before, (before, after)
+          print('learning-state v3.1 validation passed; samples', before, '->', after)
           PY
       - name: Publish learning state
         shell: bash
