@@ -1,0 +1,42 @@
+name: Fix Kalshi Live Market
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'fix_kalshi_live_market.py'
+      - '.github/workflows/fix-kalshi-live-market.yml'
+permissions:
+  contents: write
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply live market fix
+        run: python fix_kalshi_live_market.py
+      - name: Compile
+        run: python -m py_compile app.py learner.py ai_core.py
+      - name: Verify market selection logic
+        run: |
+          grep -q 'choose the active contract from ticker + close time FIRST' app.py
+          grep -q 'KXBTC15M rows found but no future close_time' app.py
+          grep -q 'exact = payload\["market"\]' learner.py
+      - name: Commit repair
+        run: |
+          git config user.name "btc-ai-fix-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py learner.py
+          git diff --cached --quiet || git commit -m "Fix active Kalshi 15m market selection"
+          for i in 1 2 3; do
+            git fetch origin main
+            git rebase origin/main && git push origin HEAD:main && exit 0
+            git rebase --abort || true
+            sleep 2
+          done
+          exit 1
