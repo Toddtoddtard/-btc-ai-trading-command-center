@@ -24,15 +24,16 @@ jobs:
         run: python -m py_compile app.py learner.py ai_core.py
       - name: Verify market selection logic
         run: |
-          grep -q 'Find the active KXBTC15M contract first' app.py
+          grep -q 'deterministic-exact-ticker' app.py
+          grep -q '_kalshi_15m_ticker' app.py
+          grep -q 'schedule-only-fallback' app.py
           grep -q 'fetch_exact_kalshi_market' app.py
-          grep -q 'KXBTC15M-' app.py
       - name: Commit repair
         run: |
           git config user.name "btc-ai-fix-bot"
           git config user.email "actions@users.noreply.github.com"
           git add app.py
-          git diff --cached --quiet || git commit -m "Fix active Kalshi 15m market selection"
+          git diff --cached --quiet || git commit -m "Make Kalshi 15m timer and target deterministic"
           for i in 1 2 3; do
             git fetch origin main
             git rebase origin/main && git push origin HEAD:main && exit 0
