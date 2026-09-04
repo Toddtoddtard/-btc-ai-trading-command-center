@@ -19,6 +19,8 @@ from shared_learning import fetch_shared_learning_state
 
 from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
 from council_v4 import council_vote
+from specialist_knowledge_v5 import knowledge_council_vote
+from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
@@ -55,7 +57,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r42-bot-intelligence-v4"
+APP_VERSION = "2026.09.04-r43-specialist-self-learning-v5"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -1601,13 +1603,13 @@ def master_decision(results, hist, kalshi=None):
     regime_name = detect_regime(hist)
     policy = learned_policy(remote_learning, regime_name)
 
-    # Bot Intelligence v4 is the single authoritative source-council vote.
-    # It excludes Combination AI to avoid double-counting the council's own
-    # aggregate, and applies learned + regime-specific specialist reliability.
-    v4_council = council_vote(results, remote_learning, regime_name)
-    base_score = clamp(v4_council["base_score"])
-    consensus = float(v4_council["consensus"])
-    council_confidence = float(v4_council["confidence"])
+    # Bot Intelligence v5 adds Bayesian specialist knowledge on top of the v4
+    # learned/regime-aware council. The 90% value is a precision target, not a
+    # claimed accuracy; weak evidence causes abstention rather than a forced call.
+    v5_council = knowledge_council_vote(results, remote_learning, regime_name, target_precision=0.90)
+    base_score = clamp(v5_council["base_score"])
+    consensus = float(v5_council["consensus"])
+    council_confidence = float(v5_council["confidence"])
 
     px = float(hist["close"].iloc[-1])
     atr = safe_float(hist["atr14"].iloc[-1], px * 0.002)
@@ -1809,6 +1811,17 @@ def master_decision(results, hist, kalshi=None):
             action = "HOLD"
             locked_side = None
             gate_note = f"{gated_action}; learned reliability gate blocked trade"
+
+    # v5 selective-precision gate: the live app must not take a trade merely
+    # because the older threshold fired. The Bayesian evidence floor must pass.
+    if action not in {"HOLD", "WAIT"} and not bool(v5_council.get("precision_gate_passed")):
+        if action.startswith("LOCK"):
+            st.session_state.pop("kalshi_lock_ticker", None)
+            st.session_state.pop("kalshi_lock_side", None)
+        action = "HOLD"
+        locked_side = None
+        precision_reason = str(v5_council.get("precision_gate_reason", "WAIT — v5 precision gate"))
+        gate_note = (gate_note + "; " if gate_note else "") + precision_reason
 
     risk_level = (
         "LOW"
@@ -5106,6 +5119,21 @@ def live_dashboard():
 
     with tab_paper:
         st.subheader("Automatic Paper Trading")
+
+        # V5 profitability scorecard uses resolved paper/prediction outcomes and
+        # subtracts simulated fees/slippage before calculating expectancy.
+        _profit_rows = recent_predictions(300)
+        _profit_records = _profit_rows.to_dict("records") if _profit_rows is not None and not _profit_rows.empty else []
+        _profit = summarize_trades(_profit_records, cost_bps=6.5)
+        _profit_ok, _profit_reason = profitability_gate(_profit, min_samples=30)
+        p1, p2, p3, p4, p5 = st.columns(5)
+        p1.metric("Net win rate", "Learning" if _profit.get("win_rate") is None else f"{_profit['win_rate']*100:.1f}%")
+        p2.metric("Net expectancy", "Learning" if _profit.get("expectancy") is None else f"{_profit['expectancy']*100:+.3f}%")
+        _pf = _profit.get("profit_factor")
+        p3.metric("Profit factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))
+        p4.metric("Drawdown proxy", "Learning" if _profit.get("max_drawdown_proxy") is None else f"{_profit['max_drawdown_proxy']*100:.2f}%")
+        p5.metric("Profitability gate", "PASS" if _profit_ok else "WAIT")
+        st.caption(f"V5 net-of-cost analytics • {_profit.get('samples', 0)} resolved trade calls • simulated cost 6.5 bps • {_profit_reason}")
         auto_state = get_auto_state()
         account = get_account(price)
 
