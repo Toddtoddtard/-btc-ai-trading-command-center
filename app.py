@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r14-predicted-candle-path"
+APP_VERSION = "2026.09.04-single-file-r15-self-learning-prediction"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -1684,6 +1684,445 @@ def risk_evaluate(decision, account, hist, futures):
 
     return {"approved": True, "position_pct": position_pct, "risk_score": risk_score, "reason": "Paper-trade risk checks passed"}
 
+
+# ============================================================
+# SELF-LEARNING 15-MINUTE FORECAST MODEL
+# ============================================================
+
+LEARNING_DB = "btc_ai.db"
+
+def learning_db():
+    conn = sqlite3.connect(LEARNING_DB, check_same_thread=False)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS forecast_learning_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            w_ret3 REAL NOT NULL DEFAULT 0.46,
+            w_ret8 REAL NOT NULL DEFAULT 0.34,
+            w_ret15 REAL NOT NULL DEFAULT 0.20,
+            momentum_scale REAL NOT NULL DEFAULT 2.20,
+            target_influence REAL NOT NULL DEFAULT 0.18,
+            bias REAL NOT NULL DEFAULT 0.0,
+            learning_rate REAL NOT NULL DEFAULT 0.08,
+            samples INTEGER NOT NULL DEFAULT 0,
+            direction_hits INTEGER NOT NULL DEFAULT 0,
+            avg_abs_error REAL NOT NULL DEFAULT 0.0,
+            avg_path_error REAL NOT NULL DEFAULT 0.0,
+            updated_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS forecast_windows (
+            ticker TEXT PRIMARY KEY,
+            opened_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            start_price REAL NOT NULL,
+            target_price REAL,
+            predicted_end REAL NOT NULL,
+            predicted_direction INTEGER NOT NULL,
+            ret3 REAL NOT NULL,
+            ret8 REAL NOT NULL,
+            ret15 REAL NOT NULL,
+            avg_range REAL NOT NULL,
+            prediction_json TEXT,
+            resolved INTEGER NOT NULL DEFAULT 0,
+            actual_end REAL,
+            direction_correct INTEGER,
+            abs_error REAL,
+            path_error REAL,
+            resolved_at TEXT
+        )
+    """)
+    conn.execute(
+        "INSERT OR IGNORE INTO forecast_learning_state (id, updated_at) VALUES (1, ?)",
+        (datetime.now(timezone.utc).isoformat(),)
+    )
+    conn.commit()
+    return conn
+
+
+def get_learning_state():
+    conn = learning_db()
+    row = conn.execute("""
+        SELECT
+            w_ret3, w_ret8, w_ret15, momentum_scale,
+            target_influence, bias, learning_rate,
+            samples, direction_hits, avg_abs_error, avg_path_error
+        FROM forecast_learning_state
+        WHERE id = 1
+    """).fetchone()
+    conn.close()
+
+    keys = [
+        "w_ret3", "w_ret8", "w_ret15", "momentum_scale",
+        "target_influence", "bias", "learning_rate",
+        "samples", "direction_hits", "avg_abs_error", "avg_path_error"
+    ]
+    state = dict(zip(keys, row))
+    state["direction_accuracy"] = (
+        state["direction_hits"] / state["samples"]
+        if state["samples"] else np.nan
+    )
+    return state
+
+
+def save_learning_state(state):
+    conn = learning_db()
+    conn.execute("""
+        UPDATE forecast_learning_state
+        SET
+            w_ret3 = ?,
+            w_ret8 = ?,
+            w_ret15 = ?,
+            momentum_scale = ?,
+            target_influence = ?,
+            bias = ?,
+            learning_rate = ?,
+            samples = ?,
+            direction_hits = ?,
+            avg_abs_error = ?,
+            avg_path_error = ?,
+            updated_at = ?
+        WHERE id = 1
+    """, (
+        float(state["w_ret3"]),
+        float(state["w_ret8"]),
+        float(state["w_ret15"]),
+        float(state["momentum_scale"]),
+        float(state["target_influence"]),
+        float(state["bias"]),
+        float(state["learning_rate"]),
+        int(state["samples"]),
+        int(state["direction_hits"]),
+        float(state["avg_abs_error"]),
+        float(state["avg_path_error"]),
+        datetime.now(timezone.utc).isoformat(),
+    ))
+    conn.commit()
+    conn.close()
+
+
+def normalize_learning_weights(state):
+    vals = np.array(
+        [state["w_ret3"], state["w_ret8"], state["w_ret15"]],
+        dtype=float
+    )
+    vals = np.clip(vals, 0.05, 0.90)
+    vals /= float(vals.sum()) or 1.0
+    state["w_ret3"], state["w_ret8"], state["w_ret15"] = vals.tolist()
+    state["momentum_scale"] = float(np.clip(state["momentum_scale"], 0.60, 4.50))
+    state["target_influence"] = float(np.clip(state["target_influence"], 0.00, 0.50))
+    state["bias"] = float(np.clip(state["bias"], -0.004, 0.004))
+    return state
+
+
+def model_inputs_from_rows(rows, target=None):
+    closes = np.asarray([float(r["close"]) for r in rows], dtype=float)
+    if len(closes) < 16:
+        return None
+
+    last = float(closes[-1])
+    ret3 = last / float(closes[-4]) - 1.0
+    ret8 = last / float(closes[-9]) - 1.0
+    ret15 = last / float(closes[-16]) - 1.0
+
+    recent = rows[-20:]
+    ranges = [
+        max(0.0, float(r["high"]) - float(r["low"]))
+        for r in recent
+    ]
+    avg_range = float(np.mean(ranges)) if ranges else max(last * 0.0005, 1.0)
+
+    return {
+        "last": last,
+        "ret3": ret3,
+        "ret8": ret8,
+        "ret15": ret15,
+        "avg_range": avg_range,
+        "target": safe_float(target),
+    }
+
+
+def python_forecast_path(rows, target=None, state=None):
+    state = state or get_learning_state()
+    inputs = model_inputs_from_rows(rows, target)
+    if not inputs:
+        return None
+
+    last = inputs["last"]
+    avg_range = inputs["avg_range"]
+
+    directional = (
+        state["w_ret3"] * inputs["ret3"]
+        + state["w_ret8"] * inputs["ret8"]
+        + state["w_ret15"] * inputs["ret15"]
+        + state["bias"]
+    )
+    directional = float(np.clip(directional, -0.012, 0.012))
+
+    projected_move = last * directional * state["momentum_scale"]
+
+    if pd.notna(inputs["target"]):
+        gap = inputs["target"] - last
+        max_influence = max(avg_range * 2.0, last * 0.0015)
+        projected_move += float(
+            np.clip(
+                gap * state["target_influence"],
+                -max_influence,
+                max_influence
+            )
+        )
+
+    min_visible = max(avg_range * 0.35, last * 0.00015)
+    if abs(projected_move) < min_visible:
+        projected_move = np.sign(projected_move or directional or 1.0) * min_visible
+
+    forecast = []
+    prev_close = last
+
+    for i in range(1, 16):
+        progress = i / 15.0
+        eased = progress * progress * (3.0 - 2.0 * progress)
+        center = last + projected_move * eased
+        wave = (
+            np.sin(i * 1.35) * avg_range * 0.16
+            + np.cos(i * 0.72) * avg_range * 0.08
+        )
+        close = float(center + wave)
+        open_ = float(prev_close)
+        body = abs(close - open_)
+        wick = max(avg_range * (0.18 + 0.08 * progress), body * 0.35)
+
+        forecast.append({
+            "step": i,
+            "open": open_,
+            "high": max(open_, close) + wick,
+            "low": min(open_, close) - wick,
+            "close": close,
+        })
+        prev_close = close
+
+    return {
+        "inputs": inputs,
+        "forecast": forecast,
+        "predicted_end": float(forecast[-1]["close"]),
+        "predicted_direction": 1 if forecast[-1]["close"] >= last else -1,
+    }
+
+
+def register_forecast_window(ticker, expires_at, rows, target):
+    if not ticker or pd.isna(expires_at):
+        return
+
+    conn = learning_db()
+    if conn.execute(
+        "SELECT 1 FROM forecast_windows WHERE ticker = ?",
+        (ticker,)
+    ).fetchone():
+        conn.close()
+        return
+
+    state = get_learning_state()
+    result = python_forecast_path(rows, target, state)
+    if not result:
+        conn.close()
+        return
+
+    import json as _json
+    inputs = result["inputs"]
+
+    conn.execute("""
+        INSERT OR IGNORE INTO forecast_windows (
+            ticker, opened_at, expires_at, start_price, target_price,
+            predicted_end, predicted_direction,
+            ret3, ret8, ret15, avg_range, prediction_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        ticker,
+        time.time(),
+        float(expires_at),
+        float(inputs["last"]),
+        float(target) if pd.notna(target) else None,
+        float(result["predicted_end"]),
+        int(result["predicted_direction"]),
+        float(inputs["ret3"]),
+        float(inputs["ret8"]),
+        float(inputs["ret15"]),
+        float(inputs["avg_range"]),
+        _json.dumps(result["forecast"]),
+    ))
+    conn.commit()
+    conn.close()
+
+
+def resolve_forecast_windows(hist):
+    if hist is None or hist.empty:
+        return 0
+
+    now_ts = time.time()
+    conn = learning_db()
+    pending = conn.execute("""
+        SELECT
+            ticker, expires_at, start_price, target_price,
+            predicted_end, predicted_direction,
+            ret3, ret8, ret15, avg_range, prediction_json
+        FROM forecast_windows
+        WHERE resolved = 0 AND expires_at <= ?
+        ORDER BY expires_at ASC
+        LIMIT 20
+    """, (now_ts,)).fetchall()
+
+    if not pending:
+        conn.close()
+        return 0
+
+    state = get_learning_state()
+    resolved_count = 0
+
+    hist2 = hist.copy()
+    hist2["_ts"] = pd.to_datetime(hist2["time"], utc=True, errors="coerce")
+    hist2 = hist2.dropna(subset=["_ts"])
+
+    import json as _json
+
+    for row in pending:
+        (
+            ticker, expires_at, start_price, target_price,
+            predicted_end, predicted_direction,
+            ret3, ret8, ret15, avg_range, prediction_json
+        ) = row
+
+        expiry_dt = pd.to_datetime(expires_at, unit="s", utc=True)
+        near = hist2.iloc[(hist2["_ts"] - expiry_dt).abs().argsort()[:1]]
+        if near.empty:
+            continue
+
+        actual_end = float(near.iloc[0]["close"])
+        actual_direction = 1 if actual_end >= start_price else -1
+        direction_correct = int(actual_direction == predicted_direction)
+        abs_error = abs(actual_end - predicted_end)
+
+        path_error = abs_error
+        try:
+            pred_path = _json.loads(prediction_json or "[]")
+            actual_window = hist2.loc[
+                (hist2["_ts"] > expiry_dt - pd.Timedelta(minutes=15))
+                & (hist2["_ts"] <= expiry_dt)
+            ].tail(15)
+
+            if pred_path and len(actual_window) >= 5:
+                pred_closes = np.array(
+                    [float(p["close"]) for p in pred_path],
+                    dtype=float
+                )
+                actual_closes = actual_window["close"].astype(float).to_numpy()
+                n = min(len(pred_closes), len(actual_closes))
+                path_error = float(
+                    np.mean(np.abs(pred_closes[-n:] - actual_closes[-n:]))
+                )
+        except Exception:
+            pass
+
+        actual_return = actual_end / start_price - 1.0
+        predicted_return = predicted_end / start_price - 1.0
+        error = actual_return - predicted_return
+        lr = float(state["learning_rate"])
+
+        features = np.array([ret3, ret8, ret15], dtype=float)
+        feature_scale = max(float(np.abs(features).sum()), 1e-6)
+        adjustments = lr * error * (features / feature_scale) * 8.0
+
+        state["w_ret3"] += float(adjustments[0])
+        state["w_ret8"] += float(adjustments[1])
+        state["w_ret15"] += float(adjustments[2])
+
+        if abs(predicted_return) > 1e-5:
+            ratio = actual_return / predicted_return
+            state["momentum_scale"] *= float(
+                np.clip(1.0 + lr * (ratio - 1.0) * 0.20, 0.94, 1.06)
+            )
+
+        state["bias"] += float(
+            np.clip(lr * error * 0.12, -0.00015, 0.00015)
+        )
+
+        if target_price is not None:
+            target_dir = np.sign(target_price - start_price)
+            actual_dir = np.sign(actual_end - start_price)
+            if target_dir != 0:
+                state["target_influence"] += (
+                    lr * 0.008 if target_dir == actual_dir else -lr * 0.012
+                )
+
+        state["samples"] += 1
+        state["direction_hits"] += direction_correct
+        n_samples = state["samples"]
+
+        state["avg_abs_error"] = (
+            abs_error
+            if n_samples == 1
+            else state["avg_abs_error"]
+            + (abs_error - state["avg_abs_error"]) / n_samples
+        )
+        state["avg_path_error"] = (
+            path_error
+            if n_samples == 1
+            else state["avg_path_error"]
+            + (path_error - state["avg_path_error"]) / n_samples
+        )
+
+        state = normalize_learning_weights(state)
+
+        conn.execute("""
+            UPDATE forecast_windows
+            SET
+                resolved = 1,
+                actual_end = ?,
+                direction_correct = ?,
+                abs_error = ?,
+                path_error = ?,
+                resolved_at = ?
+            WHERE ticker = ?
+        """, (
+            actual_end,
+            direction_correct,
+            abs_error,
+            path_error,
+            datetime.now(timezone.utc).isoformat(),
+            ticker,
+        ))
+        resolved_count += 1
+
+    conn.commit()
+    conn.close()
+
+    if resolved_count:
+        save_learning_state(state)
+
+    return resolved_count
+
+
+def recent_learning_windows(limit=50):
+    conn = learning_db()
+    df = pd.read_sql_query("""
+        SELECT
+            ticker,
+            datetime(expires_at, 'unixepoch') AS expires_utc,
+            start_price,
+            predicted_end,
+            actual_end,
+            direction_correct,
+            abs_error,
+            path_error
+        FROM forecast_windows
+        WHERE resolved = 1
+        ORDER BY expires_at DESC
+        LIMIT ?
+    """, conn, params=(int(limit),))
+    conn.close()
+    return df
+
+
 # ============================================================
 # PREDICTION JOURNAL
 # ============================================================
@@ -2059,7 +2498,7 @@ init_db()
 
 st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
-st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute engine + separate Hourly Target AI • SCALP UP / SCALP DOWN / LOCK UP / LOCK DOWN • paper-only")
+st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute self-learning engine + separate Hourly Target AI • SCALP UP / SCALP DOWN / LOCK UP / LOCK DOWN • paper-only")
 
 # ============================================================
 # SIDEBAR
@@ -2171,7 +2610,7 @@ st.markdown(
 # PERSISTENT LIVE MARKET CHART
 # ============================================================
 
-def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True):
+def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None):
     """
     Browser-side Plotly chart.
 
@@ -2209,6 +2648,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             ),
             "ticker": initial_ticker or "",
             "dark": bool(dark_mode),
+            "learning": learning_state or get_learning_state(),
         }
     ).replace("</", "<\\/")
 
@@ -2248,6 +2688,14 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         let currentTicker = initial.ticker || "";
         let lastCandleSignature = "";
         let busy = false;
+
+        const learning = initial.learning || {{}};
+        const W_RET3 = Number(learning.w_ret3 ?? 0.46);
+        const W_RET8 = Number(learning.w_ret8 ?? 0.34);
+        const W_RET15 = Number(learning.w_ret15 ?? 0.20);
+        const MOMENTUM_SCALE = Number(learning.momentum_scale ?? 2.20);
+        const TARGET_INFLUENCE = Number(learning.target_influence ?? 0.18);
+        const MODEL_BIAS = Number(learning.bias ?? 0.0);
 
         const paperBg = "{paper}";
         const plotBg = "{bg}";
@@ -2301,13 +2749,14 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             }}, 0) / Math.max(1, recent.length);
 
             let directional =
-                0.46 * ret3 +
-                0.34 * ret8 +
-                0.20 * ret15;
+                W_RET3 * ret3 +
+                W_RET8 * ret8 +
+                W_RET15 * ret15 +
+                MODEL_BIAS;
 
             directional = Math.max(-0.012, Math.min(0.012, directional));
 
-            let projectedMove = last * directional * 2.2;
+            let projectedMove = last * directional * MOMENTUM_SCALE;
 
             if (Number.isFinite(currentTarget)) {{
                 const gap = currentTarget - last;
@@ -2317,7 +2766,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 );
                 const targetInfluence = Math.max(
                     -maxInfluence,
-                    Math.min(maxInfluence, gap * 0.18)
+                    Math.min(maxInfluence, gap * TARGET_INFLUENCE)
                 );
                 projectedMove += targetInfluence;
             }}
@@ -2879,12 +3328,51 @@ st.caption(
     "and is not rebuilt by the dashboard refresh."
 )
 
+# Grade completed windows and learn before drawing the next forecast.
+try:
+    _learning_resolved = resolve_forecast_windows(_persistent_hist)
+except Exception:
+    _learning_resolved = 0
+
+try:
+    _close_raw = _persistent_ctx.get("close_time")
+    _active_close_ts = (
+        pd.Timestamp(_close_raw).timestamp()
+        if _close_raw else np.nan
+    )
+
+    register_forecast_window(
+        _persistent_ctx.get("ticker", ""),
+        _active_close_ts,
+        _persistent_hist.tail(60).to_dict("records"),
+        _persistent_ctx.get("target", np.nan),
+    )
+except Exception:
+    pass
+
+_learning_state = get_learning_state()
+
 persistent_kalshi_market_chart(
     _persistent_hist,
     _persistent_ctx.get("target", np.nan),
     _persistent_ctx.get("ticker", ""),
     dark_mode=dark_mode,
+    learning_state=_learning_state,
 )
+
+if _learning_state["samples"] > 0:
+    _acc = _learning_state["direction_accuracy"] * 100
+    st.caption(
+        f"Self-learning model: {_learning_state['samples']} completed windows • "
+        f"direction accuracy {_acc:.1f}% • "
+        f"avg final-price error ${_learning_state['avg_abs_error']:,.2f} • "
+        f"avg path error ${_learning_state['avg_path_error']:,.2f}"
+    )
+else:
+    st.caption(
+        "Self-learning model is active. Accuracy statistics will appear after "
+        "the first completed 15-minute Kalshi window is graded."
+    )
 
 @st.fragment(run_every=live_run_every)
 def live_dashboard():
@@ -2963,7 +3451,7 @@ def live_dashboard():
     # TABS
     # ============================================================
 
-    tab_market, tab_ai, tab_hourly, tab_flow, tab_paper, tab_journal, tab_backtest = st.tabs(
+    tab_market, tab_ai, tab_hourly, tab_flow, tab_paper, tab_journal, tab_learning, tab_backtest = st.tabs(
         [
             "Market",
             "AI Council",
@@ -2971,6 +3459,7 @@ def live_dashboard():
             "Order Flow + Kalshi",
             "Paper Trading",
             "Prediction Journal",
+            "Learning",
             "Backtest",
         ]
     )
@@ -3396,6 +3885,57 @@ def live_dashboard():
             st.dataframe(journal_df, use_container_width=True, hide_index=True)
         else:
             st.info("No predictions recorded yet.")
+
+    with tab_learning:
+        st.subheader("15-Minute Prediction Learning")
+        learn = get_learning_state()
+
+        l1, l2, l3, l4 = st.columns(4)
+        l1.metric("Completed windows", int(learn["samples"]))
+        l2.metric(
+            "Direction accuracy",
+            "N/A"
+            if pd.isna(learn["direction_accuracy"])
+            else f"{learn['direction_accuracy']*100:.1f}%"
+        )
+        l3.metric("Avg final error", f"${learn['avg_abs_error']:,.2f}")
+        l4.metric("Avg path error", f"${learn['avg_path_error']:,.2f}")
+
+        st.caption(
+            "After each completed 15-minute Kalshi window, the model grades "
+            "its forecast and adjusts its momentum weights, move scale, "
+            "target influence, and directional bias."
+        )
+
+        w1, w2, w3, w4 = st.columns(4)
+        w1.metric("3m weight", f"{learn['w_ret3']*100:.1f}%")
+        w2.metric("8m weight", f"{learn['w_ret8']*100:.1f}%")
+        w3.metric("15m weight", f"{learn['w_ret15']*100:.1f}%")
+        w4.metric("Move scale", f"{learn['momentum_scale']:.2f}×")
+
+        learning_df = recent_learning_windows(50)
+        if learning_df.empty:
+            st.info(
+                "No completed learning windows yet. The active Kalshi "
+                "15-minute contract is being recorded now."
+            )
+        else:
+            for col in [
+                "start_price", "predicted_end", "actual_end",
+                "abs_error", "path_error"
+            ]:
+                if col in learning_df.columns:
+                    learning_df[col] = pd.to_numeric(
+                        learning_df[col],
+                        errors="coerce"
+                    ).round(2)
+
+            st.dataframe(
+                learning_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
 
     with tab_backtest:
         st.subheader("Walk-forward Backtest")
