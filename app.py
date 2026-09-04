@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r18-remote-24x7-learning"
+APP_VERSION = "2026.09.04-single-file-r19-canonical-kalshi-target"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -719,6 +719,54 @@ def fetch_futures_snapshot():
     return out
 
 
+def kalshi_numeric_target(market):
+    """Return the numeric settlement strike exactly as Kalshi exposes it."""
+    if not isinstance(market, dict):
+        return np.nan
+    strike_type = str(market.get("strike_type") or "").lower()
+    preferred = (
+        ("cap_strike", "floor_strike")
+        if strike_type in {"less", "less_equal", "less-than", "less_than"}
+        else ("floor_strike", "cap_strike")
+    )
+    for key in preferred:
+        value = safe_float(market.get(key))
+        if pd.notna(value) and value > 0:
+            return float(value)
+    return np.nan
+
+
+def kalshi_close_timestamp(market):
+    if not isinstance(market, dict):
+        return np.nan
+    raw_close = (
+        market.get("close_time")
+        or market.get("expiration_time")
+        or market.get("expected_expiration_time")
+    )
+    if not raw_close:
+        return np.nan
+    try:
+        return float(pd.Timestamp(raw_close).timestamp())
+    except Exception:
+        return np.nan
+
+
+def fetch_exact_kalshi_market(ticker):
+    """Read one exact Kalshi market by ticker to canonicalize its strike."""
+    if not ticker:
+        return None
+    for base in KALSHI_BASES:
+        try:
+            payload, _ = http_json(base + "/markets/" + str(ticker), timeout=3.0)
+            market = payload.get("market") if isinstance(payload, dict) else None
+            if isinstance(market, dict):
+                return market
+        except Exception:
+            continue
+    return None
+
+
 @st.cache_data(ttl=3, show_spinner=False)
 def fetch_kalshi_bitcoin_markets():
     """Read-only lookup for the live Kalshi KXBTC15M market."""
@@ -745,23 +793,11 @@ def fetch_kalshi_bitcoin_markets():
                 if not any(word in blob for word in ["bitcoin", "btc"]):
                     continue
 
-                target = safe_float(market.get("floor_strike"))
-                if pd.isna(target) or target <= 0:
-                    target = safe_float(market.get("cap_strike"))
+                target = kalshi_numeric_target(market)
                 if pd.isna(target) or target <= 0:
                     continue
 
-                raw_close = (
-                    market.get("close_time")
-                    or market.get("expiration_time")
-                    or market.get("expected_expiration_time")
-                )
-                close_ts = np.nan
-                if raw_close:
-                    try:
-                        close_ts = pd.Timestamp(raw_close).timestamp()
-                    except Exception:
-                        pass
+                close_ts = kalshi_close_timestamp(market)
 
                 row = dict(market)
                 row["_target"] = target
@@ -777,9 +813,23 @@ def fetch_kalshi_bitcoin_markets():
                 if pd.notna(row["_close_ts"]) and row["_close_ts"] > now_ts
             ]
             current = (
-                min(future, key=lambda row: row["_close_ts"])
+                min(future, key=lambda row: (row["_close_ts"], str(row.get("ticker", ""))))
                 if future else (hits[0] if hits else None)
             )
+
+            if current:
+                exact = fetch_exact_kalshi_market(current.get("ticker", ""))
+                if exact:
+                    exact_target = kalshi_numeric_target(exact)
+                    exact_close_ts = kalshi_close_timestamp(exact)
+                    merged = dict(current)
+                    merged.update(exact)
+                    if pd.notna(exact_target):
+                        merged["_target"] = exact_target
+                    if pd.notna(exact_close_ts):
+                        merged["_close_ts"] = exact_close_ts
+                        merged["_seconds_remaining"] = max(0, int(exact_close_ts - now_ts))
+                    current = merged
 
             return {
                 "ok": True,
@@ -858,36 +908,36 @@ def current_kalshi_context(kalshi, spot_price):
 
 
 def stable_kalshi_contract(kalshi, spot_price):
-    """
-    Freeze the current Kalshi 15-minute contract target in session state.
-    The target/ticker only changes when Kalshi exposes a different active ticker.
-    This prevents the horizontal target from being rebuilt on every live refresh.
+    """Return one canonical Kalshi 15-minute contract for the whole app.
+
+    Exact ticker + strike stay paired until expiry so chart, metrics,
+    LOCK/SCALP decisions, paper trading and learning cannot drift apart.
     """
     live = current_kalshi_context(kalshi, spot_price)
-
-    if not live.get("available"):
-        cached = st.session_state.get("kalshi_contract_snapshot")
-        if cached:
-            cached = dict(cached)
-            cached["distance"] = spot_price - cached["target"]
-            cached["distance_pct"] = (
-                cached["distance"] / cached["target"]
-                if cached.get("target") else np.nan
-            )
-            return cached
-        return live
-
-    live_ticker = live.get("ticker", "")
     cached = st.session_state.get("kalshi_contract_snapshot")
+    now_ts = time.time()
 
-    if (
+    def cache_expired(snapshot):
+        if not snapshot:
+            return True
+        raw = snapshot.get("close_time")
+        if not raw:
+            return False
+        try:
+            return pd.Timestamp(raw).timestamp() <= now_ts
+        except Exception:
+            return False
+
+    should_replace = (
         cached is None
-        or cached.get("ticker") != live_ticker
         or pd.isna(cached.get("target", np.nan))
-    ):
+        or cache_expired(cached)
+    )
+
+    if live.get("available") and should_replace:
         cached = {
             "available": True,
-            "ticker": live_ticker,
+            "ticker": live.get("ticker", ""),
             "title": live.get("title", "BTC 15 min"),
             "target": live.get("target", np.nan),
             "close_time": live.get("close_time"),
@@ -895,22 +945,33 @@ def stable_kalshi_contract(kalshi, spot_price):
         }
         st.session_state["kalshi_contract_snapshot"] = cached
 
-    # Dynamic fields may refresh, but the target/ticker snapshot stays fixed.
-    result = dict(cached)
-    result["seconds_remaining"] = live.get("seconds_remaining", np.nan)
-    result["up_probability"] = live.get("up_probability", np.nan)
-    result["distance"] = (
-        spot_price - result["target"]
-        if pd.notna(result.get("target", np.nan))
-        else np.nan
-    )
-    result["distance_pct"] = (
-        result["distance"] / result["target"]
-        if pd.notna(result.get("distance", np.nan)) and result.get("target")
-        else np.nan
-    )
-    return result
+    if cached:
+        result = dict(cached)
+        if live.get("available") and live.get("ticker") == result.get("ticker"):
+            result["up_probability"] = live.get("up_probability", np.nan)
+            result["market"] = live.get("market", result.get("market"))
+        else:
+            result["up_probability"] = kalshi_probability(result.get("market"))
 
+        try:
+            close_ts = pd.Timestamp(result.get("close_time")).timestamp()
+            result["seconds_remaining"] = max(0, int(close_ts - now_ts))
+        except Exception:
+            result["seconds_remaining"] = np.nan
+
+        result["distance"] = (
+            spot_price - result["target"]
+            if pd.notna(result.get("target", np.nan)) else np.nan
+        )
+        result["distance_pct"] = (
+            result["distance"] / result["target"]
+            if pd.notna(result.get("distance", np.nan)) and result.get("target")
+            else np.nan
+        )
+        result["available"] = True
+        return result
+
+    return live
 
 
 @st.cache_data(ttl=10, show_spinner=False)
@@ -3736,6 +3797,28 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             return Number.isFinite(ms) ? ms : NaN;
         }}
 
+        function numericKalshiTarget(m) {{
+            if (!m) return NaN;
+            const strikeType = String(m.strike_type || "").toLowerCase();
+            const preferCap = ["less", "less_equal", "less-than", "less_than"].includes(strikeType);
+            const first = Number(preferCap ? m.cap_strike : m.floor_strike);
+            const second = Number(preferCap ? m.floor_strike : m.cap_strike);
+            if (Number.isFinite(first) && first > 0) return first;
+            if (Number.isFinite(second) && second > 0) return second;
+            return NaN;
+        }}
+
+        async function exactKalshiMarket(ticker) {{
+            if (!ticker) return null;
+            try {{
+                const url = "https://external-api.kalshi.com/trade-api/v2/markets/" + encodeURIComponent(ticker);
+                const resp = await fetch(url, {{cache:"no-store"}});
+                if (!resp.ok) return null;
+                const payload = await resp.json();
+                return payload && payload.market ? payload.market : null;
+            }} catch (e) {{ return null; }}
+        }}
+
         async function fetchKalshiTarget() {{
             const url =
                 "https://external-api.kalshi.com/trade-api/v2/markets" +
@@ -3748,36 +3831,36 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 const markets = Array.isArray(payload.markets) ? payload.markets : [];
                 const now = Date.now();
 
-                const candidates = markets.map(m => {{
-                    const closeRaw =
-                        m.close_time ||
-                        m.expiration_time ||
-                        m.expected_expiration_time;
-
-                    const closeMs = parseTime(closeRaw);
-
-                    let target = Number(m.floor_strike);
-                    if (!Number.isFinite(target) || target <= 0) {{
-                        target = Number(m.cap_strike);
-                    }}
-
+                const parsed = markets.map(m => {{
+                    const closeRaw = m.close_time || m.expiration_time || m.expected_expiration_time;
                     return {{
+                        raw: m,
                         ticker: String(m.ticker || ""),
-                        target,
-                        closeMs
+                        target: numericKalshiTarget(m),
+                        closeMs: parseTime(closeRaw)
                     }};
                 }}).filter(m =>
-                    Number.isFinite(m.target) &&
-                    m.target > 0 &&
-                    Number.isFinite(m.closeMs) &&
-                    m.closeMs > now
+                    Number.isFinite(m.target) && m.target > 0 &&
+                    Number.isFinite(m.closeMs) && m.closeMs > now
                 );
 
-                candidates.sort((a,b) => a.closeMs - b.closeMs);
-                return candidates.length ? candidates[0] : null;
-            }} catch (e) {{
-                return null;
-            }}
+                const pinned = parsed.find(m => m.ticker === currentTicker);
+                let selected = pinned || null;
+                if (!selected) {{
+                    parsed.sort((a,b) => (a.closeMs - b.closeMs) || a.ticker.localeCompare(b.ticker));
+                    selected = parsed.length ? parsed[0] : null;
+                }}
+                if (!selected) return null;
+
+                const exact = await exactKalshiMarket(selected.ticker);
+                if (exact) {{
+                    const exactTarget = numericKalshiTarget(exact);
+                    const exactClose = parseTime(exact.close_time || exact.expiration_time || exact.expected_expiration_time);
+                    if (Number.isFinite(exactTarget) && exactTarget > 0) selected.target = exactTarget;
+                    if (Number.isFinite(exactClose)) selected.closeMs = exactClose;
+                }}
+                return selected;
+            }} catch (e) {{ return null; }}
         }}
 
         async function updateCandles() {{
@@ -4263,8 +4346,9 @@ def live_dashboard():
                 st.info("HOLD → no Kalshi side has enough edge yet.")
 
             st.caption(
-                f"Live Kalshi market: {kctx['ticker']} • target comes "
-                "from Kalshi. The candles use this app's Binance 1-minute feed "
+                f"Live Kalshi market: {kctx['ticker']} • target is fetched from "
+                "that exact Kalshi ticker and shared by the chart, LOCK/SCALP engine, "
+                "paper signals, and learner. The candles use this app's Binance 1-minute feed "
                 "as a real-time proxy; official Kalshi settlement follows "
                 "Kalshi's stated reference methodology. "
                 "The target line stays fixed for this contract and changes only "
