@@ -1,0 +1,36 @@
+name: Apply R27 Align Call Card Row
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'apply_r27_align_call_card_row.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Align whole decision card with metric row
+        run: python apply_r27_align_call_card_row.py
+      - name: Validate syntax
+        run: python -m py_compile app.py
+      - name: Commit updated app
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes needed."
+            exit 0
+          fi
+          git config user.name "btc-ai-ui-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py
+          git commit -m "Align decision card with Master score row"
+          git push origin main
