@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r8-darkmode-targetline"
+APP_VERSION = "2026.09.04-single-file-r9-aggr-candles-smooth"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -815,6 +815,62 @@ def current_kalshi_context(kalshi, spot_price):
         "market": market,
     }
 
+
+def stable_kalshi_contract(kalshi, spot_price):
+    """
+    Freeze the current Kalshi 15-minute contract target in session state.
+    The target/ticker only changes when Kalshi exposes a different active ticker.
+    This prevents the horizontal target from being rebuilt on every live refresh.
+    """
+    live = current_kalshi_context(kalshi, spot_price)
+
+    if not live.get("available"):
+        cached = st.session_state.get("kalshi_contract_snapshot")
+        if cached:
+            cached = dict(cached)
+            cached["distance"] = spot_price - cached["target"]
+            cached["distance_pct"] = (
+                cached["distance"] / cached["target"]
+                if cached.get("target") else np.nan
+            )
+            return cached
+        return live
+
+    live_ticker = live.get("ticker", "")
+    cached = st.session_state.get("kalshi_contract_snapshot")
+
+    if (
+        cached is None
+        or cached.get("ticker") != live_ticker
+        or pd.isna(cached.get("target", np.nan))
+    ):
+        cached = {
+            "available": True,
+            "ticker": live_ticker,
+            "title": live.get("title", "BTC 15 min"),
+            "target": live.get("target", np.nan),
+            "close_time": live.get("close_time"),
+            "market": live.get("market"),
+        }
+        st.session_state["kalshi_contract_snapshot"] = cached
+
+    # Dynamic fields may refresh, but the target/ticker snapshot stays fixed.
+    result = dict(cached)
+    result["seconds_remaining"] = live.get("seconds_remaining", np.nan)
+    result["up_probability"] = live.get("up_probability", np.nan)
+    result["distance"] = (
+        spot_price - result["target"]
+        if pd.notna(result.get("target", np.nan))
+        else np.nan
+    )
+    result["distance_pct"] = (
+        result["distance"] / result["target"]
+        if pd.notna(result.get("distance", np.nan)) and result.get("target")
+        else np.nan
+    )
+    return result
+
+
 # ============================================================
 # INDICATORS
 # ============================================================
@@ -952,7 +1008,7 @@ def run_specialists(hist, agg, futures, kalshi):
     out["Derivatives AI"] = specialist("Derivatives AI", deriv_score, f"Funding {funding*100:.4f}%; OI {safe_float(futures.get('open_interest'), 0):,.0f} BTC")
 
     # Event / Kalshi 15-minute market
-    kctx = current_kalshi_context(kalshi, px)
+    kctx = stable_kalshi_contract(kalshi, px)
     if kctx["available"]:
         probability = kctx["up_probability"]
         market_score = clamp((probability - 0.5) * 2.0) if pd.notna(probability) else 0.0
@@ -1012,7 +1068,7 @@ def master_decision(results, hist, kalshi=None):
 
     px = float(hist["close"].iloc[-1])
     atr = safe_float(hist["atr14"].iloc[-1], px * 0.002)
-    kctx = current_kalshi_context(kalshi or {}, px)
+    kctx = stable_kalshi_contract(kalshi or {}, px)
 
     forecast_move = max(atr * 1.25, px * 0.0012) * base_score
     projected_end = px + forecast_move
@@ -1421,70 +1477,135 @@ def candle_chart(hist, kalshi_target=np.nan):
         margin=dict(l=10, r=10, t=30, b=10),
         xaxis_rangeslider_visible=False,
         legend_orientation="h",
+        uirevision="btc-broader-market",
+        transition_duration=0,
     )
     apply_plotly_theme(fig)
     return fig
 
 
 def kalshi_15m_chart(hist, spot_price, kctx, projected_end=np.nan):
-    tail = hist.tail(16).copy()
+    """
+    AGGR-style Kalshi view:
+    - 1-minute BTC candles
+    - fixed Kalshi target for the current contract
+    - stable uirevision so refreshes do not reset the chart
+    - no rangeslider / minimal chrome
+    """
+    tail = hist.tail(32).copy()
+
+    # Keep only a useful window around the active 15-minute contract,
+    # while retaining a little context before it opened.
+    if kctx.get("close_time"):
+        try:
+            close_ts = pd.Timestamp(kctx["close_time"])
+            if close_ts.tzinfo is None:
+                close_ts = close_ts.tz_localize("UTC")
+            open_ts = close_ts - pd.Timedelta(minutes=15)
+            context_start = open_ts - pd.Timedelta(minutes=5)
+            filtered = tail[tail["time"] >= context_start]
+            if len(filtered) >= 6:
+                tail = filtered
+        except Exception:
+            pass
+
     fig = go.Figure()
 
     fig.add_trace(
-        go.Scatter(
+        go.Candlestick(
             x=tail["time"],
-            y=tail["close"],
-            mode="lines+markers",
-            name="BTC live proxy",
-            line=dict(width=4),
+            open=tail["open"],
+            high=tail["high"],
+            low=tail["low"],
+            close=tail["close"],
+            name="BTC 1m",
+            increasing_line_width=1.8,
+            decreasing_line_width=1.8,
+            increasing_fillcolor="#12b886",
+            increasing_line_color="#12b886",
+            decreasing_fillcolor="#fa5252",
+            decreasing_line_color="#fa5252",
+            whiskerwidth=0.35,
         )
     )
 
+    target = kctx.get("target", np.nan)
+    ticker = kctx.get("ticker", "KXBTC15M")
+
+    if pd.notna(target):
+        fig.add_hline(
+            y=target,
+            line_dash="solid",
+            line_width=4,
+            line_color="#ffd43b",
+            opacity=1.0,
+            annotation_text=f"KALSHI TARGET  ${target:,.2f}",
+            annotation_position="top left",
+            annotation_bgcolor="rgba(8,13,20,0.92)",
+            annotation_bordercolor="#ffd43b",
+            annotation_borderwidth=1,
+            annotation_font=dict(size=14, color="#fff3bf"),
+        )
+
+    # Current live BTC marker: updates without changing the target.
     now = pd.Timestamp.now(tz="UTC")
     fig.add_trace(
         go.Scatter(
             x=[now],
             y=[spot_price],
             mode="markers",
-            marker=dict(size=10),
+            marker=dict(size=8, symbol="circle"),
             name="BTC now",
+            hovertemplate="BTC now: $%{y:,.2f}<extra></extra>",
         )
     )
-
-    target = kctx.get("target", np.nan)
-    if pd.notna(target):
-        fig.add_hline(
-            y=target,
-            line_dash="solid",
-            line_width=5,
-            opacity=1.0,
-            annotation_text=f"KALSHI TARGET  ${target:,.2f}",
-            annotation_position="top left",
-            annotation_bgcolor="rgba(0,0,0,0.78)",
-            annotation_font=dict(size=15),
-        )
 
     if pd.notna(projected_end):
         fig.add_trace(
             go.Scatter(
                 x=[now],
                 y=[projected_end],
-                mode="markers+text",
-                text=["AI projected end"],
-                textposition="top center",
-                marker=dict(size=11, symbol="diamond"),
+                mode="markers",
+                marker=dict(size=9, symbol="diamond"),
                 name="AI projected end",
+                hovertemplate="AI projected end: $%{y:,.2f}<extra></extra>",
             )
         )
 
+    # Preserve zoom/pan and avoid a full visual reset every Streamlit refresh.
     fig.update_layout(
-        height=390,
-        margin=dict(l=10, r=10, t=30, b=10),
-        xaxis_title="Current 15-minute window",
-        yaxis_title="BTC price",
-        legend_orientation="h",
+        uirevision=f"kalshi-{ticker}",
+        height=430,
+        margin=dict(l=8, r=8, t=18, b=8),
+        xaxis_rangeslider_visible=False,
         hovermode="x unified",
+        dragmode="pan",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.01,
+            xanchor="left",
+            x=0,
+        ),
+        transition_duration=0,
     )
+
+    # AGGR-like minimal chart chrome.
+    fig.update_xaxes(
+        showgrid=False,
+        showline=False,
+        zeroline=False,
+        fixedrange=False,
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridwidth=1,
+        side="right",
+        fixedrange=False,
+        tickformat="$,.0f",
+    )
+
     apply_plotly_theme(fig)
     return fig
 
@@ -1747,7 +1868,7 @@ def live_dashboard():
     )
 
     with tab_market:
-        kctx = current_kalshi_context(kalshi, price)
+        kctx = stable_kalshi_contract(kalshi, price)
 
         st.subheader("Kalshi BTC 15-minute target tracker")
 
@@ -1778,6 +1899,12 @@ def live_dashboard():
                 ),
                 use_container_width=True,
                 key="kalshi_15m_live_chart",
+                config={
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                    "responsive": True,
+                    "doubleClick": "reset",
+                },
             )
 
             side_text = (
@@ -1814,9 +1941,11 @@ def live_dashboard():
 
             st.caption(
                 f"Live Kalshi market: {kctx['ticker']} • target comes "
-                "from Kalshi. The BTC line uses this app's Binance feed "
+                "from Kalshi. The candles use this app's Binance 1-minute feed "
                 "as a real-time proxy; official Kalshi settlement follows "
-                "Kalshi's stated reference methodology."
+                "Kalshi's stated reference methodology. "
+                "The target line stays fixed for this contract and changes only "
+                "when Kalshi rolls to the next 15-minute market."
             )
         else:
             st.warning(
@@ -1838,6 +1967,11 @@ def live_dashboard():
             ),
             use_container_width=True,
             key="btc_market_chart",
+            config={
+                "displaylogo": False,
+                "scrollZoom": True,
+                "responsive": True,
+            },
         )
 
         c1, c2, c3, c4 = st.columns(4)
@@ -1908,7 +2042,7 @@ def live_dashboard():
 
         st.divider()
         st.subheader("Kalshi — live BTC 15-minute market")
-        kctx = current_kalshi_context(kalshi, price)
+        kctx = stable_kalshi_contract(kalshi, price)
         if kctx["available"]:
             rr1, rr2, rr3, rr4 = st.columns(4)
             rr1.metric("Ticker", kctx["ticker"])
