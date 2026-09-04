@@ -4,6 +4,8 @@
     "avg_path_error": 0.0,
     "bias": -3.437120957119152e-05,
     "direction_hits": 2,
+    "kalshi_hits": 0,
+    "kalshi_samples": 0,
     "learning_rate": 0.08,
     "momentum_scale": 2.2,
     "samples": 3,
@@ -35,6 +37,7 @@
       "ticker": "KXBTC15M-26SEP040500-00"
     }
   ],
+  "official_pending": [],
   "pending": {
     "expires_at": 1788514200.0,
     "opened_at": 1788513342.3490345,
@@ -52,13 +55,13 @@
         "confidence": 0.48,
         "score": 0.0
       },
-      "Event AI": {
-        "confidence": 0.5440473234950066,
-        "score": 0.13343192394793055
-      },
       "Historical Pattern AI": {
         "confidence": 0.5099753615346532,
         "score": -0.06244866986386081
+      },
+      "Kalshi Context AI": {
+        "confidence": 0.5440473234950066,
+        "score": 0.13343192394793055
       },
       "Liquidity AI": {
         "confidence": 0.48,
@@ -142,26 +145,6 @@
         "ticker": "KXBTC15M-26SEP040500-00"
       }
     ],
-    "Event AI": [
-      {
-        "direction_correct": 1,
-        "expires_at": 1788510600.0,
-        "signed_edge": 0.17911993598468734,
-        "ticker": "KXBTC15M-26SEP040430-30"
-      },
-      {
-        "direction_correct": 1,
-        "expires_at": 1788511500.0,
-        "signed_edge": 0.022735106313630016,
-        "ticker": "KXBTC15M-26SEP040445-45"
-      },
-      {
-        "direction_correct": 0,
-        "expires_at": 1788512400.0,
-        "signed_edge": -0.09604209590303842,
-        "ticker": "KXBTC15M-26SEP040500-00"
-      }
-    ],
     "Historical Pattern AI": [
       {
         "direction_correct": 1,
@@ -179,6 +162,26 @@
         "direction_correct": 0,
         "expires_at": 1788512400.0,
         "signed_edge": -0.03494552061319307,
+        "ticker": "KXBTC15M-26SEP040500-00"
+      }
+    ],
+    "Kalshi Context AI": [
+      {
+        "direction_correct": 1,
+        "expires_at": 1788510600.0,
+        "signed_edge": 0.17911993598468734,
+        "ticker": "KXBTC15M-26SEP040430-30"
+      },
+      {
+        "direction_correct": 1,
+        "expires_at": 1788511500.0,
+        "signed_edge": 0.022735106313630016,
+        "ticker": "KXBTC15M-26SEP040445-45"
+      },
+      {
+        "direction_correct": 0,
+        "expires_at": 1788512400.0,
+        "signed_edge": -0.09604209590303842,
         "ticker": "KXBTC15M-26SEP040500-00"
       }
     ],
@@ -380,20 +383,20 @@
       "ewma_edge": 0.0,
       "samples": 3
     },
-    "Event AI": {
-      "adaptive_weight": 1.0265956539044536,
-      "direction_hits": 2,
-      "ewma_accuracy": 0.5355000000000001,
-      "ewma_calibration": 0.046756438012069246,
-      "ewma_edge": 0.006950664792682536,
-      "samples": 3
-    },
     "Historical Pattern AI": {
       "adaptive_weight": 0.9980451876585094,
       "direction_hits": 1,
       "ewma_accuracy": 0.44550000000000006,
       "ewma_calibration": -0.06574251087507453,
       "ewma_edge": -0.0006288862464090246,
+      "samples": 3
+    },
+    "Kalshi Context AI": {
+      "adaptive_weight": 1.0265956539044536,
+      "direction_hits": 2,
+      "ewma_accuracy": 0.5355000000000001,
+      "ewma_calibration": 0.046756438012069246,
+      "ewma_edge": 0.006950664792682536,
       "samples": 3
     },
     "Liquidity AI": {
@@ -472,13 +475,17 @@
   "status": {
     "active_target": 81090.19,
     "active_ticker": "KXBTC15M-26SEP040530-30",
-    "btc_price": 81118.1,
+    "btc_price": 81009.89,
     "forecast_samples": 3,
-    "graded_this_run": true,
+    "graded_this_run": false,
+    "kalshi_accuracy": null,
+    "kalshi_samples": 0,
     "last_graded_ticker": "KXBTC15M-26SEP040500-00",
-    "registered_this_run": true,
+    "official_results_resolved": 0,
+    "registered_this_run": false,
+    "shared_core": true,
     "worker_ok": true
   },
-  "updated_at": "2026-09-04T09:15:42.349040+00:00",
-  "version": 1
+  "updated_at": "2026-09-04T09:28:03.159096+00:00",
+  "version": 2
 }
