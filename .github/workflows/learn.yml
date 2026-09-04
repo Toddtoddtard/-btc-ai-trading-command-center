@@ -3,6 +3,8 @@ name: BTC AI 24x7 Learner
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - 'learner.py'
       - 'learner_v3.py'
@@ -59,6 +61,8 @@ jobs:
           assert 'wait_policy' in data
           assert 'validation' in data
           assert 'champion_challenger' in data
+          assert data.get('champion_challenger', {}).get('minimum_samples') == 20
+          assert data.get('champion_challenger', {}).get('required_streak') == 3
           assert 'prediction_snapshots' in data
           assert 'wait_counterfactual' in data
           print('learning-state v3.1 validation passed')
