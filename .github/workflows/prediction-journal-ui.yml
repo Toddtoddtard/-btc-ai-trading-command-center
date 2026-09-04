@@ -1,0 +1,41 @@
+name: Prediction Journal UI Upgrade
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_prediction_journal_ui.py'
+      - '.github/workflows/prediction-journal-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply journal UI patch
+        run: python tools/apply_prediction_journal_ui.py
+      - name: Compile
+        run: python -m py_compile app.py
+      - name: Verify
+        run: |
+          grep -q 'prediction-journal-wrap' app.py
+          grep -q 'journal-up' app.py
+          grep -q 'journal-down' app.py
+          grep -q 'r40-journal-dark-ui' app.py
+      - name: Commit patched app
+        run: |
+          if git diff --quiet -- app.py; then
+            echo 'No app.py changes needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Style prediction journal like AI Council'
+          git push origin main
