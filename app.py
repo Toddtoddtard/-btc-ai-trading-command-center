@@ -1906,7 +1906,9 @@ def log_prediction(
                 evidence_json,
                 features_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
             """,
             (
                 key,
@@ -1918,15 +1920,23 @@ def log_prediction(
                 float(probability),
                 float(expected_price),
                 float(disagreement),
-                json.dumps(scores),
-                json.dumps(evidence),
-                json.dumps(features),
+                json.dumps(
+                    scores,
+                    allow_nan=False,
+                ),
+                json.dumps(
+                    evidence,
+                    allow_nan=False,
+                ),
+                json.dumps(
+                    features,
+                    allow_nan=False,
+                ),
             ),
         )
 
         connection.commit()
         connection.close()
-
 
 def score_predictions(
     candles
