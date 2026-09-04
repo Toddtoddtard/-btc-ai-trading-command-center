@@ -6,6 +6,8 @@ on:
     paths:
       - 'learner.py'
       - 'learner_v3.py'
+      - 'learner_v31.py'
+      - 'reliability_v31.py'
       - 'ai_core.py'
       - '.github/workflows/learn.yml'
   schedule:
@@ -32,11 +34,11 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py ai_core.py
-      - name: Run BTC AI learner v3
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py
+      - name: Run BTC AI learner v3.1
         env:
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
-        run: python learner_v3.py
+        run: python learner_v31.py
       - name: Validate generated learning state
         run: |
           python - <<'PY'
@@ -44,22 +46,22 @@ jobs:
           from pathlib import Path
           p=Path('/tmp/learning_state.json')
           data=json.loads(p.read_text())
-          assert data.get('version') == 3
+          assert data.get('version') == 31
           assert data.get('status', {}).get('worker_ok') is True
           assert data.get('status', {}).get('shared_core') is True
-          assert data.get('status', {}).get('learning_version') == 3
+          assert data.get('status', {}).get('learning_version') == 31
+          assert data.get('status', {}).get('strict_expiry_grading') is True
           assert 'Kalshi Context AI' in data.get('specialists', {})
           assert 'Event AI' not in data.get('specialists', {})
-          assert 'avg_path_error' in data.get('forecast', {})
-          assert 'robust_abs_error' in data.get('forecast', {})
-          assert 'robust_path_error' in data.get('forecast', {})
-          assert 'kalshi_samples' in data.get('forecast', {})
           assert 'rolling' in data
           assert 'regimes' in data
           assert 'confidence_model' in data
           assert 'wait_policy' in data
           assert 'validation' in data
-          print('learning-state v3 validation passed')
+          assert 'champion_challenger' in data
+          assert 'prediction_snapshots' in data
+          assert 'wait_counterfactual' in data
+          print('learning-state v3.1 validation passed')
           PY
       - name: Publish learning state
         shell: bash
@@ -80,5 +82,5 @@ jobs:
             echo "No learning-state change to publish."
             exit 0
           fi
-          git commit -m "Update BTC AI learning state v3"
+          git commit -m "Update BTC AI learning state v3.1"
           git push origin learning-state --force-with-lease
