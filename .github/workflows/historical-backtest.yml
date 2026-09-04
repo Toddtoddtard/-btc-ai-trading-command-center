@@ -1,0 +1,75 @@
+name: BTC AI Five-Year Backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'historical_backtest.py'
+      - 'ai_core.py'
+      - '.github/workflows/historical-backtest.yml'
+  schedule:
+    - cron: "17 5 * * 0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: btc-ai-five-year-backtest
+  cancel-in-progress: true
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout app code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Validate backtest code
+        run: python -m py_compile historical_backtest.py ai_core.py
+      - name: Run five-year 1m walk-forward backtest
+        env:
+          HISTORICAL_BACKTEST_OUTPUT: /tmp/historical_backtest.json
+        run: python historical_backtest.py
+      - name: Validate report
+        run: |
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/historical_backtest.json'))
+          assert data.get('walk_forward') is True
+          assert data.get('production_parameters_changed') is False
+          assert data.get('evaluation_horizon_minutes') == 15
+          assert data.get('overall', {}).get('samples', 0) >= 10000
+          assert len(data.get('months_loaded', [])) >= 48
+          print('Five-year backtest validation passed:', data['overall'])
+          PY
+      - name: Publish historical report to private learning branch
+        shell: bash
+        run: |
+          set -e
+          git config user.name "btc-ai-learning-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin learning-state:refs/remotes/origin/learning-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
+            git checkout -B learning-state refs/remotes/origin/learning-state
+          else
+            git checkout --orphan learning-state
+            git rm -rf . || true
+          fi
+          cp /tmp/historical_backtest.json ./historical_backtest.json
+          git add historical_backtest.json
+          if git diff --cached --quiet; then
+            echo "No historical report change to publish."
+            exit 0
+          fi
+          git commit -m "Update five-year BTC historical backtest"
+          git push origin learning-state --force-with-lease
