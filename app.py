@@ -1683,7 +1683,23 @@ def init_database():
 
         connection = database()
 
-        connection.executescript(
+        # --------------------------------------------------------
+        # SQLite settings
+        # --------------------------------------------------------
+
+        connection.execute(
+            "PRAGMA journal_mode=WAL"
+        )
+
+        connection.execute(
+            "PRAGMA busy_timeout=10000"
+        )
+
+        # --------------------------------------------------------
+        # Original prediction table
+        # --------------------------------------------------------
+
+        connection.execute(
             """
             CREATE TABLE IF NOT EXISTS predictions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1693,6 +1709,7 @@ def init_database():
                 price REAL,
                 signal TEXT,
                 confidence REAL,
+                bullish_score REAL,
                 bullish_probability REAL,
                 expected_price REAL,
                 disagreement REAL,
@@ -1704,8 +1721,84 @@ def init_database():
                 error_pct REAL,
                 correct INTEGER,
                 scored_at TEXT
-            );
+            )
+            """
+        )
 
+        # --------------------------------------------------------
+        # SAFE MIGRATION FOR EXISTING DATABASES
+        # --------------------------------------------------------
+
+        existing_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(predictions)"
+            ).fetchall()
+        }
+
+        migrations = {
+            "bullish_probability":
+                "ALTER TABLE predictions ADD COLUMN bullish_probability REAL",
+
+            "error_pct":
+                "ALTER TABLE predictions ADD COLUMN error_pct REAL",
+
+            "features_json":
+                "ALTER TABLE predictions ADD COLUMN features_json TEXT",
+        }
+
+        for column, statement in migrations.items():
+
+            if column not in existing_columns:
+
+                connection.execute(
+                    statement
+                )
+
+        # --------------------------------------------------------
+        # Backfill probability from old bullish_score
+        # --------------------------------------------------------
+
+        columns_after_migration = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(predictions)"
+            ).fetchall()
+        }
+
+        if (
+            "bullish_score"
+            in columns_after_migration
+            and "bullish_probability"
+            in columns_after_migration
+        ):
+
+            connection.execute(
+                """
+                UPDATE predictions
+                SET bullish_probability =
+                    CASE
+                        WHEN bullish_probability IS NULL
+                        THEN
+                            MAX(
+                                0.01,
+                                MIN(
+                                    0.99,
+                                    bullish_score / 100.0
+                                )
+                            )
+                        ELSE bullish_probability
+                    END
+                WHERE bullish_score IS NOT NULL
+                """
+            )
+
+        # --------------------------------------------------------
+        # Paper trades
+        # --------------------------------------------------------
+
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS trades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 opened_at TEXT,
@@ -1719,69 +1812,45 @@ def init_database():
                 pnl REAL,
                 return_pct REAL,
                 reason TEXT
-            );
+            )
+            """
+        )
 
+        # --------------------------------------------------------
+        # Learner versions
+        # --------------------------------------------------------
+
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS learner_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT,
                 version TEXT,
                 weights_json TEXT,
                 reason TEXT
-            );
+            )
+            """
+        )
 
+        # --------------------------------------------------------
+        # System events
+        # --------------------------------------------------------
+
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT,
                 level TEXT,
                 source TEXT,
                 message TEXT
-            );
+            )
             """
         )
 
         connection.commit()
+
         connection.close()
-
-
-def log_event(
-    level,
-    source,
-    message,
-):
-
-    try:
-
-        with DB_LOCK:
-
-            connection = database()
-
-            connection.execute(
-                """
-                INSERT INTO events
-                (
-                    created_at,
-                    level,
-                    source,
-                    message
-                )
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    datetime.now(
-                        timezone.utc
-                    ).isoformat(),
-                    level,
-                    source,
-                    message,
-                ),
-            )
-
-            connection.commit()
-            connection.close()
-
-    except Exception:
-        pass
-
 
 # ================================================================
 # PREDICTION JOURNAL
