@@ -64,3 +64,4 @@ if old_caption in s:
 compile(s, 'app.py', 'exec')
 p.write_text(s)
 print('R29 audit fixes applied: shared AI core, accurate Kalshi Context naming, official settlement stats.')
+# trigger workflow after workflow file exists
