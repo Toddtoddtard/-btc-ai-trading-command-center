@@ -26,11 +26,11 @@ MARKETS = {
         "page": "pages/ZEC_Command_Center.py",
         "accent": "#ffd43b",
     },
-    "eth": {
-        "label": "◆ ETH",
-        "title": "ETH AI Trading Command Center",
-        "page": "pages/ETH_Command_Center.py",
-        "accent": "#8d9eff",
+    "wti": {
+        "label": "🛢 WTI OIL",
+        "title": "WTI Oil AI Trading Command Center",
+        "page": "pages/WTI_Oil_Command_Center.py",
+        "accent": "#ff922b",
     },
 }
 
@@ -88,6 +88,6 @@ def render_market_nav(active="btc"):
                     st.switch_page(cfg["page"])
 
     st.markdown(
-        '<div class="market-switcher-note">Bitcoin is live now. The other command centers are UI shells first; their market feeds and specialist AIs will be integrated separately.</div>',
+        '<div class="market-switcher-note">Bitcoin is live now. Gold, gas prices and WTI will use Kalshi market context when their integrations are added. ZEC remains UI-only until a real Kalshi ZEC market exists.</div>',
         unsafe_allow_html=True,
     )
