@@ -1,0 +1,12 @@
+from pathlib import Path
+
+p=Path('app.py')
+s=p.read_text()
+old='''    should_replace = (\n        cached is None\n        or pd.isna(cached.get("target", np.nan))\n        or cache_expired(cached)\n    )\n\n    if live.get("available") and should_replace:\n        cached = {\n            "available": True,\n            "ticker": live.get("ticker", ""),\n            "title": live.get("title", "BTC 15 min"),\n            "target": live.get("target", np.nan),\n            "close_time": live.get("close_time"),\n            "market": live.get("market"),\n        }\n        st.session_state["kalshi_contract_snapshot"] = cached\n'''
+new='''    live_ticker = str(live.get("ticker") or "")\n    cached_ticker = str((cached or {}).get("ticker") or "")\n    should_replace = (\n        cached is None\n        or pd.isna(cached.get("target", np.nan))\n        or cache_expired(cached)\n        or (live.get("available") and live_ticker and live_ticker != cached_ticker)\n    )\n\n    if live.get("available") and should_replace:\n        cached = {\n            "available": True,\n            "ticker": live_ticker,\n            "title": live.get("title", "BTC 15 min"),\n            "target": live.get("target", np.nan),\n            "close_time": live.get("close_time"),\n            "market": live.get("market"),\n        }\n        st.session_state["kalshi_contract_snapshot"] = cached\n    elif live.get("available") and cached and live_ticker == cached_ticker:\n        # Keep the same contract fresh. Kalshi can publish/update the explicit\n        # Target Price shortly after the market shell appears; never preserve a\n        # stale target just because the ticker itself has not changed.\n        live_target = safe_float(live.get("target"))\n        if pd.notna(live_target) and live_target > 0:\n            cached["target"] = float(live_target)\n        if live.get("close_time"):\n            cached["close_time"] = live.get("close_time")\n        if live.get("market"):\n            cached["market"] = live.get("market")\n        cached["title"] = live.get("title", cached.get("title", "BTC 15 min"))\n        st.session_state["kalshi_contract_snapshot"] = cached\n'''
+if old not in s:
+    raise SystemExit('stable Kalshi cache anchor not found')
+s=s.replace(old,new,1)
+compile(s,'app.py','exec')
+p.write_text(s)
+print('Kalshi stable contract cache now follows ticker changes and target updates.')
