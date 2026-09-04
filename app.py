@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r9-aggr-candles-smooth"
+APP_VERSION = "2026.09.04-single-file-r10-lock-scalp-semantics"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -502,7 +502,7 @@ def manage_auto_paper(decision, risk, price, hist):
 
         exit_reason = None
 
-        if decision["action"] == "LOCK":
+        if decision["action"] in {"LOCK UP", "LOCK DOWN"}:
             if (
                 pd.notna(decision.get("seconds_remaining"))
                 and decision["seconds_remaining"] <= 0
@@ -1070,65 +1070,113 @@ def master_decision(results, hist, kalshi=None):
     atr = safe_float(hist["atr14"].iloc[-1], px * 0.002)
     kctx = stable_kalshi_contract(kalshi or {}, px)
 
-    forecast_move = max(atr * 1.25, px * 0.0012) * base_score
+    # Expected short-term move from the specialist council.
+    forecast_move = max(atr * 1.35, px * 0.00125) * base_score
     projected_end = px + forecast_move
 
     target = kctx["target"]
     remaining = kctx["seconds_remaining"]
-    market_prob = kctx["up_probability"]
+    up_prob = kctx["up_probability"]
+    down_prob = (1.0 - up_prob) if pd.notna(up_prob) else np.nan
 
     if kctx["available"] and pd.notna(target):
+        # Core settlement question: finish above or below the Kalshi target.
         projected_edge = projected_end - target
-        target_scale = max(atr * 0.8, px * 0.0008)
-        target_score = clamp(projected_edge / target_scale)
-        current_edge_score = clamp(
-            (px - target) / max(atr * 0.65, px * 0.0006)
-        )
+        current_edge = px - target
+
+        target_scale = max(atr * 0.80, px * 0.0008)
+        projected_target_score = clamp(projected_edge / target_scale)
+        current_target_score = clamp(current_edge / max(atr * 0.65, px * 0.0006))
+
         market_score = (
-            clamp((market_prob - 0.5) * 2.0)
-            if pd.notna(market_prob) else 0.0
+            clamp((up_prob - 0.5) * 2.0)
+            if pd.notna(up_prob) else 0.0
         )
 
         score = clamp(
-            0.50 * base_score
-            + 0.28 * target_score
-            + 0.14 * current_edge_score
+            0.48 * base_score
+            + 0.30 * projected_target_score
+            + 0.14 * current_target_score
             + 0.08 * market_score
         )
 
+        raw_side = "UP" if projected_end >= target else "DOWN"
+
         distance_strength = min(
-            1.0, abs(projected_edge) / max(target_scale, 1.0)
+            1.0,
+            abs(projected_edge) / max(target_scale, 1.0),
         )
+
         confidence = min(
             0.97,
             max(
                 0.45,
                 0.49
-                + abs(score) * 0.29
-                + consensus * 0.12
+                + abs(score) * 0.28
+                + consensus * 0.13
                 + distance_strength * 0.10,
             ),
         )
 
-        raw_side = "UP" if projected_end >= target else "DOWN"
-
-        lock_now = (
-            (confidence >= 0.72 and abs(score) >= 0.28)
-            or (
-                pd.notna(remaining)
-                and remaining <= 240
-                and confidence >= 0.66
-                and abs(score) >= 0.18
+        # -----------------------------------------------------------
+        # LOCK semantics
+        # LOCK UP   = expected to FINISH ABOVE the Kalshi target.
+        # LOCK DOWN = expected to FINISH BELOW the Kalshi target.
+        # -----------------------------------------------------------
+        lock_up = (
+            raw_side == "UP"
+            and confidence >= 0.68
+            and projected_edge >= max(atr * 0.35, px * 0.00035)
+            and (
+                (pd.notna(remaining) and remaining <= 300)
+                or abs(score) >= 0.30
             )
         )
 
-        # Persistent LOCK state for the current Kalshi contract.
-        # Once locked, the side cannot flip on later fragment refreshes.
+        lock_down = (
+            raw_side == "DOWN"
+            and confidence >= 0.68
+            and projected_edge <= -max(atr * 0.35, px * 0.00035)
+            and (
+                (pd.notna(remaining) and remaining <= 300)
+                or abs(score) >= 0.30
+            )
+        )
+
+        # -----------------------------------------------------------
+        # SCALP semantics
+        # Requires BOTH:
+        # 1) a strong expected move before expiry
+        # 2) Kalshi side price still favorable enough for paper-profit
+        #
+        # A lower probability means cheaper contracts and more upside,
+        # but we avoid extremely low-probability lottery-style entries.
+        # -----------------------------------------------------------
+        strong_move_up = (
+            base_score >= 0.30
+            and forecast_move >= max(atr * 0.50, px * 0.0007)
+            and consensus >= 0.30
+        )
+        strong_move_down = (
+            base_score <= -0.30
+            and forecast_move <= -max(atr * 0.50, px * 0.0007)
+            and consensus >= 0.30
+        )
+
+        up_price_favorable = (
+            pd.notna(up_prob)
+            and 0.18 <= up_prob <= 0.72
+        )
+        down_price_favorable = (
+            pd.notna(down_prob)
+            and 0.18 <= down_prob <= 0.72
+        )
+
+        # Persistent lock state for the current Kalshi contract.
         lock_ticker = st.session_state.get("kalshi_lock_ticker", "")
         lock_side = st.session_state.get("kalshi_lock_side")
         current_ticker = kctx.get("ticker", "")
 
-        # New contract or expired contract clears the previous lock.
         if lock_ticker and (
             lock_ticker != current_ticker
             or (pd.notna(remaining) and remaining <= 0)
@@ -1139,26 +1187,42 @@ def master_decision(results, hist, kalshi=None):
             lock_side = None
 
         if lock_ticker == current_ticker and lock_side in {"UP", "DOWN"}:
-            action = "LOCK"
+            action = f"LOCK {lock_side}"
             locked_side = lock_side
-        elif lock_now:
+
+        elif lock_up:
             st.session_state["kalshi_lock_ticker"] = current_ticker
-            st.session_state["kalshi_lock_side"] = raw_side
-            action = "LOCK"
-            locked_side = raw_side
-        elif score >= 0.13 and confidence >= 0.57:
+            st.session_state["kalshi_lock_side"] = "UP"
+            action = "LOCK UP"
+            locked_side = "UP"
+
+        elif lock_down:
+            st.session_state["kalshi_lock_ticker"] = current_ticker
+            st.session_state["kalshi_lock_side"] = "DOWN"
+            action = "LOCK DOWN"
+            locked_side = "DOWN"
+
+        elif strong_move_up and up_price_favorable and confidence >= 0.58:
             action = "SCALP UP"
             locked_side = None
-        elif score <= -0.13 and confidence >= 0.57:
+
+        elif strong_move_down and down_price_favorable and confidence >= 0.58:
             action = "SCALP DOWN"
             locked_side = None
+
         else:
             action = "HOLD"
             locked_side = None
 
         target_price = target
-        prediction_label = f"{raw_side} @ settlement"
+        prediction_label = (
+            f"Finish ABOVE ${target:,.2f}"
+            if raw_side == "UP"
+            else f"Finish BELOW ${target:,.2f}"
+        )
+
     else:
+        # Fallback if Kalshi is temporarily unavailable.
         score = base_score
         confidence = min(
             0.97,
@@ -1167,10 +1231,12 @@ def master_decision(results, hist, kalshi=None):
         projected_end = px + forecast_move
         target_price = projected_end
         locked_side = None
+        up_prob = np.nan
+        down_prob = np.nan
 
-        if score >= 0.16 and confidence >= 0.58:
+        if base_score >= 0.32 and confidence >= 0.60:
             action = "SCALP UP"
-        elif score <= -0.16 and confidence >= 0.58:
+        elif base_score <= -0.32 and confidence >= 0.60:
             action = "SCALP DOWN"
         else:
             action = "HOLD"
@@ -1199,8 +1265,16 @@ def master_decision(results, hist, kalshi=None):
     ]
 
     if kctx["available"]:
+        odds_text = ""
+        if pd.notna(up_prob):
+            odds_text = (
+                f"; Kalshi UP {up_prob*100:.1f}% / "
+                f"DOWN {down_prob*100:.1f}%"
+            )
+
         reason_parts.append(
-            f"Kalshi target ${target:,.2f}; projected settlement ${projected_end:,.2f}"
+            f"Target ${target:,.2f}; projected end ${projected_end:,.2f}"
+            + odds_text
         )
 
     return {
@@ -1217,7 +1291,8 @@ def master_decision(results, hist, kalshi=None):
         "reason": " • ".join(reason_parts),
         "kalshi_ticker": kctx.get("ticker", ""),
         "seconds_remaining": remaining,
-        "up_probability": market_prob,
+        "up_probability": up_prob,
+        "down_probability": down_prob,
         "kalshi_available": kctx["available"],
     }
 
@@ -1228,8 +1303,8 @@ def risk_evaluate(decision, account, hist, futures):
     confidence = decision["confidence"]
     consensus = decision["consensus"]
 
-    if decision["action"] in {"HOLD", "LOCK"}:
-        reason = "LOCK: hold current Kalshi call to expiration" if decision["action"] == "LOCK" else "HOLD signal"
+    if decision["action"] in {"HOLD", "LOCK UP", "LOCK DOWN"}:
+        reason = "LOCK: hold current Kalshi call to expiration" if decision["action"].startswith("LOCK") else "HOLD signal"
         return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": reason}
     if confidence < 0.62:
         return {"approved": False, "position_pct": 0.0, "risk_score": 0.9, "reason": "Confidence below 62%"}
@@ -1309,8 +1384,18 @@ def resolve_predictions(current_price):
                     if pd.notna(strike)
                     else int(current_price < start_price)
                 )
-            elif action == "LOCK":
-                correct = None
+            elif action == "LOCK UP":
+                correct = (
+                    int(current_price >= strike)
+                    if pd.notna(strike)
+                    else int(current_price > start_price)
+                )
+            elif action == "LOCK DOWN":
+                correct = (
+                    int(current_price < strike)
+                    if pd.notna(strike)
+                    else int(current_price < start_price)
+                )
             else:
                 correct = int(abs(ret) < 0.15)
             conn.execute(
@@ -1617,7 +1702,7 @@ init_db()
 
 st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
-st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute target engine • SCALP UP / SCALP DOWN / LOCK • specialist council • paper-only")
+st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute target engine • SCALP UP / SCALP DOWN / LOCK UP / LOCK DOWN • specialist council • paper-only")
 
 # ============================================================
 # SIDEBAR
@@ -1879,17 +1964,25 @@ def live_dashboard():
             )
             minutes, seconds = divmod(max(0, rem), 60)
 
-            k1, k2, k3, k4, k5 = st.columns(5)
+            k1, k2, k3, k4, k5, k6 = st.columns(6)
             k1.metric("Kalshi target", fmt_money(kctx["target"]))
             k2.metric("BTC now", fmt_money(price))
             k3.metric("Vs target", f"${kctx['distance']:+,.2f}")
             k4.metric("Time left", f"{minutes:02d}:{seconds:02d}")
             k5.metric(
-                "Kalshi UP odds",
+                "UP price",
                 (
                     "N/A"
                     if pd.isna(kctx["up_probability"])
                     else f"{kctx['up_probability']*100:.1f}%"
+                ),
+            )
+            k6.metric(
+                "DOWN price",
+                (
+                    "N/A"
+                    if pd.isna(kctx["up_probability"])
+                    else f"{(1.0-kctx['up_probability'])*100:.1f}%"
                 ),
             )
 
@@ -1908,12 +2001,10 @@ def live_dashboard():
             )
 
             side_text = (
-                decision["locked_side"]
-                if decision["action"] == "LOCK"
-                else "UP"
-                if decision["action"] == "SCALP UP"
+                "UP"
+                if decision["action"] in {"SCALP UP", "LOCK UP"}
                 else "DOWN"
-                if decision["action"] == "SCALP DOWN"
+                if decision["action"] in {"SCALP DOWN", "LOCK DOWN"}
                 else "WAIT"
             )
 
@@ -1931,7 +2022,7 @@ def live_dashboard():
                 st.success("SCALP UP → paper signal is to BUY UP.")
             elif decision["action"] == "SCALP DOWN":
                 st.error("SCALP DOWN → paper signal is to BUY DOWN.")
-            elif decision["action"] == "LOCK":
+            elif decision["action"] in {"LOCK UP", "LOCK DOWN"}:
                 st.warning(
                     f"LOCK {decision['locked_side']} → hold this call "
                     "to the end of the current Kalshi 15-minute market."
@@ -1995,7 +2086,7 @@ def live_dashboard():
         d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
         d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
         d5.metric("Risk level", decision["risk_level"])
-        if decision["action"] == "LOCK":
+        if decision["action"] in {"LOCK UP", "LOCK DOWN"}:
             st.warning(
                 f"LOCKED SIDE: {decision['locked_side']} — "
                 "hold call until Kalshi market expiration."
@@ -2049,11 +2140,14 @@ def live_dashboard():
             rr2.metric("Target", fmt_money(kctx["target"]))
             rr3.metric("BTC vs target", f"${kctx['distance']:+,.2f}")
             rr4.metric(
-                "UP odds",
+                "UP / DOWN",
                 (
                     "N/A"
                     if pd.isna(kctx["up_probability"])
-                    else f"{kctx['up_probability']*100:.1f}%"
+                    else (
+                        f"{kctx['up_probability']*100:.1f}% / "
+                        f"{(1.0-kctx['up_probability'])*100:.1f}%"
+                    )
                 ),
             )
         st.caption(
