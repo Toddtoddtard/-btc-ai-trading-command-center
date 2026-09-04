@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r4-smooth-refresh"
+APP_VERSION = "2026.09.04-single-file-r5-no-dim-refresh"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -67,6 +67,22 @@ st.markdown(
     .paper-banner {
         padding: 0.7rem 1rem; border: 1px solid rgba(255,255,255,.15);
         border-radius: 10px; margin-bottom: 0.8rem; font-weight: 700;
+    }
+
+    /* Prevent Streamlit's "stale" rerun state from dimming live numbers.
+       Old values stay fully visible until the new values replace them. */
+    [data-stale="true"],
+    [data-stale="true"] *,
+    .element-container,
+    [data-testid="element-container"],
+    [data-testid="stMetric"],
+    [data-testid="stMetricValue"],
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricDelta"] {
+        opacity: 1 !important;
+        filter: none !important;
+        transition: none !important;
+        animation: none !important;
     }
     </style>
     """,
