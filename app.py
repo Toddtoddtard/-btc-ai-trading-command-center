@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r20-friendly-ai-council"
+APP_VERSION = "2026.09.04-single-file-r21-dark-council-table"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -4468,7 +4468,47 @@ def live_dashboard():
                 "Weight": SPECIALIST_WEIGHTS.get(r["name"], 1.0),
                 "Reason": r["reason"],
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        council_df = pd.DataFrame(rows)
+        if dark_mode:
+            # Streamlit's native dataframe canvas stays light even when our custom
+            # dashboard dark-mode toggle is enabled, so render the council table
+            # as a responsive HTML table in dark mode. Light mode keeps the native table.
+            table_html = council_df.to_html(index=False, border=0, classes="ai-council-table")
+            st.markdown(
+                """
+                <style>
+                .ai-council-wrap {
+                    width: 100%; overflow-x: auto; border: 1px solid #263447;
+                    border-radius: 12px; background: #0b1220;
+                }
+                .ai-council-table {
+                    width: 100%; border-collapse: collapse; color: #e8eef8;
+                    background: #0b1220; font-size: 0.93rem; margin: 0;
+                }
+                .ai-council-table thead th {
+                    position: sticky; top: 0; z-index: 1; text-align: left;
+                    color: #b8cff7; background: #111c2e; font-weight: 700;
+                    border-bottom: 1px solid #2b3b52; padding: 10px 12px;
+                    white-space: nowrap;
+                }
+                .ai-council-table tbody td {
+                    color: #e7edf7; background: #0b1220;
+                    border-bottom: 1px solid #1e2b3d; padding: 9px 12px;
+                    vertical-align: middle; white-space: nowrap;
+                }
+                .ai-council-table tbody tr:nth-child(even) td {background: #0f1828;}
+                .ai-council-table tbody tr:hover td {background: #15243a;}
+                .ai-council-table td:last-child {white-space: normal; min-width: 260px;}
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="ai-council-wrap">{table_html}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.dataframe(council_df, use_container_width=True, hide_index=True)
 
     with tab_hourly:
         st.subheader("Hourly Kalshi BTC Target AI")
