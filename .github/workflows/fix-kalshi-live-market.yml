@@ -24,14 +24,14 @@ jobs:
         run: python -m py_compile app.py learner.py ai_core.py
       - name: Verify market selection logic
         run: |
-          grep -q 'choose the active contract from ticker + close time FIRST' app.py
-          grep -q 'KXBTC15M rows found but no future close_time' app.py
-          grep -q 'exact = payload\["market"\]' learner.py
+          grep -q 'Find the active KXBTC15M contract first' app.py
+          grep -q 'fetch_exact_kalshi_market' app.py
+          grep -q 'KXBTC15M-' app.py
       - name: Commit repair
         run: |
           git config user.name "btc-ai-fix-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add app.py learner.py
+          git add app.py
           git diff --cached --quiet || git commit -m "Fix active Kalshi 15m market selection"
           for i in 1 2 3; do
             git fetch origin main
