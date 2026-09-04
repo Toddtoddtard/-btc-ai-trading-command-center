@@ -1,0 +1,49 @@
+name: Apply R31 Fix Kalshi Timer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'apply_r31_fix_kalshi_timer.py'
+      - '.github/workflows/apply-r31-fix-kalshi-timer.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply timer reliability fix
+        run: python apply_r31_fix_kalshi_timer.py
+      - name: Compile app
+        run: python -m py_compile app.py
+      - name: Verify timer is server seeded
+        run: |
+          grep -q '_timer_close_ms' app.py
+          grep -q "Number('__CLOSE_MS__')" app.py
+          grep -q 'rollWindowIfNeeded' app.py
+      - name: Commit app safely
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes needed."
+            exit 0
+          fi
+          git config user.name "btc-ai-ui-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py
+          git commit -m "Fix Kalshi sidebar countdown reliability"
+          for i in 1 2 3; do
+            git fetch origin main
+            git rebase origin/main && git push origin HEAD:main && exit 0
+            git rebase --abort || true
+            sleep 2
+          done
+          exit 1
