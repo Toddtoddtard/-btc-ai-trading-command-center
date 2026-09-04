@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r25-unified-council-style"
+APP_VERSION = "2026.09.04-single-file-r28-aligned-direction-metrics"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -107,7 +107,34 @@ st.markdown(
     .direction-card .direction-call {
         min-width:150px; padding:10px 18px; font-size:1.08rem;
     }
-    .direction-card.verdict-card {
+    
+    .direction-card.metric-direction-card {
+        min-height:92px;
+        padding:.72rem 1rem;
+        flex-direction:column;
+        align-items:flex-start;
+        justify-content:flex-start;
+        gap:.48rem;
+    }
+    .direction-card-label {
+        color:#9fb2ce;
+        font-size:.90rem;
+        line-height:1.15;
+        font-weight:500;
+    }
+    .direction-card-value {
+        width:100%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        flex:1;
+    }
+    .direction-card.metric-direction-card .direction-call {
+        min-width:min(150px, 100%);
+        max-width:100%;
+        box-sizing:border-box;
+    }
+.direction-card.verdict-card {
         width:min(100%, 330px); min-height:82px; justify-content:flex-start;
     }
     .direction-card.verdict-card .direction-call {min-width:165px;}
@@ -4474,9 +4501,8 @@ def live_dashboard():
     m1.metric("BTC", fmt_money(price))
     m2.metric("24h", fmt_pct(ticker.get("change_24h")))
     with m3:
-        st.caption("Master")
         st.markdown(
-            f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+            f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Master</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
             unsafe_allow_html=True,
         )
     m4.metric("Confidence", f"{decision['confidence']*100:.1f}%")
@@ -4554,9 +4580,8 @@ def live_dashboard():
 
             call1, call2, call3, call4 = st.columns(4)
             with call1:
-                st.caption("CALL")
                 st.markdown(
-                    f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+                    f'<div class="direction-card metric-direction-card"><div class="direction-card-label">CALL</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
                     unsafe_allow_html=True,
                 )
             call2.metric("Side", side_text)
@@ -4632,9 +4657,8 @@ def live_dashboard():
         st.subheader("Master Kalshi 15-minute Prediction AI")
         d1, d2, d3, d4, d5 = st.columns(5)
         with d1:
-            st.caption("Call")
             st.markdown(
-                f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+                f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Call</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
                 unsafe_allow_html=True,
             )
         d2.metric("Master score", f"{decision['score']:+.3f}")
@@ -4808,9 +4832,8 @@ def live_dashboard():
             f"{hourly_ai['projected_move_pct']*100:+.3f}%",
         )
         with h3:
-            st.caption("Direction")
             st.markdown(
-                f'<div class="direction-card">{directional_badge_html(hourly_ai["direction"])}</div>',
+                f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Direction</div><div class="direction-card-value">{directional_badge_html(hourly_ai["direction"])}</div></div>',
                 unsafe_allow_html=True,
             )
         h4.metric(
