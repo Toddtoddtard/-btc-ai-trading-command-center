@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r16-all-bots-self-learning"
+APP_VERSION = "2026.09.04-single-file-r17-learning-accuracy-windows"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -2530,6 +2530,209 @@ def specialist_learning_dataframe():
     return pd.DataFrame(rows)
 
 
+
+# ============================================================
+# ROLLING LEARNING ACCURACY
+# ============================================================
+
+def rolling_master_accuracy(window):
+    conn = learning_db()
+
+    df = pd.read_sql_query("""
+        SELECT
+            direction_correct,
+            abs_error,
+            path_error,
+            expires_at
+        FROM forecast_windows
+        WHERE resolved = 1
+        ORDER BY expires_at DESC
+        LIMIT ?
+    """, conn, params=(int(window),))
+
+    conn.close()
+
+    if df.empty:
+        return {
+            "samples": 0,
+            "accuracy": np.nan,
+            "avg_abs_error": np.nan,
+            "avg_path_error": np.nan,
+        }
+
+    df["direction_correct"] = pd.to_numeric(
+        df["direction_correct"],
+        errors="coerce",
+    )
+
+    df["abs_error"] = pd.to_numeric(
+        df["abs_error"],
+        errors="coerce",
+    )
+
+    df["path_error"] = pd.to_numeric(
+        df["path_error"],
+        errors="coerce",
+    )
+
+    valid = df["direction_correct"].dropna()
+
+    return {
+        "samples": int(len(valid)),
+        "accuracy": float(valid.mean()) if len(valid) else np.nan,
+        "avg_abs_error": float(df["abs_error"].mean()),
+        "avg_path_error": float(df["path_error"].mean()),
+    }
+
+
+def rolling_master_accuracy_table():
+    rows = []
+
+    for window in (100, 500, 1000):
+        stats = rolling_master_accuracy(window)
+
+        rows.append({
+            "Window": f"Last {window}",
+            "Samples": stats["samples"],
+            "Direction Accuracy %": (
+                np.nan
+                if pd.isna(stats["accuracy"])
+                else stats["accuracy"] * 100.0
+            ),
+            "Avg Final Error $": stats["avg_abs_error"],
+            "Avg Path Error $": stats["avg_path_error"],
+        })
+
+    return pd.DataFrame(rows)
+
+
+def rolling_specialist_accuracy(window):
+    conn = specialist_learning_db()
+
+    df = pd.read_sql_query("""
+        SELECT
+            specialist,
+            direction_correct,
+            signed_edge,
+            resolved_at
+        FROM specialist_window_predictions
+        WHERE resolved = 1
+        ORDER BY resolved_at DESC
+    """, conn)
+
+    conn.close()
+
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "Specialist",
+                "Samples",
+                "Accuracy %",
+                "Avg Signed Edge",
+            ]
+        )
+
+    df["direction_correct"] = pd.to_numeric(
+        df["direction_correct"],
+        errors="coerce",
+    )
+
+    df["signed_edge"] = pd.to_numeric(
+        df["signed_edge"],
+        errors="coerce",
+    )
+
+    out = []
+
+    for specialist, group in df.groupby("specialist"):
+        g = group.head(int(window)).copy()
+        valid = g["direction_correct"].dropna()
+
+        out.append({
+            "Specialist": specialist,
+            "Samples": int(len(valid)),
+            "Accuracy %": (
+                np.nan
+                if len(valid) == 0
+                else float(valid.mean() * 100.0)
+            ),
+            "Avg Signed Edge": float(
+                g["signed_edge"].mean()
+            ) if len(g) else np.nan,
+        })
+
+    return pd.DataFrame(out)
+
+
+def specialist_multiwindow_accuracy():
+    merged = None
+
+    for window in (100, 500, 1000):
+        df = rolling_specialist_accuracy(window)
+
+        rename = {
+            "Samples": f"N{window}",
+            "Accuracy %": f"Acc {window} %",
+            "Avg Signed Edge": f"Edge {window}",
+        }
+
+        df = df.rename(columns=rename)
+
+        cols = [
+            "Specialist",
+            f"N{window}",
+            f"Acc {window} %",
+            f"Edge {window}",
+        ]
+
+        df = df[cols]
+
+        merged = (
+            df if merged is None
+            else merged.merge(
+                df,
+                on="Specialist",
+                how="outer",
+            )
+        )
+
+    return (
+        merged
+        if merged is not None
+        else pd.DataFrame()
+    )
+
+
+def learning_trend_label(short_acc, long_acc):
+    if pd.isna(short_acc) or pd.isna(long_acc):
+        return "Not enough data"
+
+    diff = float(short_acc) - float(long_acc)
+
+    if diff >= 5.0:
+        return "Improving ↑"
+    if diff <= -5.0:
+        return "Slipping ↓"
+    return "Stable →"
+
+
+def add_specialist_learning_trends(df):
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+
+    out["Trend"] = out.apply(
+        lambda r: learning_trend_label(
+            r.get("Acc 100 %"),
+            r.get("Acc 1000 %"),
+        ),
+        axis=1,
+    )
+
+    return out
+
+
 # ============================================================
 # PREDICTION JOURNAL
 # ============================================================
@@ -2905,7 +3108,7 @@ init_db()
 
 st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
-st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine + separate Hourly Target AI • every specialist adapts after completed windows • paper-only")
+st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine • rolling 100/500/1000-window accuracy • every specialist adapts after completed windows • paper-only")
 
 # ============================================================
 # SIDEBAR
@@ -4332,6 +4535,33 @@ def live_dashboard():
         l3.metric("Avg final error", f"${learn['avg_abs_error']:,.2f}")
         l4.metric("Avg path error", f"${learn['avg_path_error']:,.2f}")
 
+        _quick100 = rolling_master_accuracy(100)
+        _quick500 = rolling_master_accuracy(500)
+        _quick1000 = rolling_master_accuracy(1000)
+
+        q1, q2, q3 = st.columns(3)
+
+        q1.metric(
+            "Last 100 accuracy",
+            "N/A"
+            if pd.isna(_quick100["accuracy"])
+            else f"{_quick100['accuracy']*100:.1f}%"
+        )
+
+        q2.metric(
+            "Last 500 accuracy",
+            "N/A"
+            if pd.isna(_quick500["accuracy"])
+            else f"{_quick500['accuracy']*100:.1f}%"
+        )
+
+        q3.metric(
+            "Last 1,000 accuracy",
+            "N/A"
+            if pd.isna(_quick1000["accuracy"])
+            else f"{_quick1000['accuracy']*100:.1f}%"
+        )
+
         st.caption(
             "After each completed 15-minute Kalshi window, the model grades "
             "its forecast and adjusts its momentum weights, move scale, "
@@ -4353,6 +4583,85 @@ def live_dashboard():
             "with stronger recent accuracy, edge, and confidence calibration, "
             "and reduces the influence of weaker ones."
         )
+
+        st.divider()
+        st.subheader("Rolling Master Accuracy")
+
+        rolling_master_df = rolling_master_accuracy_table()
+
+        for col in [
+            "Direction Accuracy %",
+            "Avg Final Error $",
+            "Avg Path Error $",
+        ]:
+            rolling_master_df[col] = pd.to_numeric(
+                rolling_master_df[col],
+                errors="coerce",
+            ).round(2)
+
+        st.dataframe(
+            rolling_master_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        _m100 = rolling_master_accuracy(100)
+        _m1000 = rolling_master_accuracy(1000)
+
+        _m100_acc = (
+            np.nan
+            if pd.isna(_m100["accuracy"])
+            else _m100["accuracy"] * 100.0
+        )
+
+        _m1000_acc = (
+            np.nan
+            if pd.isna(_m1000["accuracy"])
+            else _m1000["accuracy"] * 100.0
+        )
+
+        st.caption(
+            "Master learning trend: "
+            + learning_trend_label(
+                _m100_acc,
+                _m1000_acc,
+            )
+            + " — compares the most recent 100 completed windows "
+              "with the broader 1,000-window baseline."
+        )
+
+        specialist_multi = add_specialist_learning_trends(
+            specialist_multiwindow_accuracy()
+        )
+
+        if not specialist_multi.empty:
+            for col in [
+                "Acc 100 %",
+                "Acc 500 %",
+                "Acc 1000 %",
+                "Edge 100",
+                "Edge 500",
+                "Edge 1000",
+            ]:
+                if col in specialist_multi.columns:
+                    specialist_multi[col] = pd.to_numeric(
+                        specialist_multi[col],
+                        errors="coerce",
+                    ).round(2)
+
+            st.subheader("Specialist Rolling Accuracy")
+
+            st.caption(
+                "This view makes it easy to see which bots are improving, "
+                "which are stable, and which are losing effectiveness as "
+                "market conditions change."
+            )
+
+            st.dataframe(
+                specialist_multi,
+                use_container_width=True,
+                hide_index=True,
+            )
 
         specialist_df = specialist_learning_dataframe()
 
