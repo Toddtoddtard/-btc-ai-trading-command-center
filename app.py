@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r13-persistent-live-chart"
+APP_VERSION = "2026.09.04-single-file-r14-predicted-candle-path"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -2233,7 +2233,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             font-size:12px;
             opacity:.82;
             box-sizing:border-box;
-        ">Live BTC 1m candles • Kalshi 15m target</div>
+        ">Live BTC 1m candles • predicted 15m candle path • Kalshi target</div>
         <div id="persistent-market-chart" style="width:100%;height:415px;"></div>
     </div>
 
@@ -2273,6 +2273,173 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 }},
                 whiskerwidth: 0.35,
                 hoverinfo: "x+open+high+low+close"
+            }};
+        }}
+
+        function predictedCandles(rows) {{
+            if (!rows || rows.length < 12) return [];
+
+            const closes = rows.map(r => Number(r.close)).filter(Number.isFinite);
+            if (closes.length < 12) return [];
+
+            const n = closes.length;
+            const last = closes[n - 1];
+
+            const ret3 = n >= 4 ? (last / closes[n - 4] - 1) : 0;
+            const ret8 = n >= 9 ? (last / closes[n - 9] - 1) : 0;
+            const ret15 = n >= 16 ? (last / closes[n - 16] - 1) : ret8;
+
+            const recent = rows.slice(-20);
+            const avgRange = recent.reduce((sum, r) => {{
+                const hi = Number(r.high);
+                const lo = Number(r.low);
+                return sum + (
+                    Number.isFinite(hi) && Number.isFinite(lo)
+                    ? Math.max(0, hi - lo)
+                    : 0
+                );
+            }}, 0) / Math.max(1, recent.length);
+
+            let directional =
+                0.46 * ret3 +
+                0.34 * ret8 +
+                0.20 * ret15;
+
+            directional = Math.max(-0.012, Math.min(0.012, directional));
+
+            let projectedMove = last * directional * 2.2;
+
+            if (Number.isFinite(currentTarget)) {{
+                const gap = currentTarget - last;
+                const maxInfluence = Math.max(
+                    avgRange * 2.0,
+                    last * 0.0015
+                );
+                const targetInfluence = Math.max(
+                    -maxInfluence,
+                    Math.min(maxInfluence, gap * 0.18)
+                );
+                projectedMove += targetInfluence;
+            }}
+
+            const minVisible = Math.max(
+                avgRange * 0.35,
+                last * 0.00015
+            );
+
+            if (Math.abs(projectedMove) < minVisible) {{
+                projectedMove =
+                    Math.sign(projectedMove || directional || 1) * minVisible;
+            }}
+
+            const forecast = [];
+            let prevClose = last;
+            const lastTime = new Date(
+                rows[rows.length - 1].time
+            ).getTime();
+
+            for (let i = 1; i <= 15; i++) {{
+                const progress = i / 15;
+                const eased = progress * progress * (3 - 2 * progress);
+                const center = last + projectedMove * eased;
+
+                const wave =
+                    Math.sin(i * 1.35) * avgRange * 0.16 +
+                    Math.cos(i * 0.72) * avgRange * 0.08;
+
+                const close = center + wave;
+                const open = prevClose;
+
+                const body = Math.abs(close - open);
+                const wickBase = Math.max(
+                    avgRange * (0.18 + 0.08 * progress),
+                    body * 0.35
+                );
+
+                const high = Math.max(open, close) + wickBase;
+                const low = Math.min(open, close) - wickBase;
+
+                forecast.push({{
+                    time: new Date(
+                        lastTime + i * 60000
+                    ).toISOString(),
+                    open,
+                    high,
+                    low,
+                    close
+                }});
+
+                prevClose = close;
+            }}
+
+            return forecast;
+        }}
+
+        function predictionTrace(rows) {{
+            const forecast = predictedCandles(rows);
+
+            return {{
+                type: "candlestick",
+                x: forecast.map(r => r.time),
+                open: forecast.map(r => r.open),
+                high: forecast.map(r => r.high),
+                low: forecast.map(r => r.low),
+                close: forecast.map(r => r.close),
+                name: "Predicted 15m candles",
+                increasing: {{
+                    line: {{
+                        color:"rgba(77,171,247,0.88)",
+                        width:1.5
+                    }},
+                    fillcolor:"rgba(77,171,247,0.28)"
+                }},
+                decreasing: {{
+                    line: {{
+                        color:"rgba(186,104,200,0.88)",
+                        width:1.5
+                    }},
+                    fillcolor:"rgba(186,104,200,0.25)"
+                }},
+                whiskerwidth: 0.28,
+                hoverinfo: "x+open+high+low+close",
+                opacity: 0.78
+            }};
+        }}
+
+        function predictionPathTrace(rows) {{
+            const forecast = predictedCandles(rows);
+
+            if (!forecast.length) {{
+                return {{
+                    type: "scatter",
+                    mode: "lines",
+                    x: [],
+                    y: [],
+                    name: "Prediction path"
+                }};
+            }}
+
+            const lastReal = rows[rows.length - 1];
+
+            return {{
+                type: "scatter",
+                mode: "lines",
+                x: [
+                    lastReal.time,
+                    ...forecast.map(r => r.time)
+                ],
+                y: [
+                    lastReal.close,
+                    ...forecast.map(r => r.close)
+                ],
+                name: "Prediction path",
+                line: {{
+                    color: "#4dabf7",
+                    width: 2,
+                    dash: "dot"
+                }},
+                hovertemplate:
+                    "Predicted $%{{y:,.2f}}<extra></extra>"
             }};
         }}
 
@@ -2318,7 +2485,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             paper_bgcolor: paperBg,
             plot_bgcolor: plotBg,
             font: {{color: fontColor}},
-            margin: {{l:8,r:62,t:8,b:28}},
+            margin: {{l:8,r:62,t:34,b:28}},
             xaxis: {{
                 rangeslider: {{visible:false}},
                 showgrid:false,
@@ -2335,7 +2502,13 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             }},
             hovermode:"x unified",
             dragmode:"pan",
-            showlegend:false,
+            showlegend:true,
+            legend:{{
+                orientation:"h",
+                x:0,
+                y:1.04,
+                bgcolor:"rgba(0,0,0,0)"
+            }},
             uirevision:"persistent-kalshi-market",
             shapes: targetShape(),
             annotations: targetAnnotation(),
@@ -2354,7 +2527,11 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 
         Plotly.newPlot(
             chart,
-            [candleTrace(rows)],
+            [
+                candleTrace(rows),
+                predictionTrace(rows),
+                predictionPathTrace(rows)
+            ],
             layout,
             config
         );
@@ -2466,7 +2643,11 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 // allowing Streamlit to delete/recreate the chart container.
                 await Plotly.react(
                     chart,
-                    [candleTrace(rows)],
+                    [
+                        candleTrace(rows),
+                        predictionTrace(rows),
+                        predictionPathTrace(rows)
+                    ],
                     {{
                         ...layout,
                         shapes: targetShape(),
