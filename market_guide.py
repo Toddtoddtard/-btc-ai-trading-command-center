@@ -1,8 +1,12 @@
 import streamlit as st
 
+from multi_market_nav import render_market_nav
+
 
 def render_market_guide():
     """Beginner-friendly guide for approved users of the command center."""
+    render_market_nav("btc")
+
     st.info(
         "New here? Read the Bitcoin Market Guide below before acting on any signal. "
         "The dashboard is decision support for paper trading, not a guarantee of price direction."
