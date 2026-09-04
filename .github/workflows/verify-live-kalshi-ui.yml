@@ -1,0 +1,56 @@
+name: Verify Live Kalshi UI
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser test deps
+        run: |
+          pip install playwright
+          playwright install chromium
+      - name: Verify Kalshi market and deployed UI
+        run: |
+          python - <<'PY'
+          import json, re, time, urllib.parse, urllib.request
+          from playwright.sync_api import sync_playwright
+
+          BASE='https://external-api.kalshi.com/trade-api/v2'
+          APP='https://bettingbusa.streamlit.app/'
+          q=urllib.parse.urlencode({'limit':100,'status':'open','series_ticker':'KXBTC15M'})
+          with urllib.request.urlopen(BASE+'/markets?'+q, timeout=15) as r:
+              data=json.load(r)
+          markets=data.get('markets',[])
+          assert markets, 'No active KXBTC15M market returned'
+          m=markets[0]
+          ticker=m.get('ticker')
+          with urllib.request.urlopen(BASE+'/markets/'+ticker, timeout=15) as r:
+              exact=json.load(r).get('market',{})
+          text=' '.join(str(exact.get(k) or '') for k in ('yes_sub_title','subtitle','title'))
+          hit=re.search(r'Target\s*Price\s*:\s*\$?([0-9][0-9,]*(?:\.[0-9]+)?)', text, re.I)
+          assert hit, f'No explicit target found for {ticker}: {text}'
+          target=float(hit.group(1).replace(',',''))
+          target_fmt=f'${target:,.2f}'
+          print('ACTIVE_TICKER', ticker)
+          print('ACTIVE_TARGET', target_fmt)
+
+          with sync_playwright() as p:
+              browser=p.chromium.launch(headless=True)
+              page=browser.new_page(viewport={'width':1400,'height':1200})
+              page.goto(APP, wait_until='domcontentloaded', timeout=120000)
+              page.wait_for_timeout(15000)
+              body=page.locator('body').inner_text(timeout=30000)
+              print('BODY_SNIPPET', body[:5000])
+              assert 'Kalshi 15m Timer' in body, 'Kalshi timer card not visible in deployed UI'
+              assert re.search(r'\b(?:[0-1]?\d):[0-5]\d\b', body), 'Countdown MM:SS not visible'
+              assert target_fmt in body, f'Expected live target {target_fmt} not visible in deployed UI'
+              assert ticker in body, f'Expected active ticker {ticker} not visible in deployed UI'
+              browser.close()
+          print('LIVE_UI_VERIFIED')
+          PY
