@@ -44,10 +44,8 @@ jobs:
               browser=p.chromium.launch(headless=True)
               page=browser.new_page(viewport={'width':1440,'height':1600})
               page.goto(APP, wait_until='domcontentloaded', timeout=120000)
-              # Streamlit and custom components can take time to mount.
               page.wait_for_timeout(25000)
 
-              # Collect text from the top page and every iframe/component frame.
               texts=[]
               for i,fr in enumerate(page.frames):
                   try:
@@ -59,14 +57,11 @@ jobs:
                   texts.append(t)
               all_text='\n'.join(texts)
 
-              # Timer: title plus a live MM:SS countdown must be present somewhere.
               assert 'Kalshi 15m Timer' in all_text, 'Kalshi timer card not visible in any frame'
               countdowns=re.findall(r'\b(?:[0-1]?\d):[0-5]\d\b', all_text)
               assert countdowns, 'Countdown MM:SS not visible in any frame'
               print('COUNTDOWNS', countdowns[:10])
 
-              # Target: accept either exact formatted target in visible text or a Plotly annotation
-              # whose text contains the exact target inside any component frame.
               target_seen = target_fmt in all_text
               if not target_seen:
                   for fr in page.frames:
@@ -79,7 +74,6 @@ jobs:
                           break
               assert target_seen, f'Expected live target {target_fmt} not visible in deployed UI/components'
 
-              # Active ticker should be visible either in page text or chart status text.
               ticker_seen = ticker in all_text
               if not ticker_seen:
                   for fr in page.frames:
@@ -92,7 +86,6 @@ jobs:
                           break
               assert ticker_seen, f'Expected active ticker {ticker} not present in deployed UI/components'
 
-              # Verify the countdown is actually changing, not frozen.
               first=countdowns[0]
               page.wait_for_timeout(2500)
               texts2=[]
@@ -107,3 +100,4 @@ jobs:
 
           print('LIVE_UI_VERIFIED')
           PY
+# trigger verification
