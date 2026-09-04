@@ -12,6 +12,8 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
+from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
+
 # ============================================================
 # BTC AI TRADING COMMAND CENTER — PAPER TRADING ONLY
 # Single-file build. No exchange keys. No live order endpoints.
@@ -38,7 +40,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r28-aligned-direction-metrics"
+APP_VERSION = "2026.09.04-single-file-r29-audit-fixed"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -58,7 +60,7 @@ SPECIALIST_WEIGHTS = {
     "Whale AI": 0.90,
     "Liquidity AI": 0.90,
     "Derivatives AI": 0.85,
-    "Event AI": 0.55,
+    "Kalshi Context AI": 0.55,
     "Historical Pattern AI": 0.75,
     "Combination AI": 1.25,
 }
@@ -1410,40 +1412,7 @@ def hourly_target_chart(hist, spot_price, hourly_ai):
 
 
 def enrich_history(df):
-    x = df.copy()
-    c = x["close"]
-    x["ret1"] = c.pct_change()
-    x["ema9"] = c.ewm(span=9, adjust=False).mean()
-    x["ema21"] = c.ewm(span=21, adjust=False).mean()
-    x["ema50"] = c.ewm(span=50, adjust=False).mean()
-    delta = c.diff()
-    gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
-    rs = gain / loss.replace(0, np.nan)
-    x["rsi"] = 100 - (100 / (1 + rs))
-    ema12 = c.ewm(span=12, adjust=False).mean()
-    ema26 = c.ewm(span=26, adjust=False).mean()
-    x["macd"] = ema12 - ema26
-    x["macd_signal"] = x["macd"].ewm(span=9, adjust=False).mean()
-    x["vol20"] = x["ret1"].rolling(20).std() * np.sqrt(20)
-    x["sma20"] = c.rolling(20).mean()
-    x["std20"] = c.rolling(20).std()
-    x["bb_upper"] = x["sma20"] + 2 * x["std20"]
-    x["bb_lower"] = x["sma20"] - 2 * x["std20"]
-    x["volume_ma20"] = x["volume"].rolling(20).mean()
-    x["volume_z"] = (x["volume"] - x["volume_ma20"]) / x["volume"].rolling(20).std().replace(0, np.nan)
-    x["high20"] = x["high"].rolling(20).max()
-    x["low20"] = x["low"].rolling(20).min()
-    tr = pd.concat(
-        [
-            x["high"] - x["low"],
-            (x["high"] - c.shift()).abs(),
-            (x["low"] - c.shift()).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-    x["atr14"] = tr.rolling(14).mean()
-    return x
+    return enrich_history_core(df)
 
 
 def specialist(name, score, reason):
@@ -1459,125 +1428,9 @@ def specialist(name, score, reason):
 
 
 def run_specialists(hist, agg, futures, kalshi):
-    last = hist.iloc[-1]
-    prev = hist.iloc[-2]
-    px = float(last["close"])
-    out = {}
-
-    # Trend
-    trend_score = 0.55 * np.sign(last["ema9"] - last["ema21"]) + 0.45 * np.sign(last["ema21"] - last["ema50"])
-    out["Trend AI"] = specialist("Trend AI", trend_score, f"EMA9 {last['ema9']:.0f}, EMA21 {last['ema21']:.0f}, EMA50 {last['ema50']:.0f}")
-
-    # Momentum
-    rsi = safe_float(last["rsi"], 50.0)
-    macd_delta = safe_float(last["macd"] - last["macd_signal"], 0.0)
-    momentum = clamp(((rsi - 50) / 30) * 0.55 + np.sign(macd_delta) * min(abs(macd_delta) / max(px * 0.0005, 1), 1) * 0.45)
-    out["Momentum AI"] = specialist("Momentum AI", momentum, f"RSI {rsi:.1f}; MACD spread {macd_delta:.2f}")
-
-    # Volume
-    volume_z = safe_float(last["volume_z"], 0.0)
-    candle_dir = np.sign(last["close"] - last["open"])
-    volume_score = clamp(candle_dir * min(abs(volume_z) / 2.5, 1.0))
-    out["Volume AI"] = specialist("Volume AI", volume_score, f"Volume z-score {volume_z:.2f}")
-
-    # Pattern
-    body = last["close"] - last["open"]
-    rng = max(last["high"] - last["low"], 1e-9)
-    prev_body = prev["close"] - prev["open"]
-    engulf = 0.0
-    if body > 0 and prev_body < 0 and last["close"] >= prev["open"] and last["open"] <= prev["close"]:
-        engulf = 1.0
-    elif body < 0 and prev_body > 0 and last["open"] >= prev["close"] and last["close"] <= prev["open"]:
-        engulf = -1.0
-    pattern_score = clamp(0.55 * (body / rng) + 0.45 * engulf)
-    out["Pattern AI"] = specialist("Pattern AI", pattern_score, "Candle body/engulfing structure")
-
-    # Support / resistance
-    support = safe_float(hist["low"].tail(60).min(), px)
-    resistance = safe_float(hist["high"].tail(60).max(), px)
-    span = max(resistance - support, px * 0.001)
-    location = (px - support) / span
-    sr_score = clamp((0.5 - location) * 1.4)
-    out["Support/Resistance AI"] = specialist("Support/Resistance AI", sr_score, f"Support ${support:,.0f}; resistance ${resistance:,.0f}")
-
-    # Volatility
-    atr_pct = safe_float(last["atr14"] / px, 0.0)
-    bb_mid = safe_float(last["sma20"], px)
-    stretch = (px - bb_mid) / max(safe_float(last["std20"], px * 0.001), px * 0.001)
-    vol_score = clamp(-stretch / 3.0) if atr_pct > 0.0015 else clamp(np.sign(last["ema9"] - last["ema21"]) * 0.25)
-    out["Volatility AI"] = specialist("Volatility AI", vol_score, f"ATR {atr_pct*100:.3f}% of price; BB stretch {stretch:.2f}")
-
-    # Regime
-    ema_spread = abs(last["ema9"] - last["ema50"]) / px
-    regime_dir = np.sign(last["ema9"] - last["ema50"])
-    regime_score = clamp(regime_dir * min(ema_spread / 0.003, 1.0))
-    out["Market Regime AI"] = specialist("Market Regime AI", regime_score, "Trend regime from EMA separation")
-
-    # Whale / AGGR-style order flow
-    if agg is not None and not agg.empty:
-        buy = agg.loc[agg["aggressor"] == "BUY", "notional"].sum()
-        sell = agg.loc[agg["aggressor"] == "SELL", "notional"].sum()
-        total = buy + sell
-        flow = (buy - sell) / total if total else 0.0
-        med = agg["notional"].median()
-        whales = agg[agg["notional"] >= max(med * 6, 50_000)]
-        whale_buy = whales.loc[whales["aggressor"] == "BUY", "notional"].sum()
-        whale_sell = whales.loc[whales["aggressor"] == "SELL", "notional"].sum()
-        whale_total = whale_buy + whale_sell
-        whale_flow = (whale_buy - whale_sell) / whale_total if whale_total else flow
-        whale_score = clamp(0.55 * flow * 3 + 0.45 * whale_flow * 3)
-        whale_reason = f"Aggressor flow {flow*100:+.1f}%; large-trade flow {whale_flow*100:+.1f}%"
-    else:
-        whale_score, whale_reason = 0.0, "Aggregate trade feed unavailable"
-    out["Whale AI"] = specialist("Whale AI", whale_score, whale_reason)
-
-    # Liquidity
-    book = safe_float(futures.get("book_imbalance", 0.0), 0.0)
-    out["Liquidity AI"] = specialist("Liquidity AI", clamp(book * 3), f"Futures top-book imbalance {book*100:+.1f}%")
-
-    # Derivatives
-    funding = safe_float(futures.get("funding_rate"), 0.0)
-    deriv_score = clamp(book * 1.6 - np.sign(funding) * min(abs(funding) / 0.0005, 1.0) * 0.25)
-    out["Derivatives AI"] = specialist("Derivatives AI", deriv_score, f"Funding {funding*100:.4f}%; OI {safe_float(futures.get('open_interest'), 0):,.0f} BTC")
-
-    # Event / Kalshi 15-minute market
+    px = float(hist["close"].iloc[-1])
     kctx = stable_kalshi_contract(kalshi, px)
-    if kctx["available"]:
-        probability = kctx["up_probability"]
-        market_score = clamp((probability - 0.5) * 2.0) if pd.notna(probability) else 0.0
-        target_distance_score = clamp(
-            (px - kctx["target"]) / max(px * 0.0025, 1.0)
-        )
-        event_score = clamp(0.55 * market_score + 0.45 * target_distance_score)
-        event_reason = (
-            f"Kalshi target ${kctx['target']:,.2f}; BTC {kctx['distance']:+,.2f} "
-            f"({kctx['distance_pct']*100:+.3f}%) vs target; "
-            + (
-                f"UP market ~{probability*100:.1f}%"
-                if pd.notna(probability)
-                else "UP market price unavailable"
-            )
-        )
-    else:
-        event_score = 0.0
-        event_reason = "Live KXBTC15M target unavailable"
-    out["Event AI"] = specialist("Event AI", event_score, event_reason)
-
-    # Historical pattern
-    rets = hist["ret1"].dropna()
-    recent3 = safe_float((hist["close"].iloc[-1] / hist["close"].iloc[-4] - 1), 0.0) if len(hist) >= 4 else 0.0
-    future_proxy = rets.shift(-15)
-    similar = hist.loc[(hist["ret1"] - recent3 / 3).abs() < max(rets.std() * 0.35, 1e-6)]
-    hist_score = clamp(np.sign(recent3) * min(abs(recent3) / 0.003, 1.0) * 0.5)
-    out["Historical Pattern AI"] = specialist("Historical Pattern AI", hist_score, f"Recent 3-minute move {recent3*100:+.3f}%")
-
-    # Combination / interaction
-    base_names = [k for k in out.keys() if k not in {"Event AI"}]
-    base_scores = np.array([out[k]["score"] for k in base_names], dtype=float)
-    agreement = abs(np.mean(np.sign(base_scores))) if len(base_scores) else 0.0
-    combo = clamp(np.mean(base_scores) * (0.8 + 0.5 * agreement)) if len(base_scores) else 0.0
-    out["Combination AI"] = specialist("Combination AI", combo, f"Cross-specialist directional agreement {agreement*100:.0f}%")
-    return out
+    return run_specialists_core(hist, agg, futures, kctx)
 
 # ============================================================
 # MASTER AI + RISK
@@ -1933,6 +1786,8 @@ def get_learning_state():
                 "direction_hits": 0,
                 "avg_abs_error": 0.0,
                 "avg_path_error": 0.0,
+                "kalshi_samples": 0,
+                "kalshi_hits": 0,
             }
             state = {k: r.get(k, v) for k, v in defaults.items()}
             state["samples"] = int(state["samples"])
@@ -2044,70 +1899,7 @@ def model_inputs_from_rows(rows, target=None):
 
 
 def python_forecast_path(rows, target=None, state=None):
-    state = state or get_learning_state()
-    inputs = model_inputs_from_rows(rows, target)
-    if not inputs:
-        return None
-
-    last = inputs["last"]
-    avg_range = inputs["avg_range"]
-
-    directional = (
-        state["w_ret3"] * inputs["ret3"]
-        + state["w_ret8"] * inputs["ret8"]
-        + state["w_ret15"] * inputs["ret15"]
-        + state["bias"]
-    )
-    directional = float(np.clip(directional, -0.012, 0.012))
-
-    projected_move = last * directional * state["momentum_scale"]
-
-    if pd.notna(inputs["target"]):
-        gap = inputs["target"] - last
-        max_influence = max(avg_range * 2.0, last * 0.0015)
-        projected_move += float(
-            np.clip(
-                gap * state["target_influence"],
-                -max_influence,
-                max_influence
-            )
-        )
-
-    min_visible = max(avg_range * 0.35, last * 0.00015)
-    if abs(projected_move) < min_visible:
-        projected_move = np.sign(projected_move or directional or 1.0) * min_visible
-
-    forecast = []
-    prev_close = last
-
-    for i in range(1, 16):
-        progress = i / 15.0
-        eased = progress * progress * (3.0 - 2.0 * progress)
-        center = last + projected_move * eased
-        wave = (
-            np.sin(i * 1.35) * avg_range * 0.16
-            + np.cos(i * 0.72) * avg_range * 0.08
-        )
-        close = float(center + wave)
-        open_ = float(prev_close)
-        body = abs(close - open_)
-        wick = max(avg_range * (0.18 + 0.08 * progress), body * 0.35)
-
-        forecast.append({
-            "step": i,
-            "open": open_,
-            "high": max(open_, close) + wick,
-            "low": min(open_, close) - wick,
-            "close": close,
-        })
-        prev_close = close
-
-    return {
-        "inputs": inputs,
-        "forecast": forecast,
-        "predicted_end": float(forecast[-1]["close"]),
-        "predicted_direction": 1 if forecast[-1]["close"] >= last else -1,
-    }
+    return forecast_path_core(rows, target, state or get_learning_state())
 
 
 def register_forecast_window(ticker, expires_at, rows, target):
@@ -2369,6 +2161,19 @@ def specialist_learning_db():
         )
     """)
 
+    # Migrate the old misleading Event AI label without discarding learned state.
+    old_event = conn.execute(
+        "SELECT adaptive_weight,samples,direction_hits,ewma_accuracy,ewma_edge,ewma_calibration,updated_at "
+        "FROM specialist_learning_state WHERE specialist='Event AI'"
+    ).fetchone()
+    if old_event is not None:
+        conn.execute(
+            "INSERT OR IGNORE INTO specialist_learning_state "
+            "(specialist,adaptive_weight,samples,direction_hits,ewma_accuracy,ewma_edge,ewma_calibration,updated_at) "
+            "VALUES ('Kalshi Context AI',?,?,?,?,?,?,?)",
+            tuple(old_event),
+        )
+
     # Ensure each known specialist has a persistent learning row.
     for name in SPECIALIST_WEIGHTS.keys():
         conn.execute("""
@@ -2392,7 +2197,7 @@ def get_specialist_learning_state():
         if isinstance(specialists, dict) and specialists:
             state = {}
             for name in SPECIALIST_WEIGHTS.keys():
-                item = specialists.get(name, {})
+                item = specialists.get(name, specialists.get("Event AI", {}) if name == "Kalshi Context AI" else {})
                 samples = int(item.get("samples", 0))
                 direction_hits = int(item.get("direction_hits", 0))
                 state[name] = {
@@ -4411,6 +4216,11 @@ if _learning_state["samples"] > 0:
         f"direction accuracy {_acc:.1f}% • "
         f"avg final-price error ${_learning_state['avg_abs_error']:,.2f} • "
         f"avg path error ${_learning_state['avg_path_error']:,.2f}"
+        + (
+            f" • official Kalshi accuracy {_learning_state.get('kalshi_hits', 0) / _learning_state.get('kalshi_samples', 1) * 100:.1f}% "
+            f"({_learning_state.get('kalshi_samples', 0)} settled)"
+            if _learning_state.get('kalshi_samples', 0) else ""
+        )
     )
 else:
     st.caption(
