@@ -1,0 +1,63 @@
+name: Reliability v3.1 Upgrade
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - reliability-v3-1
+    paths:
+      - 'reliability_v31.py'
+      - 'learner_v31.py'
+      - 'tools/apply_reliability_v31.py'
+      - 'tests/test_reliability_v31.py'
+      - '.github/workflows/reliability-v31.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reliability-v31-upgrade
+  cancel-in-progress: false
+
+jobs:
+  validate-and-apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: reliability-v3-1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Apply deterministic app patch
+        run: python tools/apply_reliability_v31.py
+      - name: Compile upgraded code
+        run: python -m py_compile app.py ai_core.py learner.py learner_v3.py learner_v31.py reliability_v31.py
+      - name: Run reliability tests
+        run: python -m unittest tests/test_reliability_v31.py -v
+      - name: Verify upgrade markers
+        run: |
+          grep -q 'r37-reliability-v31' app.py
+          grep -q 'source_health_from_specialists' app.py
+          grep -q 'execution_cost_bps' app.py
+          grep -q 'regime_specialist_weight' app.py
+          grep -q 'entry_cost_est = execution_cost_bps(qty \* entry_price)' app.py
+          ! grep -q 'strong_move_up and up_price_favorable and confidence >= 0.58' app.py
+          ! grep -q 'strong_move_down and down_price_favorable and confidence >= 0.58' app.py
+      - name: Commit upgraded app safely
+        run: |
+          set -e
+          git config user.name "btc-ai-reliability-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py
+          if git diff --cached --quiet; then
+            echo "app.py already upgraded"
+            exit 0
+          fi
+          git commit -m "Apply reliability v3.1 to dashboard"
+          git fetch origin reliability-v3-1
+          git rebase origin/reliability-v3-1
+          git push origin HEAD:reliability-v3-1
