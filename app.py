@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r15-self-learning-prediction"
+APP_VERSION = "2026.09.04-single-file-r16-all-bots-self-learning"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -1414,7 +1414,7 @@ def master_decision(results, hist, kalshi=None):
     signs = []
 
     for name, result in results.items():
-        weight = SPECIALIST_WEIGHTS.get(name, 1.0)
+        weight = adaptive_specialist_weight(name)
         weighted_sum += result["score"] * result["confidence"] * weight
         total_weight += result["confidence"] * weight
         signs.append(np.sign(result["score"]))
@@ -2123,6 +2123,413 @@ def recent_learning_windows(limit=50):
     return df
 
 
+
+# ============================================================
+# SELF-LEARNING SPECIALIST AIS
+# ============================================================
+
+SPECIALIST_LEARNING_DB = "btc_ai.db"
+
+def specialist_learning_db():
+    conn = sqlite3.connect(SPECIALIST_LEARNING_DB, check_same_thread=False)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS specialist_learning_state (
+            specialist TEXT PRIMARY KEY,
+            adaptive_weight REAL NOT NULL DEFAULT 1.0,
+            samples INTEGER NOT NULL DEFAULT 0,
+            direction_hits INTEGER NOT NULL DEFAULT 0,
+            ewma_accuracy REAL NOT NULL DEFAULT 0.50,
+            ewma_edge REAL NOT NULL DEFAULT 0.0,
+            ewma_calibration REAL NOT NULL DEFAULT 0.0,
+            updated_at TEXT
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS specialist_window_predictions (
+            ticker TEXT NOT NULL,
+            specialist TEXT NOT NULL,
+            opened_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            start_price REAL NOT NULL,
+            target_price REAL,
+            score REAL NOT NULL,
+            confidence REAL NOT NULL,
+            predicted_direction INTEGER NOT NULL,
+            resolved INTEGER NOT NULL DEFAULT 0,
+            actual_end REAL,
+            actual_direction INTEGER,
+            direction_correct INTEGER,
+            realized_return REAL,
+            signed_edge REAL,
+            resolved_at TEXT,
+            PRIMARY KEY (ticker, specialist)
+        )
+    """)
+
+    # Ensure each known specialist has a persistent learning row.
+    for name in SPECIALIST_WEIGHTS.keys():
+        conn.execute("""
+            INSERT OR IGNORE INTO specialist_learning_state (
+                specialist, adaptive_weight, updated_at
+            )
+            VALUES (?, 1.0, ?)
+        """, (
+            name,
+            datetime.now(timezone.utc).isoformat(),
+        ))
+
+    conn.commit()
+    return conn
+
+
+def get_specialist_learning_state():
+    conn = specialist_learning_db()
+    rows = conn.execute("""
+        SELECT
+            specialist,
+            adaptive_weight,
+            samples,
+            direction_hits,
+            ewma_accuracy,
+            ewma_edge,
+            ewma_calibration
+        FROM specialist_learning_state
+    """).fetchall()
+    conn.close()
+
+    state = {}
+    for row in rows:
+        (
+            specialist,
+            adaptive_weight,
+            samples,
+            direction_hits,
+            ewma_accuracy,
+            ewma_edge,
+            ewma_calibration,
+        ) = row
+
+        state[specialist] = {
+            "adaptive_weight": float(adaptive_weight),
+            "samples": int(samples),
+            "direction_hits": int(direction_hits),
+            "accuracy": (
+                direction_hits / samples
+                if samples else np.nan
+            ),
+            "ewma_accuracy": float(ewma_accuracy),
+            "ewma_edge": float(ewma_edge),
+            "ewma_calibration": float(ewma_calibration),
+        }
+
+    return state
+
+
+def adaptive_specialist_weight(name):
+    state = get_specialist_learning_state().get(name, {})
+    learned = safe_float(state.get("adaptive_weight"), 1.0)
+    base = safe_float(SPECIALIST_WEIGHTS.get(name), 1.0)
+    return base * learned
+
+
+def register_specialist_window_predictions(
+    ticker,
+    expires_at,
+    start_price,
+    target_price,
+    specialist_results,
+):
+    if (
+        not ticker
+        or pd.isna(expires_at)
+        or not specialist_results
+        or pd.isna(start_price)
+    ):
+        return
+
+    conn = specialist_learning_db()
+    now_ts = time.time()
+
+    for name, result in specialist_results.items():
+        score = safe_float(result.get("score"), 0.0)
+        confidence = safe_float(result.get("confidence"), 0.50)
+
+        predicted_direction = (
+            1 if score > 0.03
+            else -1 if score < -0.03
+            else 0
+        )
+
+        conn.execute("""
+            INSERT OR IGNORE INTO specialist_window_predictions (
+                ticker,
+                specialist,
+                opened_at,
+                expires_at,
+                start_price,
+                target_price,
+                score,
+                confidence,
+                predicted_direction
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            ticker,
+            name,
+            now_ts,
+            float(expires_at),
+            float(start_price),
+            float(target_price) if pd.notna(target_price) else None,
+            float(score),
+            float(confidence),
+            int(predicted_direction),
+        ))
+
+    conn.commit()
+    conn.close()
+
+
+def resolve_specialist_learning(hist):
+    if hist is None or hist.empty:
+        return 0
+
+    now_ts = time.time()
+    conn = specialist_learning_db()
+
+    pending = conn.execute("""
+        SELECT
+            ticker,
+            specialist,
+            expires_at,
+            start_price,
+            target_price,
+            score,
+            confidence,
+            predicted_direction
+        FROM specialist_window_predictions
+        WHERE resolved = 0 AND expires_at <= ?
+        ORDER BY expires_at ASC
+        LIMIT 500
+    """, (now_ts,)).fetchall()
+
+    if not pending:
+        conn.close()
+        return 0
+
+    hist2 = hist.copy()
+    hist2["_ts"] = pd.to_datetime(
+        hist2["time"],
+        utc=True,
+        errors="coerce",
+    )
+    hist2 = hist2.dropna(subset=["_ts"])
+
+    updates = {}
+
+    for row in pending:
+        (
+            ticker,
+            specialist,
+            expires_at,
+            start_price,
+            target_price,
+            score,
+            confidence,
+            predicted_direction,
+        ) = row
+
+        expiry_dt = pd.to_datetime(
+            expires_at,
+            unit="s",
+            utc=True,
+        )
+
+        near = hist2.iloc[
+            (hist2["_ts"] - expiry_dt).abs().argsort()[:1]
+        ]
+
+        if near.empty:
+            continue
+
+        actual_end = float(near.iloc[0]["close"])
+        realized_return = actual_end / float(start_price) - 1.0
+
+        # Primary specialist grading is market direction over the window.
+        actual_direction = (
+            1 if actual_end > start_price
+            else -1 if actual_end < start_price
+            else 0
+        )
+
+        if predicted_direction == 0:
+            direction_correct = 0
+            signed_edge = 0.0
+        else:
+            direction_correct = int(
+                predicted_direction == actual_direction
+            )
+
+            # Signed edge rewards correct directional conviction and
+            # penalizes wrong directional conviction.
+            signed_edge = (
+                float(score)
+                * float(realized_return)
+                * 100.0
+            )
+
+        # Confidence calibration:
+        # correct confident calls help; wrong confident calls hurt.
+        calibration = (
+            confidence
+            if direction_correct
+            else -confidence
+        )
+
+        current = conn.execute("""
+            SELECT
+                adaptive_weight,
+                samples,
+                direction_hits,
+                ewma_accuracy,
+                ewma_edge,
+                ewma_calibration
+            FROM specialist_learning_state
+            WHERE specialist = ?
+        """, (specialist,)).fetchone()
+
+        if current is None:
+            current = (1.0, 0, 0, 0.50, 0.0, 0.0)
+
+        (
+            adaptive_weight,
+            samples,
+            direction_hits,
+            ewma_accuracy,
+            ewma_edge,
+            ewma_calibration,
+        ) = current
+
+        alpha = 0.10
+
+        ewma_accuracy = (
+            (1 - alpha) * float(ewma_accuracy)
+            + alpha * float(direction_correct)
+        )
+
+        ewma_edge = (
+            (1 - alpha) * float(ewma_edge)
+            + alpha * float(signed_edge)
+        )
+
+        ewma_calibration = (
+            (1 - alpha) * float(ewma_calibration)
+            + alpha * float(calibration)
+        )
+
+        samples = int(samples) + 1
+        direction_hits = int(direction_hits) + int(direction_correct)
+
+        # Adaptive influence:
+        # accuracy + realized edge + confidence calibration.
+        quality = (
+            0.55 * (ewma_accuracy - 0.50) * 2.0
+            + 0.25 * np.tanh(ewma_edge * 4.0)
+            + 0.20 * ewma_calibration
+        )
+
+        target_weight = float(
+            np.clip(
+                1.0 + quality,
+                0.35,
+                1.85,
+            )
+        )
+
+        # Smooth changes so one bad window cannot destroy a specialist.
+        adaptive_weight = (
+            0.90 * float(adaptive_weight)
+            + 0.10 * target_weight
+        )
+        adaptive_weight = float(
+            np.clip(adaptive_weight, 0.35, 1.85)
+        )
+
+        conn.execute("""
+            UPDATE specialist_learning_state
+            SET
+                adaptive_weight = ?,
+                samples = ?,
+                direction_hits = ?,
+                ewma_accuracy = ?,
+                ewma_edge = ?,
+                ewma_calibration = ?,
+                updated_at = ?
+            WHERE specialist = ?
+        """, (
+            adaptive_weight,
+            samples,
+            direction_hits,
+            ewma_accuracy,
+            ewma_edge,
+            ewma_calibration,
+            datetime.now(timezone.utc).isoformat(),
+            specialist,
+        ))
+
+        conn.execute("""
+            UPDATE specialist_window_predictions
+            SET
+                resolved = 1,
+                actual_end = ?,
+                actual_direction = ?,
+                direction_correct = ?,
+                realized_return = ?,
+                signed_edge = ?,
+                resolved_at = ?
+            WHERE ticker = ? AND specialist = ?
+        """, (
+            actual_end,
+            actual_direction,
+            direction_correct,
+            realized_return,
+            signed_edge,
+            datetime.now(timezone.utc).isoformat(),
+            ticker,
+            specialist,
+        ))
+
+        updates[specialist] = adaptive_weight
+
+    conn.commit()
+    conn.close()
+    return len(updates)
+
+
+def specialist_learning_dataframe():
+    state = get_specialist_learning_state()
+
+    rows = []
+    for name in sorted(state.keys()):
+        item = state[name]
+        rows.append({
+            "Specialist": name,
+            "Learned weight": item["adaptive_weight"],
+            "Samples": item["samples"],
+            "Accuracy %": (
+                np.nan
+                if pd.isna(item["accuracy"])
+                else item["accuracy"] * 100.0
+            ),
+            "Recent accuracy %": item["ewma_accuracy"] * 100.0,
+            "Recent edge": item["ewma_edge"],
+            "Calibration": item["ewma_calibration"],
+        })
+
+    return pd.DataFrame(rows)
+
+
 # ============================================================
 # PREDICTION JOURNAL
 # ============================================================
@@ -2498,7 +2905,7 @@ init_db()
 
 st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
-st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute self-learning engine + separate Hourly Target AI • SCALP UP / SCALP DOWN / LOCK UP / LOCK DOWN • paper-only")
+st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine + separate Hourly Target AI • every specialist adapts after completed windows • paper-only")
 
 # ============================================================
 # SIDEBAR
@@ -3335,6 +3742,11 @@ except Exception:
     _learning_resolved = 0
 
 try:
+    _specialist_learning_resolved = resolve_specialist_learning(_persistent_hist)
+except Exception:
+    _specialist_learning_resolved = 0
+
+try:
     _close_raw = _persistent_ctx.get("close_time")
     _active_close_ts = (
         pd.Timestamp(_close_raw).timestamp()
@@ -3414,6 +3826,25 @@ def live_dashboard():
         price = float(hist["close"].iloc[-1])
 
     results = run_specialists(hist, agg, futures, kalshi)
+    # Let every specialist learn independently from this Kalshi window.
+    try:
+        _learn_ctx = stable_kalshi_contract(kalshi, price)
+        _learn_close_raw = _learn_ctx.get("close_time")
+        _learn_close_ts = (
+            pd.Timestamp(_learn_close_raw).timestamp()
+            if _learn_close_raw else np.nan
+        )
+
+        register_specialist_window_predictions(
+            _learn_ctx.get("ticker", ""),
+            _learn_close_ts,
+            price,
+            _learn_ctx.get("target", np.nan),
+            results,
+        )
+    except Exception:
+        pass
+
     decision = master_decision(results, hist, kalshi)
     hourly_ai = hourly_kalshi_target_ai(hist, results, hourly_kalshi, price)
     account = get_account(price)
@@ -3912,6 +4343,52 @@ def live_dashboard():
         w2.metric("8m weight", f"{learn['w_ret8']*100:.1f}%")
         w3.metric("15m weight", f"{learn['w_ret15']*100:.1f}%")
         w4.metric("Move scale", f"{learn['momentum_scale']:.2f}×")
+
+        st.divider()
+        st.subheader("Specialist AI Learning")
+
+        st.caption(
+            "Every specialist is graded after each completed 15-minute window. "
+            "The Master AI automatically increases the influence of specialists "
+            "with stronger recent accuracy, edge, and confidence calibration, "
+            "and reduces the influence of weaker ones."
+        )
+
+        specialist_df = specialist_learning_dataframe()
+
+        if specialist_df.empty:
+            st.info("Specialist learning will populate after completed windows.")
+        else:
+            specialist_df["Learned weight"] = pd.to_numeric(
+                specialist_df["Learned weight"],
+                errors="coerce",
+            ).round(3)
+
+            specialist_df["Accuracy %"] = pd.to_numeric(
+                specialist_df["Accuracy %"],
+                errors="coerce",
+            ).round(1)
+
+            specialist_df["Recent accuracy %"] = pd.to_numeric(
+                specialist_df["Recent accuracy %"],
+                errors="coerce",
+            ).round(1)
+
+            specialist_df["Recent edge"] = pd.to_numeric(
+                specialist_df["Recent edge"],
+                errors="coerce",
+            ).round(4)
+
+            specialist_df["Calibration"] = pd.to_numeric(
+                specialist_df["Calibration"],
+                errors="coerce",
+            ).round(3)
+
+            st.dataframe(
+                specialist_df,
+                use_container_width=True,
+                hide_index=True,
+            )
 
         learning_df = recent_learning_windows(50)
         if learning_df.empty:
