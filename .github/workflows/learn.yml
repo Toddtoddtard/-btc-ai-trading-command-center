@@ -47,14 +47,15 @@ jobs:
         run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py tests/test_audit_v6.py
       - name: Run audit v6 regression tests
         run: python -m unittest tests.test_audit_v6 -v
-      - name: Load previous private learning state
+      - name: Load previous private learning state and historical priors
         shell: bash
         run: |
           set -e
-          rm -f /tmp/previous_learning_state.json
+          rm -f /tmp/previous_learning_state.json /tmp/historical_specialist_knowledge_v7.json
           git fetch origin learning-state:refs/remotes/origin/learning-state || true
           if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
             git show refs/remotes/origin/learning-state:learning_state.json > /tmp/previous_learning_state.json || true
+            git show refs/remotes/origin/learning-state:historical_specialist_knowledge_v7.json > /tmp/historical_specialist_knowledge_v7.json || true
           fi
           if [ -s /tmp/previous_learning_state.json ]; then
             python - <<'PY'
@@ -65,6 +66,16 @@ jobs:
           PY
           else
             echo "No previous learning state found; learner will use fallback state."
+          fi
+          if [ -s /tmp/historical_specialist_knowledge_v7.json ]; then
+            python - <<'PY'
+          import json
+          p='/tmp/historical_specialist_knowledge_v7.json'
+          data=json.load(open(p))
+          print('Loaded historical specialist v7 report with', data.get('evaluated_windows', 0), 'windows')
+          PY
+          else
+            echo "Historical specialist v7 report not available yet; live learner continues without it."
           fi
       - name: Run BTC AI learner v3.1
         env:
@@ -78,9 +89,10 @@ jobs:
         run: |
           python bot_intelligence_report.py
           mv /tmp/learning_state_v4.json /tmp/learning_state.json
-      - name: Enrich specialist self-learning v5 knowledge
+      - name: Enrich specialist self-learning v7 knowledge
         env:
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
+          HISTORICAL_SPECIALIST_INPUT: /tmp/historical_specialist_knowledge_v7.json
         run: python enrich_learning_state_v5.py
       - name: Validate generated learning state
         run: |
@@ -96,7 +108,7 @@ jobs:
           assert data.get('status', {}).get('strict_expiry_grading') is True
           assert data.get('status', {}).get('bot_intelligence_v4_ok') is True
           assert data.get('status', {}).get('specialist_self_learning_v5') is True
-          assert data.get('status', {}).get('intelligence_version') == 5
+          assert data.get('status', {}).get('intelligence_version') in {6, 7}
           assert data.get('status', {}).get('regime_tagged_specialist_history') is True
           assert data.get('status', {}).get('current_regime') in {'HIGH_VOL', 'TREND_UP', 'TREND_DOWN', 'LOW_VOL_RANGE', 'RANGE'}
           assert data.get('status', {}).get('specialist_knowledge_regime') == data.get('status', {}).get('current_regime') or data.get('specialist_knowledge_v5', {}).get('regime') == data.get('pending', {}).get('regime')
@@ -119,7 +131,10 @@ jobs:
           before=int(data.get('status', {}).get('samples_before_run', 0))
           after=int(data.get('status', {}).get('samples_after_run', 0))
           assert after >= before, (before, after)
-          print('learning-state v3.1 + v4 + Specialist Intelligence v5 + Audit v6 validation passed; samples', before, '->', after)
+          if data.get('status', {}).get('historical_specialist_v7_loaded'):
+              assert data.get('historical_specialist_knowledge_v7', {}).get('evaluated_windows', 0) >= 10000
+              assert data.get('status', {}).get('intelligence_version') == 7
+          print('learning-state v3.1 + v4 + Specialist Intelligence v7 validation passed; samples', before, '->', after)
           PY
       - name: Publish learning state
         shell: bash
@@ -140,5 +155,5 @@ jobs:
             echo "No learning-state change to publish."
             exit 0
           fi
-          git commit -m "Update BTC AI learning state with Specialist Intelligence v5"
+          git commit -m "Update BTC AI learning state with Specialist Intelligence v7"
           git push origin learning-state --force-with-lease
