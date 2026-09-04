@@ -48,16 +48,15 @@ jobs:
           grep -q 'knowledge_council_vote' app.py
           grep -q 'v5 selective-precision gate' app.py
           grep -q 'specialist_self_learning_v5' .github/workflows/learn.yml
-          grep -q 'V5 precision target' app.py || true
-      - name: Commit integrated files
+      - name: Commit integrated app
         shell: bash
         run: |
           set -e
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app.py .github/workflows/learn.yml
+          git add app.py
           if git diff --cached --quiet; then
-            echo 'No generated integration changes.'
+            echo 'No generated app changes.'
             exit 0
           fi
           git commit -m 'Integrate specialist self-learning v5 and precision gate'
