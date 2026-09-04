@@ -1,0 +1,38 @@
+name: Fix Kalshi Rollover
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'fix_kalshi_rollover.py'
+      - '.github/workflows/fix-kalshi-rollover.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply rollover fix
+        run: python fix_kalshi_rollover.py
+      - name: Compile
+        run: python -m py_compile app.py
+      - name: Verify rollover logic
+        run: |
+          grep -q 'kalshiWindowKey' app.py
+          grep -q 'Loading new Kalshi 15m target' app.py
+          grep -q 'setInterval(updateTarget, 1000)' app.py
+      - name: Commit app fix
+        run: |
+          git config user.name "btc-ai-fix-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py
+          git diff --cached --quiet || git commit -m "Make Kalshi target rollover atomic"
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
