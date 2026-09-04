@@ -1,0 +1,28 @@
+name: Bot Intelligence v4 CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'council_v4.py'
+      - 'bot_intelligence_report.py'
+      - 'tests/test_council_v4.py'
+      - 'reliability_v31.py'
+      - '.github/workflows/learn.yml'
+      - '.github/workflows/bot-intelligence-v4.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Compile v4 intelligence code
+        run: python -m py_compile council_v4.py bot_intelligence_report.py reliability_v31.py
+      - name: Run council tests
+        run: python -m unittest tests.test_council_v4 -v
