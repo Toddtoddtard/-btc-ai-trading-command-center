@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r7b-kalshi-lock-persistent"
+APP_VERSION = "2026.09.04-single-file-r8-darkmode-targetline"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -1343,6 +1343,40 @@ def walk_forward_backtest(hist, horizon=15):
 # ============================================================
 
 
+def apply_plotly_theme(fig):
+    if st.session_state.get("dashboard_dark_mode", True):
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#080d14",
+            plot_bgcolor="#0d141f",
+            font=dict(color="#eef3fa"),
+            xaxis=dict(
+                gridcolor="rgba(255,255,255,0.10)",
+                zerolinecolor="rgba(255,255,255,0.16)",
+            ),
+            yaxis=dict(
+                gridcolor="rgba(255,255,255,0.10)",
+                zerolinecolor="rgba(255,255,255,0.16)",
+            ),
+        )
+    else:
+        fig.update_layout(
+            template="plotly_white",
+            paper_bgcolor="#ffffff",
+            plot_bgcolor="#ffffff",
+            font=dict(color="#111827"),
+            xaxis=dict(
+                gridcolor="rgba(0,0,0,0.08)",
+                zerolinecolor="rgba(0,0,0,0.14)",
+            ),
+            yaxis=dict(
+                gridcolor="rgba(0,0,0,0.08)",
+                zerolinecolor="rgba(0,0,0,0.14)",
+            ),
+        )
+    return fig
+
+
 def candle_chart(hist, kalshi_target=np.nan):
     tail = hist.tail(180)
     fig = go.Figure()
@@ -1373,9 +1407,13 @@ def candle_chart(hist, kalshi_target=np.nan):
     if pd.notna(kalshi_target):
         fig.add_hline(
             y=kalshi_target,
-            line_dash="dash",
+            line_dash="solid",
+            line_width=4,
+            opacity=1.0,
             annotation_text=f"KALSHI TARGET  ${kalshi_target:,.2f}",
             annotation_position="top left",
+            annotation_bgcolor="rgba(0,0,0,0.75)",
+            annotation_font=dict(size=14),
         )
 
     fig.update_layout(
@@ -1384,6 +1422,7 @@ def candle_chart(hist, kalshi_target=np.nan):
         xaxis_rangeslider_visible=False,
         legend_orientation="h",
     )
+    apply_plotly_theme(fig)
     return fig
 
 
@@ -1397,7 +1436,7 @@ def kalshi_15m_chart(hist, spot_price, kctx, projected_end=np.nan):
             y=tail["close"],
             mode="lines+markers",
             name="BTC live proxy",
-            line=dict(width=3),
+            line=dict(width=4),
         )
     )
 
@@ -1416,10 +1455,13 @@ def kalshi_15m_chart(hist, spot_price, kctx, projected_end=np.nan):
     if pd.notna(target):
         fig.add_hline(
             y=target,
-            line_dash="dash",
-            line_width=2,
+            line_dash="solid",
+            line_width=5,
+            opacity=1.0,
             annotation_text=f"KALSHI TARGET  ${target:,.2f}",
             annotation_position="top left",
+            annotation_bgcolor="rgba(0,0,0,0.78)",
+            annotation_font=dict(size=15),
         )
 
     if pd.notna(projected_end):
@@ -1443,6 +1485,7 @@ def kalshi_15m_chart(hist, spot_price, kctx, projected_end=np.nan):
         legend_orientation="h",
         hovermode="x unified",
     )
+    apply_plotly_theme(fig)
     return fig
 
 # ============================================================
@@ -1460,6 +1503,14 @@ st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC 15-minute target eng
 # ============================================================
 
 st.sidebar.header("Command Center")
+
+dark_mode = st.sidebar.toggle(
+    "🌙 Dark Mode",
+    value=True,
+    key="dashboard_dark_mode",
+    help="Switch the command center and charts between dark and light mode.",
+)
+
 auto_refresh = st.sidebar.checkbox("Auto refresh", value=True)
 refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=3)
 record_predictions = st.sidebar.checkbox("Auto-journal predictions", value=True)
@@ -1499,6 +1550,122 @@ if st.sidebar.button("Reset paper account", use_container_width=True):
 # A fragment reruns independently from the rest of the Streamlit app.
 # This avoids the full-page rebuild/flash caused by time.sleep()+st.rerun().
 live_run_every = refresh_seconds if auto_refresh else None
+
+# ============================================================
+# DASHBOARD THEME
+# ============================================================
+
+if dark_mode:
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-color: #080d14;
+            color: #eef3fa;
+        }
+
+        [data-testid="stSidebar"] {
+            background-color: #0d141f;
+            border-right: 1px solid #263244;
+        }
+
+        [data-testid="stSidebar"] * {
+            color: #eef3fa;
+        }
+
+        [data-testid="stHeader"] {
+            background-color: rgba(8, 13, 20, 0.92);
+        }
+
+        [data-testid="stMetric"] {
+            background-color: #0f1825;
+            border: 1px solid #2a374a;
+            border-radius: 10px;
+            padding: 0.45rem 0.6rem;
+        }
+
+        [data-testid="stMetricValue"] {
+            color: #ffffff;
+            font-weight: 750;
+        }
+
+        [data-testid="stMetricLabel"] {
+            color: #c8d2df;
+        }
+
+        [data-testid="stTabs"] button,
+        [data-baseweb="tab"] {
+            color: #dbe4f0 !important;
+            font-weight: 650 !important;
+        }
+
+        [data-testid="stTabs"] button[aria-selected="true"],
+        [data-baseweb="tab"][aria-selected="true"] {
+            color: #ffffff !important;
+        }
+
+        [data-testid="stDataFrame"],
+        div[data-testid="stExpander"] {
+            border-color: #2a374a !important;
+        }
+
+        .stButton > button,
+        .stDownloadButton > button {
+            border-color: #39485d;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-color: #f7f9fc;
+            color: #111827;
+        }
+
+        [data-testid="stSidebar"] {
+            background-color: #ffffff;
+            border-right: 1px solid #d8dee9;
+        }
+
+        [data-testid="stHeader"] {
+            background-color: rgba(255, 255, 255, 0.94);
+        }
+
+        [data-testid="stMetric"] {
+            background-color: #ffffff;
+            border: 1px solid #d8dee9;
+            border-radius: 10px;
+            padding: 0.45rem 0.6rem;
+        }
+
+        [data-testid="stMetricValue"] {
+            color: #111827;
+            font-weight: 750;
+        }
+
+        [data-testid="stMetricLabel"] {
+            color: #4b5563;
+        }
+
+        [data-testid="stTabs"] button,
+        [data-baseweb="tab"] {
+            color: #374151 !important;
+            font-weight: 650 !important;
+        }
+
+        [data-testid="stTabs"] button[aria-selected="true"],
+        [data-baseweb="tab"][aria-selected="true"] {
+            color: #111827 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 @st.fragment(run_every=live_run_every)
 def live_dashboard():
