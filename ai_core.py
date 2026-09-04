@@ -86,8 +86,18 @@ def run_specialists_core(hist, agg, futures, kctx):
     px = float(last["close"])
     out = {}
 
-    trend_score = 0.55 * np.sign(last["ema9"] - last["ema21"]) + 0.45 * np.sign(last["ema21"] - last["ema50"])
-    out["Trend AI"] = _specialist("Trend AI", trend_score, f"EMA9 {last['ema9']:.0f}, EMA21 {last['ema21']:.0f}, EMA50 {last['ema50']:.0f}")
+    # Use EMA separation magnitude, not just sign. This prevents tiny low-volatility
+    # EMA differences from producing a false +/-1 trend conviction.
+    fast_spread = safe_float((last["ema9"] - last["ema21"]) / px, 0.0)
+    slow_spread = safe_float((last["ema21"] - last["ema50"]) / px, 0.0)
+    fast_component = math.tanh(fast_spread / 0.0010)
+    slow_component = math.tanh(slow_spread / 0.0018)
+    trend_score = clamp(0.58 * fast_component + 0.42 * slow_component)
+    out["Trend AI"] = _specialist(
+        "Trend AI",
+        trend_score,
+        f"EMA9 {last['ema9']:.0f}, EMA21 {last['ema21']:.0f}, EMA50 {last['ema50']:.0f}; spread strength {trend_score:+.2f}",
+    )
 
     rsi = safe_float(last["rsi"], 50.0)
     macd_delta = safe_float(last["macd"] - last["macd_signal"], 0.0)
@@ -139,8 +149,20 @@ def run_specialists_core(hist, agg, futures, kctx):
         whale_sell = whales.loc[whales["aggressor"] == "SELL", "notional"].sum()
         whale_total = whale_buy + whale_sell
         whale_flow = (whale_buy - whale_sell) / whale_total if whale_total else flow
-        whale_score = clamp(0.55 * flow * 3 + 0.45 * whale_flow * 3)
-        whale_reason = f"Aggressor flow {flow*100:+.1f}%; large-trade flow {whale_flow*100:+.1f}%"
+
+        # Sparse large prints used to create +/-1 scores and ~96% confidence. Blend
+        # whale flow with broad aggressor flow and scale conviction by evidence size.
+        whale_count = int(len(whales))
+        sample_strength = min(1.0, whale_count / 8.0)
+        participation = (whale_total / total) if total else 0.0
+        participation_strength = min(1.0, participation / 0.20)
+        evidence_strength = 0.5 * sample_strength + 0.5 * participation_strength
+        raw_whale = 0.60 * clamp(flow * 2.0) + 0.40 * clamp(whale_flow * 2.0)
+        whale_score = clamp(raw_whale * (0.40 + 0.60 * evidence_strength))
+        whale_reason = (
+            f"Aggressor flow {flow*100:+.1f}%; large-trade flow {whale_flow*100:+.1f}%; "
+            f"large trades {whale_count}; evidence {evidence_strength*100:.0f}%"
+        )
     else:
         whale_score, whale_reason = 0.0, "Aggregate trade feed unavailable"
     out["Whale AI"] = _specialist("Whale AI", whale_score, whale_reason)
