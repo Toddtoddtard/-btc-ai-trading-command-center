@@ -1060,21 +1060,37 @@ def stable_kalshi_contract(kalshi, spot_price):
         except Exception:
             return False
 
+    live_ticker = str(live.get("ticker") or "")
+    cached_ticker = str((cached or {}).get("ticker") or "")
     should_replace = (
         cached is None
         or pd.isna(cached.get("target", np.nan))
         or cache_expired(cached)
+        or (live.get("available") and live_ticker and live_ticker != cached_ticker)
     )
 
     if live.get("available") and should_replace:
         cached = {
             "available": True,
-            "ticker": live.get("ticker", ""),
+            "ticker": live_ticker,
             "title": live.get("title", "BTC 15 min"),
             "target": live.get("target", np.nan),
             "close_time": live.get("close_time"),
             "market": live.get("market"),
         }
+        st.session_state["kalshi_contract_snapshot"] = cached
+    elif live.get("available") and cached and live_ticker == cached_ticker:
+        # Keep the same contract fresh. Kalshi can publish/update the explicit
+        # Target Price shortly after the market shell appears; never preserve a
+        # stale target just because the ticker itself has not changed.
+        live_target = safe_float(live.get("target"))
+        if pd.notna(live_target) and live_target > 0:
+            cached["target"] = float(live_target)
+        if live.get("close_time"):
+            cached["close_time"] = live.get("close_time")
+        if live.get("market"):
+            cached["market"] = live.get("market")
+        cached["title"] = live.get("title", cached.get("title", "BTC 15 min"))
         st.session_state["kalshi_contract_snapshot"] = cached
 
     if cached:
