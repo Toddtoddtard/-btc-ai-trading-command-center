@@ -47,7 +47,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r36-reliability-v31"
+APP_VERSION = "2026.09.04-r37-reliability-v31"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -485,8 +485,8 @@ def open_paper_position(action, price, position_pct, hist, note=""):
             return {"ok": False, "message": "Paper account already has BTC exposure; reset or close it first."}
 
         if action == "BUY":
-            if cash < notional:
-                return {"ok": False, "message": "Not enough paper cash for the approved long."}
+            if cash < notional + entry_cost:
+                return {"ok": False, "message": "Not enough paper cash for the approved long including simulated costs."}
             cash -= (notional + entry_cost)
             btc += qty
             side = "LONG"
@@ -560,7 +560,8 @@ def close_paper_position(price, reason="Exit rule"):
             exit_cost = execution_cost_bps(notional)
             cash += (notional - exit_cost)
             btc -= qty
-            realized = (price - entry_price) * qty - exit_cost
+            entry_cost_est = execution_cost_bps(qty * entry_price)
+            realized = (price - entry_price) * qty - entry_cost_est - exit_cost
             signed_qty = -qty
         else:
             qty = min(entry_qty, abs(min(0.0, btc)))
@@ -568,7 +569,8 @@ def close_paper_position(price, reason="Exit rule"):
             exit_cost = execution_cost_bps(notional)
             cash -= (notional + exit_cost)
             btc += qty
-            realized = (entry_price - price) * qty - exit_cost
+            entry_cost_est = execution_cost_bps(qty * entry_price)
+            realized = (entry_price - price) * qty - entry_cost_est - exit_cost
             signed_qty = qty
 
         # Remove tiny floating-point leftovers.
@@ -587,7 +589,7 @@ def close_paper_position(price, reason="Exit rule"):
             notional,
             cash,
             btc,
-            f"{reason} | realized_pnl=${realized:,.2f} | exit_cost=${exit_cost:,.2f}",
+            f"{reason} | realized_pnl=${realized:,.2f} | entry_cost=${entry_cost_est:,.2f} | exit_cost=${exit_cost:,.2f}",
         )
         conn.execute(
             """UPDATE auto_paper_state
