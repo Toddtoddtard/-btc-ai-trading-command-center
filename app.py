@@ -15,6 +15,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
+from reliability_v31 import (
+    calibrate_confidence, detect_regime, execution_cost_bps,
+    learned_policy, learned_trade_gate, regime_specialist_weight,
+    source_health_from_specialists,
+)
 
 # ============================================================
 # BTC AI TRADING COMMAND CENTER — PAPER TRADING ONLY
@@ -42,7 +47,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r34-atomic-kalshi-rollover"
+APP_VERSION = "2026.09.04-r35-reliability-v31"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -466,6 +471,7 @@ def open_paper_position(action, price, position_pct, hist, note=""):
     if notional < 10:
         return {"ok": False, "message": "No paper trade: paper allocation is too small."}
 
+    entry_cost = execution_cost_bps(notional)
     qty = notional / price
     atr = safe_float(hist["atr14"].iloc[-1], price * 0.0025)
     stop_distance = max(atr * 1.10, price * 0.0025)
@@ -481,7 +487,7 @@ def open_paper_position(action, price, position_pct, hist, note=""):
         if action == "BUY":
             if cash < notional:
                 return {"ok": False, "message": "Not enough paper cash for the approved long."}
-            cash -= notional
+            cash -= (notional + entry_cost)
             btc += qty
             side = "LONG"
             stop_loss = price - stop_distance
@@ -490,7 +496,7 @@ def open_paper_position(action, price, position_pct, hist, note=""):
         else:
             # Simulated short: sale proceeds are credited to paper cash and the
             # BTC balance becomes negative. Equity remains cash + BTC*price.
-            cash += notional
+            cash += (notional - entry_cost)
             btc -= qty
             side = "SHORT"
             stop_loss = price + stop_distance
@@ -510,7 +516,7 @@ def open_paper_position(action, price, position_pct, hist, note=""):
             notional,
             cash,
             btc,
-            note,
+            f"{note} | entry_cost=${entry_cost:,.2f}",
         )
         conn.execute(
             """UPDATE auto_paper_state
@@ -551,16 +557,18 @@ def close_paper_position(price, reason="Exit rule"):
         if side == "LONG":
             qty = min(entry_qty, max(0.0, btc))
             notional = qty * price
-            cash += notional
+            exit_cost = execution_cost_bps(notional)
+            cash += (notional - exit_cost)
             btc -= qty
-            realized = (price - entry_price) * qty
+            realized = (price - entry_price) * qty - exit_cost
             signed_qty = -qty
         else:
             qty = min(entry_qty, abs(min(0.0, btc)))
             notional = qty * price
-            cash -= notional
+            exit_cost = execution_cost_bps(notional)
+            cash -= (notional + exit_cost)
             btc += qty
-            realized = (entry_price - price) * qty
+            realized = (entry_price - price) * qty - exit_cost
             signed_qty = qty
 
         # Remove tiny floating-point leftovers.
@@ -579,7 +587,7 @@ def close_paper_position(price, reason="Exit rule"):
             notional,
             cash,
             btc,
-            f"{reason} | realized_pnl=${realized:,.2f}",
+            f"{reason} | realized_pnl=${realized:,.2f} | exit_cost=${exit_cost:,.2f}",
         )
         conn.execute(
             """UPDATE auto_paper_state
@@ -1509,12 +1517,15 @@ def run_specialists(hist, agg, futures, kalshi):
 
 
 def master_decision(results, hist, kalshi=None):
+    remote_learning = fetch_remote_learning_state() or {}
+    regime_name = detect_regime(hist)
+    policy = learned_policy(remote_learning, regime_name)
     weighted_sum = 0.0
     total_weight = 0.0
     signs = []
 
     for name, result in results.items():
-        weight = adaptive_specialist_weight(name)
+        weight = adaptive_specialist_weight(name, regime_name)
         weighted_sum += result["score"] * result["confidence"] * weight
         total_weight += result["confidence"] * weight
         signs.append(np.sign(result["score"]))
@@ -1582,7 +1593,7 @@ def master_decision(results, hist, kalshi=None):
         # -----------------------------------------------------------
         lock_up = (
             raw_side == "UP"
-            and confidence >= 0.68
+            and confidence >= policy["lock_confidence_floor"]
             and projected_edge >= max(atr * 0.35, px * 0.00035)
             and (
                 (pd.notna(remaining) and remaining <= 300)
@@ -1592,7 +1603,7 @@ def master_decision(results, hist, kalshi=None):
 
         lock_down = (
             raw_side == "DOWN"
-            and confidence >= 0.68
+            and confidence >= policy["lock_confidence_floor"]
             and projected_edge <= -max(atr * 0.35, px * 0.00035)
             and (
                 (pd.notna(remaining) and remaining <= 300)
@@ -1610,12 +1621,12 @@ def master_decision(results, hist, kalshi=None):
         # but we avoid extremely low-probability lottery-style entries.
         # -----------------------------------------------------------
         strong_move_up = (
-            base_score >= 0.30
+            base_score >= policy["edge_floor"]
             and forecast_move >= max(atr * 0.50, px * 0.0007)
             and consensus >= 0.30
         )
         strong_move_down = (
-            base_score <= -0.30
+            base_score <= -policy["edge_floor"]
             and forecast_move <= -max(atr * 0.50, px * 0.0007)
             and consensus >= 0.30
         )
@@ -1691,14 +1702,27 @@ def master_decision(results, hist, kalshi=None):
         up_prob = np.nan
         down_prob = np.nan
 
-        if base_score >= 0.32 and confidence >= 0.60:
+        if base_score >= policy["edge_floor"] and confidence >= policy["trade_confidence_floor"]:
             action = "SCALP UP"
-        elif base_score <= -0.32 and confidence >= 0.60:
+        elif base_score <= -policy["edge_floor"] and confidence >= policy["trade_confidence_floor"]:
             action = "SCALP DOWN"
         else:
             action = "HOLD"
 
         prediction_label = "Kalshi target unavailable"
+
+    source_health = source_health_from_specialists(results)
+    confidence = calibrate_confidence(
+        confidence, consensus, policy, source_health=source_health, state=remote_learning
+    )
+    if action not in {"HOLD", "WAIT"}:
+        allowed, gated_action = learned_trade_gate(
+            action, confidence, base_score, consensus, policy, source_health=source_health
+        )
+        if not allowed:
+            action = "HOLD"
+            locked_side = None
+            reason_parts = [f"{gated_action}; learned reliability gate blocked trade"]
 
     risk_level = (
         "LOW"
@@ -2324,11 +2348,12 @@ def get_specialist_learning_state():
 
     return state
 
-def adaptive_specialist_weight(name):
-    state = get_specialist_learning_state().get(name, {})
-    learned = safe_float(state.get("adaptive_weight"), 1.0)
+def adaptive_specialist_weight(name, regime=None):
+    remote = fetch_remote_learning_state() or {}
+    state = (remote.get("specialists", {}) or {}).get(name, {})
     base = safe_float(SPECIALIST_WEIGHTS.get(name), 1.0)
-    return base * learned
+    regime = regime or "UNKNOWN"
+    return regime_specialist_weight(base, state, regime)
 
 
 def register_specialist_window_predictions(
