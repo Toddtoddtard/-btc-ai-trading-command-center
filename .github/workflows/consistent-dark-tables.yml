@@ -1,0 +1,40 @@
+name: Consistent Dark Dashboard Tables
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_consistent_dark_tables.py'
+      - '.github/workflows/consistent-dark-tables.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply table UI patch
+        run: python tools/apply_consistent_dark_tables.py
+      - name: Compile
+        run: python -m py_compile app.py
+      - name: Verify
+        run: |
+          grep -q 'def render_dashboard_table' app.py
+          grep -q 'dashboard-dark-wrap' app.py
+          grep -q 'r41-consistent-dark-tables' app.py
+      - name: Commit patched app
+        run: |
+          if git diff --quiet -- app.py; then
+            echo 'No app.py changes needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Make dashboard tables consistent in dark mode'
+          git push origin main
