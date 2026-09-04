@@ -1,0 +1,60 @@
+name: Bot Intelligence v4 Dashboard
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bot_intelligence_dashboard.py'
+      - 'tools/apply_bot_intelligence_v4.py'
+      - '.github/workflows/bot-intelligence-dashboard-v4.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bot-intelligence-v4-dashboard
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Apply v4 integration
+        run: python tools/apply_bot_intelligence_v4.py
+      - name: Compile critical files
+        run: python -m py_compile app.py bot_intelligence_dashboard.py council_v4.py reliability_v31.py ai_core.py
+      - name: Verify integration anchors
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('app.py').read_text()
+          assert 'from council_v4 import council_vote' in s
+          assert 'from bot_intelligence_dashboard import render_bot_intelligence_dashboard' in s
+          assert 'v4_council = council_vote(results, remote_learning, regime_name)' in s
+          assert 'render_bot_intelligence_dashboard(' in s
+          assert 'r42-bot-intelligence-v4' in s
+          print('Bot Intelligence v4 app integration verified')
+          PY
+      - name: Commit integrated app
+        shell: bash
+        run: |
+          if git diff --quiet -- app.py; then
+            echo 'app.py already integrated'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Wire Bot Intelligence v4 into live dashboard'
+          git push origin main
