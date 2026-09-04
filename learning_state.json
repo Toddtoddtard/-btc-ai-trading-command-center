@@ -1,4 +1,19 @@
 {
+  "champion_challenger": {
+    "best_challenger": {
+      "accuracy": 0.7272727272727273,
+      "median_error": 78.51987462789111,
+      "samples": 11
+    },
+    "champion": {
+      "accuracy": 0.7272727272727273,
+      "median_error": 87.48392432217952,
+      "samples": 11
+    },
+    "evaluated_at": "2026-09-04T15:55:56.088352+00:00",
+    "minimum_margin": 0.05,
+    "promoted": false
+  },
   "confidence_model": {
     "brier_ewma": 0.23450865715593067,
     "last_base_score": 0.4299539669503415,
@@ -6,6 +21,7 @@
     "last_correct": 1,
     "samples": 1
   },
+  "data_quality": {},
   "forecast": {
     "avg_abs_error": 161.7572625868158,
     "avg_path_error": 96.30464520133788,
@@ -475,6 +491,7 @@
     "ticker": "KXBTC15M-26SEP041200-00",
     "would_wait": true
   },
+  "prediction_snapshots": [],
   "regimes": {
     "UNKNOWN": {
       "avg_abs_return": 0.00036229441898072423,
@@ -2809,55 +2826,62 @@
     "active_target": 79529.72,
     "active_ticker": "KXBTC15M-26SEP041200-00",
     "btc_price": 79454.01,
+    "champion_promoted": false,
     "current_regime": "TREND_UP",
     "forecast_samples": 26,
-    "graded_this_run": true,
+    "graded_this_run": false,
     "kalshi_accuracy": 0.782608695652174,
     "kalshi_samples": 23,
     "last_graded_ticker": "KXBTC15M-26SEP041145-45",
-    "learning_version": 3,
-    "official_results_resolved": 1,
-    "registered_this_run": true,
+    "learning_version": 31,
+    "official_results_resolved": 0,
+    "registered_this_run": false,
     "robust_abs_error": 112.3866393541634,
     "robust_path_error": 106.96668477452059,
     "shared_core": true,
+    "strict_expiry_grading": true,
     "wait_confidence_floor": 0.6127211901947904,
     "wait_edge_floor": 0.21233684493324523,
     "walk_forward_accuracy": 0.18181818181818182,
     "walk_forward_samples": 11,
     "worker_ok": true
   },
-  "updated_at": "2026-09-04T15:47:25.295365+00:00",
+  "updated_at": "2026-09-04T15:55:56.088370+00:00",
   "validation": {
-    "direction_accuracy": 0.18181818181818182,
-    "evaluated_at": "2026-09-04T15:47:25.294949+00:00",
-    "mae": 353.4060448967251,
-    "median_abs_error": 280.0244759875932,
+    "direction_accuracy": 0.7272727272727273,
+    "evaluated_at": "2026-09-04T15:55:56.020974+00:00",
+    "mae": 118.40328914627952,
+    "median_abs_error": 87.48392432217952,
     "regimes": {
-      "HIGH_VOL": {
-        "direction_accuracy": 0.0,
-        "median_abs_error": 444.3108627508627,
-        "samples": 1
-      },
       "LOW_VOL_RANGE": {
         "direction_accuracy": 1.0,
-        "median_abs_error": 29.540749731691903,
-        "samples": 1
+        "median_abs_error": 70.46406386855233,
+        "samples": 2
       },
       "RANGE": {
-        "direction_accuracy": 0.0,
-        "median_abs_error": 414.6176471968065,
+        "direction_accuracy": 0.75,
+        "median_abs_error": 93.62881257312256,
         "samples": 4
       },
       "TREND_DOWN": {
-        "direction_accuracy": 0.2,
-        "median_abs_error": 192.85855238958902,
-        "samples": 5
+        "direction_accuracy": 0.5,
+        "median_abs_error": 157.50957763921906,
+        "samples": 4
+      },
+      "TREND_UP": {
+        "direction_accuracy": 1.0,
+        "median_abs_error": 16.481432159620454,
+        "samples": 1
       }
     },
     "samples": 11
   },
-  "version": 3,
+  "version": 31,
+  "wait_counterfactual": {
+    "avoided_losses": 0,
+    "profitable_waits": 0,
+    "samples": 0
+  },
   "wait_policy": {
     "minimum_calibrated_confidence": 0.6127211901947904,
     "minimum_edge_score": 0.21233684493324523,
