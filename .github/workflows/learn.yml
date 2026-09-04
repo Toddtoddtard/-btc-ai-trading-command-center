@@ -16,6 +16,7 @@ on:
       - 'specialist_knowledge_v5.py'
       - 'enrich_learning_state_v5.py'
       - 'profitability_v5.py'
+      - 'tests/test_audit_v6.py'
       - '.github/workflows/learn.yml'
   schedule:
     - cron: "*/5 * * * *"
@@ -43,7 +44,9 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py tests/test_audit_v6.py
+      - name: Run audit v6 regression tests
+        run: python -m unittest tests.test_audit_v6 -v
       - name: Load previous private learning state
         shell: bash
         run: |
@@ -94,6 +97,9 @@ jobs:
           assert data.get('status', {}).get('bot_intelligence_v4_ok') is True
           assert data.get('status', {}).get('specialist_self_learning_v5') is True
           assert data.get('status', {}).get('intelligence_version') == 5
+          assert data.get('status', {}).get('regime_tagged_specialist_history') is True
+          assert data.get('status', {}).get('current_regime') in {'HIGH_VOL', 'TREND_UP', 'TREND_DOWN', 'LOW_VOL_RANGE', 'RANGE'}
+          assert data.get('status', {}).get('specialist_knowledge_regime') == data.get('status', {}).get('current_regime') or data.get('specialist_knowledge_v5', {}).get('regime') == data.get('pending', {}).get('regime')
           assert 'Kalshi Context AI' in data.get('specialists', {})
           assert 'Event AI' not in data.get('specialists', {})
           assert 'rolling' in data
@@ -113,7 +119,7 @@ jobs:
           before=int(data.get('status', {}).get('samples_before_run', 0))
           after=int(data.get('status', {}).get('samples_after_run', 0))
           assert after >= before, (before, after)
-          print('learning-state v3.1 + v4 + Specialist Intelligence v5 validation passed; samples', before, '->', after)
+          print('learning-state v3.1 + v4 + Specialist Intelligence v5 + Audit v6 validation passed; samples', before, '->', after)
           PY
       - name: Publish learning state
         shell: bash
