@@ -47,7 +47,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r35-reliability-v31"
+APP_VERSION = "2026.09.04-r36-reliability-v31"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -1670,11 +1670,11 @@ def master_decision(results, hist, kalshi=None):
             action = "LOCK DOWN"
             locked_side = "DOWN"
 
-        elif strong_move_up and up_price_favorable and confidence >= 0.58:
+        elif strong_move_up and up_price_favorable and confidence >= policy["trade_confidence_floor"]:
             action = "SCALP UP"
             locked_side = None
 
-        elif strong_move_down and down_price_favorable and confidence >= 0.58:
+        elif strong_move_down and down_price_favorable and confidence >= policy["trade_confidence_floor"]:
             action = "SCALP DOWN"
             locked_side = None
 
@@ -1712,6 +1712,7 @@ def master_decision(results, hist, kalshi=None):
         prediction_label = "Kalshi target unavailable"
 
     source_health = source_health_from_specialists(results)
+    gate_note = ""
     confidence = calibrate_confidence(
         confidence, consensus, policy, source_health=source_health, state=remote_learning
     )
@@ -1720,9 +1721,12 @@ def master_decision(results, hist, kalshi=None):
             action, confidence, base_score, consensus, policy, source_health=source_health
         )
         if not allowed:
+            if action.startswith("LOCK"):
+                st.session_state.pop("kalshi_lock_ticker", None)
+                st.session_state.pop("kalshi_lock_side", None)
             action = "HOLD"
             locked_side = None
-            reason_parts = [f"{gated_action}; learned reliability gate blocked trade"]
+            gate_note = f"{gated_action}; learned reliability gate blocked trade"
 
     risk_level = (
         "LOW"
@@ -1744,6 +1748,9 @@ def master_decision(results, hist, kalshi=None):
             for result in strongest
         )
     ]
+
+    if gate_note:
+        reason_parts.append(gate_note)
 
     if kctx["available"]:
         odds_text = ""
@@ -1775,11 +1782,17 @@ def master_decision(results, hist, kalshi=None):
         "up_probability": up_prob,
         "down_probability": down_prob,
         "kalshi_available": kctx["available"],
+        "policy": policy,
+        "source_health": source_health,
+        "regime": regime_name,
     }
 
 
 def risk_evaluate(decision, account, hist, futures):
     px = float(hist["close"].iloc[-1])
+    policy = decision.get("policy", {})
+    source_health = safe_float(decision.get("source_health"), 1.0)
+    learned_conf_floor = safe_float(policy.get("trade_confidence_floor"), 0.62)
     atr_pct = safe_float(hist["atr14"].iloc[-1] / px, 0.003)
     confidence = decision["confidence"]
     consensus = decision["consensus"]
@@ -1787,8 +1800,10 @@ def risk_evaluate(decision, account, hist, futures):
     if decision["action"] in {"HOLD", "LOCK UP", "LOCK DOWN"}:
         reason = "LOCK: hold current Kalshi call to expiration" if decision["action"].startswith("LOCK") else "HOLD signal"
         return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": reason}
-    if confidence < 0.62:
-        return {"approved": False, "position_pct": 0.0, "risk_score": 0.9, "reason": "Confidence below 62%"}
+    if source_health < 0.68:
+        return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": "Market-data health below reliability floor"}
+    if confidence < learned_conf_floor:
+        return {"approved": False, "position_pct": 0.0, "risk_score": 0.9, "reason": f"Confidence below learned floor ({learned_conf_floor:.0%})"}
     if consensus < 0.30:
         return {"approved": False, "position_pct": 0.0, "risk_score": 0.8, "reason": "Specialist consensus too low"}
 
