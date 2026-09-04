@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r3-auto-paper"
+APP_VERSION = "2026.09.04-single-file-r4-smooth-refresh"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -1071,325 +1071,324 @@ if st.sidebar.button("Reset paper account", use_container_width=True):
     st.rerun()
 
 # ============================================================
-# FETCH DATA
+# SMOOTH LIVE DASHBOARD
 # ============================================================
+# A fragment reruns independently from the rest of the Streamlit app.
+# This avoids the full-page rebuild/flash caused by time.sleep()+st.rerun().
+live_run_every = refresh_seconds if auto_refresh else None
 
-load_started = time.perf_counter()
-errors = []
+@st.fragment(run_every=live_run_every)
+def live_dashboard():
 
-try:
-    ticker = fetch_spot_ticker()
-except Exception as exc:
-    ticker = {"price": np.nan, "change_24h": np.nan, "quote_volume_24h": np.nan, "feed_ms": np.nan, "source": "Unavailable"}
-    errors.append(f"Spot ticker: {exc}")
+    load_started = time.perf_counter()
+    errors = []
 
-try:
-    raw_hist, kline_ms = fetch_klines("1m", 500)
-    hist = enrich_history(raw_hist)
-except Exception as exc:
-    hist, kline_ms = pd.DataFrame(), np.nan
-    errors.append(f"Klines: {exc}")
+    try:
+        ticker = fetch_spot_ticker()
+    except Exception as exc:
+        ticker = {"price": np.nan, "change_24h": np.nan, "quote_volume_24h": np.nan, "feed_ms": np.nan, "source": "Unavailable"}
+        errors.append(f"Spot ticker: {exc}")
 
-try:
-    agg, agg_ms = fetch_agg_trades(600)
-except Exception as exc:
-    agg, agg_ms = pd.DataFrame(), np.nan
-    errors.append(f"Aggregate trades: {exc}")
+    try:
+        raw_hist, kline_ms = fetch_klines("1m", 500)
+        hist = enrich_history(raw_hist)
+    except Exception as exc:
+        hist, kline_ms = pd.DataFrame(), np.nan
+        errors.append(f"Klines: {exc}")
 
-futures = fetch_futures_snapshot()
-kalshi = fetch_kalshi_bitcoin_markets()
+    try:
+        agg, agg_ms = fetch_agg_trades(600)
+    except Exception as exc:
+        agg, agg_ms = pd.DataFrame(), np.nan
+        errors.append(f"Aggregate trades: {exc}")
 
-if hist.empty:
-    st.error("Price history is unavailable, so the AI engine cannot run safely right now.")
-    if errors:
-        st.code("\n".join(errors))
-    st.stop()
+    futures = fetch_futures_snapshot()
+    kalshi = fetch_kalshi_bitcoin_markets()
 
-price = safe_float(ticker.get("price"), safe_float(hist["close"].iloc[-1]))
-if pd.isna(price):
-    price = float(hist["close"].iloc[-1])
+    if hist.empty:
+        st.error("Price history is unavailable, so the AI engine cannot run safely right now.")
+        if errors:
+            st.code("\n".join(errors))
+        st.stop()
 
-results = run_specialists(hist, agg, futures, kalshi)
-decision = master_decision(results, hist)
-account = get_account(price)
-risk = risk_evaluate(decision, account, hist, futures)
+    price = safe_float(ticker.get("price"), safe_float(hist["close"].iloc[-1]))
+    if pd.isna(price):
+        price = float(hist["close"].iloc[-1])
 
-auto_result = manage_auto_paper(decision, risk, price, hist)
-if auto_result.get("event"):
+    results = run_specialists(hist, agg, futures, kalshi)
+    decision = master_decision(results, hist)
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
 
-if record_predictions:
-    maybe_record_prediction(decision, price, min_seconds=60)
-resolve_predictions(price)
+    auto_result = manage_auto_paper(decision, risk, price, hist)
+    if auto_result.get("event"):
+        account = get_account(price)
+        risk = risk_evaluate(decision, account, hist, futures)
 
-full_cycle_ms = (time.perf_counter() - load_started) * 1000
+    if record_predictions:
+        maybe_record_prediction(decision, price, min_seconds=60)
+    resolve_predictions(price)
 
-# ============================================================
-# TOP METRICS
-# ============================================================
+    full_cycle_ms = (time.perf_counter() - load_started) * 1000
 
-m1, m2, m3, m4, m5, m6 = st.columns(6)
-m1.metric("BTC", fmt_money(price))
-m2.metric("24h", fmt_pct(ticker.get("change_24h")))
-m3.metric("Master", decision["action"])
-m4.metric("Confidence", f"{decision['confidence']*100:.1f}%")
-m5.metric("Consensus", f"{decision['consensus']*100:.1f}%")
-m6.metric("Spot feed", "N/A" if pd.isna(ticker.get("feed_ms")) else f"{ticker['feed_ms']:.0f} ms")
+    # ============================================================
+    # TOP METRICS
+    # ============================================================
 
-st.caption(
-    f"Dashboard cycle {full_cycle_ms:.0f} ms • kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "
-    f"futures snapshot {futures.get('feed_ms', np.nan):.0f} ms • Kalshi cache 30s"
-)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("BTC", fmt_money(price))
+    m2.metric("24h", fmt_pct(ticker.get("change_24h")))
+    m3.metric("Master", decision["action"])
+    m4.metric("Confidence", f"{decision['confidence']*100:.1f}%")
+    m5.metric("Consensus", f"{decision['consensus']*100:.1f}%")
+    m6.metric("Spot feed", "N/A" if pd.isna(ticker.get("feed_ms")) else f"{ticker['feed_ms']:.0f} ms")
 
-# ============================================================
-# TABS
-# ============================================================
+    st.caption(
+        f"Dashboard cycle {full_cycle_ms:.0f} ms • kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "
+        f"futures snapshot {futures.get('feed_ms', np.nan):.0f} ms • Kalshi cache 30s"
+    )
 
-tab_market, tab_ai, tab_flow, tab_paper, tab_journal, tab_backtest = st.tabs(
-    ["Market", "AI Council", "Order Flow + Kalshi", "Paper Trading", "Prediction Journal", "Backtest"]
-)
+    # ============================================================
+    # TABS
+    # ============================================================
 
-with tab_market:
-    st.plotly_chart(candle_chart(hist), use_container_width=True)
-    c1, c2, c3, c4 = st.columns(4)
-    last = hist.iloc[-1]
-    c1.metric("RSI 14", f"{safe_float(last['rsi'], 50):.1f}")
-    c2.metric("ATR 14", f"${safe_float(last['atr14'], 0):,.2f}")
-    c3.metric("24h quote volume", f"${safe_float(ticker.get('quote_volume_24h'), 0):,.0f}")
-    c4.metric("Target (15m)", fmt_money(decision["target_price"]))
+    tab_market, tab_ai, tab_flow, tab_paper, tab_journal, tab_backtest = st.tabs(
+        ["Market", "AI Council", "Order Flow + Kalshi", "Paper Trading", "Prediction Journal", "Backtest"]
+    )
 
-with tab_ai:
-    st.subheader("Master 15-minute Prediction AI")
-    d1, d2, d3, d4, d5 = st.columns(5)
-    d1.metric("Action", decision["action"])
-    d2.metric("Master score", f"{decision['score']:+.3f}")
-    d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
-    d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
-    d5.metric("Risk level", decision["risk_level"])
-    st.info(decision["reason"])
+    with tab_market:
+        st.plotly_chart(candle_chart(hist), use_container_width=True)
+        c1, c2, c3, c4 = st.columns(4)
+        last = hist.iloc[-1]
+        c1.metric("RSI 14", f"{safe_float(last['rsi'], 50):.1f}")
+        c2.metric("ATR 14", f"${safe_float(last['atr14'], 0):,.2f}")
+        c3.metric("24h quote volume", f"${safe_float(ticker.get('quote_volume_24h'), 0):,.0f}")
+        c4.metric("Target (15m)", fmt_money(decision["target_price"]))
 
-    rows = []
-    for r in results.values():
-        rows.append({
-            "Specialist": r["name"],
-            "Signal": r["signal"],
-            "Score": round(r["score"], 3),
-            "Confidence %": round(r["confidence"] * 100, 1),
-            "Weight": SPECIALIST_WEIGHTS.get(r["name"], 1.0),
-            "Reason": r["reason"],
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    with tab_ai:
+        st.subheader("Master 15-minute Prediction AI")
+        d1, d2, d3, d4, d5 = st.columns(5)
+        d1.metric("Action", decision["action"])
+        d2.metric("Master score", f"{decision['score']:+.3f}")
+        d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
+        d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
+        d5.metric("Risk level", decision["risk_level"])
+        st.info(decision["reason"])
 
-with tab_flow:
-    st.subheader("AGGR-style aggressor flow")
-    st.caption("This uses Binance aggregate trades directly—the underlying aggressor/order-flow data—rather than scraping the AGGR.trade webpage.")
-    if not agg.empty:
-        buy_n = agg.loc[agg["aggressor"] == "BUY", "notional"].sum()
-        sell_n = agg.loc[agg["aggressor"] == "SELL", "notional"].sum()
-        total_n = buy_n + sell_n
-        imbalance = (buy_n - sell_n) / total_n if total_n else 0.0
-        f1, f2, f3, f4 = st.columns(4)
-        f1.metric("Aggressive buys", f"${buy_n:,.0f}")
-        f2.metric("Aggressive sells", f"${sell_n:,.0f}")
-        f3.metric("Flow imbalance", f"{imbalance*100:+.1f}%")
-        f4.metric("Trades sampled", f"{len(agg):,}")
-        show = agg[["time", "aggressor", "price", "qty", "notional"]].tail(80).sort_values("time", ascending=False)
-        st.dataframe(show, use_container_width=True, hide_index=True)
-    else:
-        st.warning("Aggregate trade feed unavailable.")
+        rows = []
+        for r in results.values():
+            rows.append({
+                "Specialist": r["name"],
+                "Signal": r["signal"],
+                "Score": round(r["score"], 3),
+                "Confidence %": round(r["confidence"] * 100, 1),
+                "Weight": SPECIALIST_WEIGHTS.get(r["name"], 1.0),
+                "Reason": r["reason"],
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.subheader("Futures liquidity / derivatives")
-    q1, q2, q3, q4 = st.columns(4)
-    q1.metric("Funding", f"{safe_float(futures.get('funding_rate'), 0)*100:.4f}%")
-    q2.metric("Open interest", f"{safe_float(futures.get('open_interest'), 0):,.0f} BTC")
-    q3.metric("Book imbalance", f"{safe_float(futures.get('book_imbalance'), 0)*100:+.1f}%")
-    q4.metric("Futures status", "LIVE" if futures.get("ok") else "UNAVAILABLE")
-
-    st.divider()
-    st.subheader("Kalshi — read-only BTC event signal")
-    if kalshi.get("ok"):
-        markets = kalshi.get("markets", [])
-        st.caption(f"Public market-data lookup • {len(markets)} BTC-related open markets found • cached for 30 seconds")
-        if markets:
-            krows = []
-            for m in markets:
-                krows.append({
-                    "Ticker": m.get("ticker", ""),
-                    "Title": m.get("title", ""),
-                    "Yes bid": m.get("yes_bid_dollars", ""),
-                    "Yes ask": m.get("yes_ask_dollars", ""),
-                    "Last": m.get("last_price_dollars", ""),
-                    "Volume": m.get("volume_fp", ""),
-                    "Close": m.get("close_time", ""),
-                })
-            st.dataframe(pd.DataFrame(krows), use_container_width=True, hide_index=True)
+    with tab_flow:
+        st.subheader("AGGR-style aggressor flow")
+        st.caption("This uses Binance aggregate trades directly—the underlying aggressor/order-flow data—rather than scraping the AGGR.trade webpage.")
+        if not agg.empty:
+            buy_n = agg.loc[agg["aggressor"] == "BUY", "notional"].sum()
+            sell_n = agg.loc[agg["aggressor"] == "SELL", "notional"].sum()
+            total_n = buy_n + sell_n
+            imbalance = (buy_n - sell_n) / total_n if total_n else 0.0
+            f1, f2, f3, f4 = st.columns(4)
+            f1.metric("Aggressive buys", f"${buy_n:,.0f}")
+            f2.metric("Aggressive sells", f"${sell_n:,.0f}")
+            f3.metric("Flow imbalance", f"{imbalance*100:+.1f}%")
+            f4.metric("Trades sampled", f"{len(agg):,}")
+            show = agg[["time", "aggressor", "price", "qty", "notional"]].tail(80).sort_values("time", ascending=False)
+            st.dataframe(show, use_container_width=True, hide_index=True)
         else:
-            st.info("Kalshi responded, but no open market in the returned page matched Bitcoin/BTC right now.")
-    else:
-        st.warning("Kalshi public data is currently unavailable. The Event AI automatically falls back to neutral.")
-        if show_raw:
-            st.code(kalshi.get("error", "Unknown Kalshi error"))
+            st.warning("Aggregate trade feed unavailable.")
 
-with tab_paper:
-    st.subheader("Automatic Paper Trading")
-    auto_state = get_auto_state()
-    account = get_account(price)
+        st.divider()
+        st.subheader("Futures liquidity / derivatives")
+        q1, q2, q3, q4 = st.columns(4)
+        q1.metric("Funding", f"{safe_float(futures.get('funding_rate'), 0)*100:.4f}%")
+        q2.metric("Open interest", f"{safe_float(futures.get('open_interest'), 0):,.0f} BTC")
+        q3.metric("Book imbalance", f"{safe_float(futures.get('book_imbalance'), 0)*100:+.1f}%")
+        q4.metric("Futures status", "LIVE" if futures.get("ok") else "UNAVAILABLE")
 
-    status1, status2, status3, status4 = st.columns(4)
-    status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
-    status2.metric("Position", auto_state["side"])
-    status3.metric("Master", decision["action"])
-    status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
-
-    if bool(auto_state["enabled"]):
-        st.success(auto_result["message"] if auto_result.get("message") else auto_state.get("last_message", "AUTO PAPER running."))
-    else:
-        st.info("AUTO PAPER TRADING is off. Turn it on in the sidebar to let approved paper signals execute automatically.")
-
-    st.subheader("Paper Account")
-    a1, a2, a3, a4, a5 = st.columns(5)
-    a1.metric("Cash", fmt_money(account["cash"]))
-    a2.metric("BTC exposure", f"{account['btc']:+.6f}")
-    a3.metric("Equity", fmt_money(account["equity"]))
-    a4.metric("P&L", fmt_money(account["pnl"]))
-    a5.metric("Return", f"{account['return_pct']:+.2f}%")
-
-    auto_state = get_auto_state()
-    if auto_state["side"] in {"LONG", "SHORT"}:
-        entry = safe_float(auto_state["entry_price"])
-        stop = safe_float(auto_state["stop_loss"])
-        target = safe_float(auto_state["take_profit"])
-        qty = abs(safe_float(auto_state["entry_qty"], 0.0))
-        entry_ts = int(auto_state["entry_ts"] or int(time.time()))
-        elapsed = max(0, int(time.time()) - entry_ts)
-        if auto_state["side"] == "LONG":
-            unrealized_dollars = (price - entry) * qty
-        else:
-            unrealized_dollars = (entry - price) * qty
-
-        st.subheader("Active Position")
-        p1, p2, p3, p4, p5, p6 = st.columns(6)
-        p1.metric("Side", auto_state["side"])
-        p2.metric("Entry", fmt_money(entry))
-        p3.metric("Current", fmt_money(price))
-        p4.metric("Stop", fmt_money(stop))
-        p5.metric("Target", fmt_money(target))
-        p6.metric("Unrealized", fmt_money(unrealized_dollars))
-        st.caption(
-            f"Quantity {qty:.6f} BTC • elapsed {elapsed//60:02d}:{elapsed%60:02d} • "
-            f"automatic time exit at {PREDICTION_HORIZON_MIN}:00"
-        )
-        if st.button("Close Paper Position Now", use_container_width=True):
-            result = close_paper_position(price, "manual close")
-            if result["ok"]:
-                st.success(result["message"])
+        st.divider()
+        st.subheader("Kalshi — read-only BTC event signal")
+        if kalshi.get("ok"):
+            markets = kalshi.get("markets", [])
+            st.caption(f"Public market-data lookup • {len(markets)} BTC-related open markets found • cached for 30 seconds")
+            if markets:
+                krows = []
+                for m in markets:
+                    krows.append({
+                        "Ticker": m.get("ticker", ""),
+                        "Title": m.get("title", ""),
+                        "Yes bid": m.get("yes_bid_dollars", ""),
+                        "Yes ask": m.get("yes_ask_dollars", ""),
+                        "Last": m.get("last_price_dollars", ""),
+                        "Volume": m.get("volume_fp", ""),
+                        "Close": m.get("close_time", ""),
+                    })
+                st.dataframe(pd.DataFrame(krows), use_container_width=True, hide_index=True)
             else:
-                st.error(result["message"])
-            st.rerun()
+                st.info("Kalshi responded, but no open market in the returned page matched Bitcoin/BTC right now.")
+        else:
+            st.warning("Kalshi public data is currently unavailable. The Event AI automatically falls back to neutral.")
+            if show_raw:
+                st.code(kalshi.get("error", "Unknown Kalshi error"))
 
-    st.subheader("Risk Manager")
-    r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Approved", "YES" if risk["approved"] else "NO")
-    r2.metric("Position size", f"{risk['position_pct']*100:.2f}%")
-    r3.metric("Risk score", f"{risk['risk_score']:.2f}")
-    r4.metric("Decision", decision["action"])
-    st.caption(risk["reason"])
+    with tab_paper:
+        st.subheader("Automatic Paper Trading")
+        auto_state = get_auto_state()
+        account = get_account(price)
 
-    if not bool(auto_state["enabled"]) and auto_state["side"] == "NONE":
-        if st.button("Execute Approved Paper Trade", type="primary", use_container_width=True):
-            if risk["approved"]:
-                result = execute_paper_trade(
-                    decision["action"],
-                    price,
-                    risk["position_pct"],
-                    hist,
-                    note=f"MANUAL master={decision['score']:+.3f}, confidence={decision['confidence']:.3f}",
-                )
+        status1, status2, status3, status4 = st.columns(4)
+        status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
+        status2.metric("Position", auto_state["side"])
+        status3.metric("Master", decision["action"])
+        status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
+
+        if bool(auto_state["enabled"]):
+            st.success(auto_result["message"] if auto_result.get("message") else auto_state.get("last_message", "AUTO PAPER running."))
+        else:
+            st.info("AUTO PAPER TRADING is off. Turn it on in the sidebar to let approved paper signals execute automatically.")
+
+        st.subheader("Paper Account")
+        a1, a2, a3, a4, a5 = st.columns(5)
+        a1.metric("Cash", fmt_money(account["cash"]))
+        a2.metric("BTC exposure", f"{account['btc']:+.6f}")
+        a3.metric("Equity", fmt_money(account["equity"]))
+        a4.metric("P&L", fmt_money(account["pnl"]))
+        a5.metric("Return", f"{account['return_pct']:+.2f}%")
+
+        auto_state = get_auto_state()
+        if auto_state["side"] in {"LONG", "SHORT"}:
+            entry = safe_float(auto_state["entry_price"])
+            stop = safe_float(auto_state["stop_loss"])
+            target = safe_float(auto_state["take_profit"])
+            qty = abs(safe_float(auto_state["entry_qty"], 0.0))
+            entry_ts = int(auto_state["entry_ts"] or int(time.time()))
+            elapsed = max(0, int(time.time()) - entry_ts)
+            if auto_state["side"] == "LONG":
+                unrealized_dollars = (price - entry) * qty
+            else:
+                unrealized_dollars = (entry - price) * qty
+
+            st.subheader("Active Position")
+            p1, p2, p3, p4, p5, p6 = st.columns(6)
+            p1.metric("Side", auto_state["side"])
+            p2.metric("Entry", fmt_money(entry))
+            p3.metric("Current", fmt_money(price))
+            p4.metric("Stop", fmt_money(stop))
+            p5.metric("Target", fmt_money(target))
+            p6.metric("Unrealized", fmt_money(unrealized_dollars))
+            st.caption(
+                f"Quantity {qty:.6f} BTC • elapsed {elapsed//60:02d}:{elapsed%60:02d} • "
+                f"automatic time exit at {PREDICTION_HORIZON_MIN}:00"
+            )
+            if st.button("Close Paper Position Now", use_container_width=True):
+                result = close_paper_position(price, "manual close")
                 if result["ok"]:
                     st.success(result["message"])
                 else:
                     st.error(result["message"])
-                st.rerun()
-            else:
-                st.error(f"Paper trade blocked: {risk['reason']}")
+                st.rerun(scope="fragment")
 
-    with db_conn() as conn:
-        trades = pd.read_sql_query("SELECT * FROM paper_trades ORDER BY id DESC LIMIT 100", conn)
-    if not trades.empty:
-        st.subheader("Paper Trade Log")
-        st.dataframe(trades, use_container_width=True, hide_index=True)
-    else:
-        st.info("No paper trades yet.")
+        st.subheader("Risk Manager")
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Approved", "YES" if risk["approved"] else "NO")
+        r2.metric("Position size", f"{risk['position_pct']*100:.2f}%")
+        r3.metric("Risk score", f"{risk['risk_score']:.2f}")
+        r4.metric("Decision", decision["action"])
+        st.caption(risk["reason"])
 
-with tab_journal:
-    stats = prediction_stats()
-    j1, j2, j3, j4 = st.columns(4)
-    j1.metric("Predictions", stats["n"])
-    j2.metric("Resolved", stats["resolved"])
-    j3.metric("Accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
-    j4.metric("Avg |15m move|", "N/A" if pd.isna(stats["avg_abs_move"]) else f"{stats['avg_abs_move']:.3f}%")
-    journal_df = recent_predictions(150)
-    if not journal_df.empty:
-        st.dataframe(journal_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No predictions recorded yet.")
+        if not bool(auto_state["enabled"]) and auto_state["side"] == "NONE":
+            if st.button("Execute Approved Paper Trade", type="primary", use_container_width=True):
+                if risk["approved"]:
+                    result = execute_paper_trade(
+                        decision["action"],
+                        price,
+                        risk["position_pct"],
+                        hist,
+                        note=f"MANUAL master={decision['score']:+.3f}, confidence={decision['confidence']:.3f}",
+                    )
+                    if result["ok"]:
+                        st.success(result["message"])
+                    else:
+                        st.error(result["message"])
+                    st.rerun(scope="fragment")
+                else:
+                    st.error(f"Paper trade blocked: {risk['reason']}")
 
-with tab_backtest:
-    st.subheader("Walk-forward Backtest")
-    st.caption("This is deliberately not rerun every dashboard refresh. Press the button when you want a fresh historical check.")
-    if st.button("Run backtest", use_container_width=True):
-        bt, stats = walk_forward_backtest(hist, horizon=PREDICTION_HORIZON_MIN)
-        if not stats:
-            st.warning("Not enough qualifying historical signals in the current 1-minute window.")
+        with db_conn() as conn:
+            trades = pd.read_sql_query("SELECT * FROM paper_trades ORDER BY id DESC LIMIT 100", conn)
+        if not trades.empty:
+            st.subheader("Paper Trade Log")
+            st.dataframe(trades, use_container_width=True, hide_index=True)
         else:
-            b1, b2, b3, b4, b5 = st.columns(5)
-            b1.metric("Signals", stats["trades"])
-            b2.metric("Win rate", f"{stats['win_rate']*100:.1f}%")
-            b3.metric("Avg signal return", f"{stats['avg_return']*100:+.3f}%")
-            b4.metric("Median", f"{stats['median_return']*100:+.3f}%")
-            b5.metric("Compounded*", f"{stats['total_compound']*100:+.2f}%")
-            st.caption("*Compounded figure is diagnostic only; overlapping 15-minute observations make it unsuitable as a live-performance estimate.")
-            view = bt[["time", "close", "signal", "future_return", "strategy_return", "correct"]].tail(200).copy()
-            view["future_return"] = (view["future_return"] * 100).round(3)
-            view["strategy_return"] = (view["strategy_return"] * 100).round(3)
-            st.dataframe(view, use_container_width=True, hide_index=True)
+            st.info("No paper trades yet.")
 
-# ============================================================
-# DIAGNOSTICS / STATUS
-# ============================================================
+    with tab_journal:
+        stats = prediction_stats()
+        j1, j2, j3, j4 = st.columns(4)
+        j1.metric("Predictions", stats["n"])
+        j2.metric("Resolved", stats["resolved"])
+        j3.metric("Accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
+        j4.metric("Avg |15m move|", "N/A" if pd.isna(stats["avg_abs_move"]) else f"{stats['avg_abs_move']:.3f}%")
+        journal_df = recent_predictions(150)
+        if not journal_df.empty:
+            st.dataframe(journal_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No predictions recorded yet.")
 
-if errors:
-    with st.expander("Data warnings"):
-        for error in errors:
-            st.warning(error)
+    with tab_backtest:
+        st.subheader("Walk-forward Backtest")
+        st.caption("This is deliberately not rerun every dashboard refresh. Press the button when you want a fresh historical check.")
+        if st.button("Run backtest", use_container_width=True):
+            bt, stats = walk_forward_backtest(hist, horizon=PREDICTION_HORIZON_MIN)
+            if not stats:
+                st.warning("Not enough qualifying historical signals in the current 1-minute window.")
+            else:
+                b1, b2, b3, b4, b5 = st.columns(5)
+                b1.metric("Signals", stats["trades"])
+                b2.metric("Win rate", f"{stats['win_rate']*100:.1f}%")
+                b3.metric("Avg signal return", f"{stats['avg_return']*100:+.3f}%")
+                b4.metric("Median", f"{stats['median_return']*100:+.3f}%")
+                b5.metric("Compounded*", f"{stats['total_compound']*100:+.2f}%")
+                st.caption("*Compounded figure is diagnostic only; overlapping 15-minute observations make it unsuitable as a live-performance estimate.")
+                view = bt[["time", "close", "signal", "future_return", "strategy_return", "correct"]].tail(200).copy()
+                view["future_return"] = (view["future_return"] * 100).round(3)
+                view["strategy_return"] = (view["strategy_return"] * 100).round(3)
+                st.dataframe(view, use_container_width=True, hide_index=True)
 
-if show_raw:
-    with st.expander("Diagnostics"):
-        st.json({
-            "ticker": ticker,
-            "futures": futures,
-            "kalshi_status": {"ok": kalshi.get("ok"), "market_count": len(kalshi.get("markets", [])), "feed_ms": kalshi.get("feed_ms")},
-            "decision": decision,
-            "risk": risk,
-            "auto_paper": get_auto_state(),
-            "auto_cycle": auto_result,
-            "full_cycle_ms": full_cycle_ms,
-        })
+    # ============================================================
+    # DIAGNOSTICS / STATUS
+    # ============================================================
 
-st.divider()
-st.caption(
-    f"Last update {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')} • "
-    "Safety: PAPER ONLY • automatic simulation may trade long/short • no order API keys • no real-money exchange execution."
-)
+    if errors:
+        with st.expander("Data warnings"):
+            for error in errors:
+                st.warning(error)
 
-# ============================================================
-# AUTO REFRESH
-# Expensive sources are cached on separate TTLs, so a fast UI refresh does
-# not refetch Kalshi/futures/backtest work every second.
-# ============================================================
+    if show_raw:
+        with st.expander("Diagnostics"):
+            st.json({
+                "ticker": ticker,
+                "futures": futures,
+                "kalshi_status": {"ok": kalshi.get("ok"), "market_count": len(kalshi.get("markets", [])), "feed_ms": kalshi.get("feed_ms")},
+                "decision": decision,
+                "risk": risk,
+                "auto_paper": get_auto_state(),
+                "auto_cycle": auto_result,
+                "full_cycle_ms": full_cycle_ms,
+            })
 
-if auto_refresh:
-    time.sleep(refresh_seconds)
-    st.rerun()
+    st.divider()
+    st.caption(
+        f"Last update {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')} • "
+        "Safety: PAPER ONLY • automatic simulation may trade long/short • no order API keys • no real-money exchange execution."
+    )
+
+
+live_dashboard()
