@@ -1,0 +1,28 @@
+name: Apply R21 Dark Council Table
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-r21-dark-council.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python apply_r21_dark_council_table.py
+      - run: |
+          git config user.name "btc-ai-ui-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py
+          git commit -m "Make AI Council table respect dark mode"
+          git push origin main
