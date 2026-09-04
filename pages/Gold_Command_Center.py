@@ -1,3 +1,3 @@
-from market_command_center_shell import render_market_shell
+from multi_asset_command_center import render_market_command_center
 
-render_market_shell("gold")
+render_market_command_center("gold")
