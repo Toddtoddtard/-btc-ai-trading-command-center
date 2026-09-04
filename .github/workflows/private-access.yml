@@ -1,0 +1,51 @@
+name: Private Access Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - private-access-gate
+    paths:
+      - 'access_control.py'
+      - 'tools/apply_private_access.py'
+      - '.github/workflows/private-access.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: private-access-gate
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Apply access patch
+        run: python tools/apply_private_access.py
+      - name: Compile
+        run: python -m py_compile app.py access_control.py
+      - name: Verify access markers
+        run: |
+          grep -q 'from access_control import require_owner_approval' app.py
+          grep -q 'require_owner_approval()' app.py
+          grep -q 'r38-private-access' app.py
+      - name: Commit patched app
+        run: |
+          set -e
+          git config user.name "btc-ai-access-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app.py
+          if git diff --cached --quiet; then
+            echo "app.py already protected"
+            exit 0
+          fi
+          git commit -m "Protect dashboard with owner-approved access"
+          git fetch origin private-access-gate
+          git rebase origin/private-access-gate
+          git push origin HEAD:private-access-gate
