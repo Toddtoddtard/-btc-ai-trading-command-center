@@ -46,19 +46,6 @@ def _nav_css():
             letter-spacing:.13em;
             margin:.15rem 0 .45rem 0;
         }
-        div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] > button {
-            min-height:46px;
-            border-radius:11px;
-            font-weight:850;
-            letter-spacing:.02em;
-            border:1px solid rgba(22,135,255,.72);
-            background:linear-gradient(180deg,rgba(10,31,53,.98),rgba(7,22,39,.98));
-            box-shadow:0 6px 18px rgba(0,0,0,.18), 0 0 0 1px rgba(22,135,255,.08) inset;
-        }
-        div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] > button:hover {
-            border-color:#45a0ff;
-            box-shadow:0 0 18px rgba(22,135,255,.18);
-        }
         .market-switcher-note {
             color:#7890ad;
             font-size:.76rem;
@@ -72,7 +59,7 @@ def _nav_css():
 
 
 def render_market_nav(active="btc"):
-    """Five-button market switcher shared by every command center."""
+    """Five-link market switcher shared by every command center."""
     active = active if active in MARKETS else "btc"
     _nav_css()
     st.markdown('<div class="market-switcher-label">COMMAND CENTER</div>', unsafe_allow_html=True)
@@ -83,11 +70,9 @@ def render_market_nav(active="btc"):
             label = cfg["label"]
             if key == active:
                 label = f"● {label}"
-            if st.button(label, key=f"market_nav_{active}_{key}", use_container_width=True):
-                if key != active:
-                    st.switch_page(cfg["page"])
+            st.page_link(cfg["page"], label=label, use_container_width=True)
 
     st.markdown(
-        '<div class="market-switcher-note">Bitcoin is live now. Gold, gas prices and WTI will use Kalshi market context when their integrations are added. ZEC remains UI-only until a real Kalshi ZEC market exists.</div>',
+        '<div class="market-switcher-note">Bitcoin, Gold, Gas Prices, ZEC and WTI command centers are available from the navigation above.</div>',
         unsafe_allow_html=True,
     )
