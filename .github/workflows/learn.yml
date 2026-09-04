@@ -13,6 +13,9 @@ on:
       - 'ai_core.py'
       - 'council_v4.py'
       - 'bot_intelligence_report.py'
+      - 'specialist_knowledge_v5.py'
+      - 'enrich_learning_state_v5.py'
+      - 'profitability_v5.py'
       - '.github/workflows/learn.yml'
   schedule:
     - cron: "*/5 * * * *"
@@ -40,7 +43,7 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py
       - name: Load previous private learning state
         shell: bash
         run: |
@@ -72,6 +75,10 @@ jobs:
         run: |
           python bot_intelligence_report.py
           mv /tmp/learning_state_v4.json /tmp/learning_state.json
+      - name: Enrich specialist self-learning v5 knowledge
+        env:
+          LEARNING_STATE_OUTPUT: /tmp/learning_state.json
+        run: python enrich_learning_state_v5.py
       - name: Validate generated learning state
         run: |
           python - <<'PY'
@@ -85,6 +92,8 @@ jobs:
           assert data.get('status', {}).get('learning_version') == 31
           assert data.get('status', {}).get('strict_expiry_grading') is True
           assert data.get('status', {}).get('bot_intelligence_v4_ok') is True
+          assert data.get('status', {}).get('specialist_self_learning_v5') is True
+          assert data.get('status', {}).get('intelligence_version') == 5
           assert 'Kalshi Context AI' in data.get('specialists', {})
           assert 'Event AI' not in data.get('specialists', {})
           assert 'rolling' in data
@@ -99,10 +108,12 @@ jobs:
           assert 'wait_counterfactual' in data
           assert 'bot_intelligence_v4' in data
           assert isinstance(data.get('bot_intelligence_v4', {}).get('ranking', []), list)
+          assert 'specialist_knowledge_v5' in data
+          assert isinstance(data.get('specialist_knowledge_v5', {}).get('bots', {}), dict)
           before=int(data.get('status', {}).get('samples_before_run', 0))
           after=int(data.get('status', {}).get('samples_after_run', 0))
           assert after >= before, (before, after)
-          print('learning-state v3.1 + Bot Intelligence v4 validation passed; samples', before, '->', after)
+          print('learning-state v3.1 + v4 + Specialist Intelligence v5 validation passed; samples', before, '->', after)
           PY
       - name: Publish learning state
         shell: bash
@@ -123,5 +134,5 @@ jobs:
             echo "No learning-state change to publish."
             exit 0
           fi
-          git commit -m "Update BTC AI learning state with Bot Intelligence v4"
+          git commit -m "Update BTC AI learning state with Specialist Intelligence v5"
           git push origin learning-state --force-with-lease
