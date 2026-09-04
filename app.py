@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r2"
+APP_VERSION = "2026.09.04-single-file-r3-auto-paper"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -190,6 +190,29 @@ def init_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_paper_state (
+                id INTEGER PRIMARY KEY CHECK (id=1),
+                enabled INTEGER NOT NULL DEFAULT 0,
+                side TEXT NOT NULL DEFAULT 'NONE',
+                entry_price REAL,
+                entry_ts INTEGER,
+                entry_qty REAL,
+                stop_loss REAL,
+                take_profit REAL,
+                last_exit_ts INTEGER NOT NULL DEFAULT 0,
+                last_message TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        auto_row = conn.execute("SELECT id FROM auto_paper_state WHERE id=1").fetchone()
+        if auto_row is None:
+            conn.execute(
+                """INSERT INTO auto_paper_state
+                   (id,enabled,side,entry_price,entry_ts,entry_qty,stop_loss,take_profit,last_exit_ts,last_message)
+                   VALUES(1,0,'NONE',NULL,NULL,NULL,NULL,NULL,0,'Auto paper trading ready.')"""
+            )
         row = conn.execute("SELECT id FROM paper_account WHERE id=1").fetchone()
         if row is None:
             conn.execute(
@@ -223,50 +246,269 @@ def reset_account():
             (STARTING_CASH, STARTING_CASH, utc_now().isoformat()),
         )
         conn.execute("DELETE FROM paper_trades")
+        conn.execute(
+            """UPDATE auto_paper_state
+               SET side='NONE',entry_price=NULL,entry_ts=NULL,entry_qty=NULL,
+                   stop_loss=NULL,take_profit=NULL,last_exit_ts=0,
+                   last_message='Paper account reset.'
+               WHERE id=1"""
+        )
         conn.commit()
 
 
-def execute_paper_trade(action, price, position_pct, note=""):
+def get_auto_state():
+    with db_conn() as conn:
+        row = conn.execute("SELECT * FROM auto_paper_state WHERE id=1").fetchone()
+    return dict(row)
+
+
+def set_auto_enabled(enabled):
+    with db_conn() as conn:
+        conn.execute(
+            "UPDATE auto_paper_state SET enabled=?, last_message=? WHERE id=1",
+            (1 if enabled else 0,
+             "AUTO PAPER TRADING enabled." if enabled else "AUTO PAPER TRADING disabled."),
+        )
+        conn.commit()
+
+
+def _paper_log(conn, action, price, signed_qty, notional, cash, btc, note):
+    conn.execute(
+        """INSERT INTO paper_trades
+           (created_iso,action,price,btc_qty,notional,cash_after,btc_after,note)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (utc_now().isoformat(), action, price, signed_qty, notional, cash, btc, note),
+    )
+
+
+def open_paper_position(action, price, position_pct, hist, note=""):
+    """Open one paper-only long or short position.
+
+    BUY opens a long. SELL opens a simulated short. No exchange order is sent.
+    """
     if action not in {"BUY", "SELL"}:
         return {"ok": False, "message": "No paper trade: master decision is HOLD."}
     if price <= 0 or not math.isfinite(price):
         return {"ok": False, "message": "No paper trade: invalid BTC price."}
 
+    state = get_auto_state()
+    if state["side"] != "NONE":
+        return {"ok": False, "message": f"Paper position already open: {state['side']}."}
+
+    account = get_account(price)
+    pct = max(0.0, min(0.15, float(position_pct)))
+    notional = account["equity"] * pct
+    if notional < 10:
+        return {"ok": False, "message": "No paper trade: paper allocation is too small."}
+
+    qty = notional / price
+    atr = safe_float(hist["atr14"].iloc[-1], price * 0.0025)
+    stop_distance = max(atr * 1.10, price * 0.0025)
+    target_distance = max(atr * 1.55, price * 0.0035)
+
     with db_conn() as conn:
         row = conn.execute("SELECT * FROM paper_account WHERE id=1").fetchone()
         cash, btc = float(row["cash"]), float(row["btc"])
-        pct = max(0.0, min(0.25, float(position_pct)))
+
+        if abs(btc) * price >= 1.0:
+            return {"ok": False, "message": "Paper account already has BTC exposure; reset or close it first."}
 
         if action == "BUY":
-            notional = cash * pct
-            if notional < 10:
-                return {"ok": False, "message": "No paper trade: paper cash allocation is too small."}
-            qty = notional / price
+            if cash < notional:
+                return {"ok": False, "message": "Not enough paper cash for the approved long."}
             cash -= notional
             btc += qty
+            side = "LONG"
+            stop_loss = price - stop_distance
+            take_profit = price + target_distance
             signed_qty = qty
         else:
-            qty = btc * max(pct, 0.25)
-            qty = min(qty, btc)
-            if qty * price < 10:
-                return {"ok": False, "message": "No paper trade: no meaningful paper BTC position to sell."}
+            # Simulated short: sale proceeds are credited to paper cash and the
+            # BTC balance becomes negative. Equity remains cash + BTC*price.
+            cash += notional
+            btc -= qty
+            side = "SHORT"
+            stop_loss = price + stop_distance
+            take_profit = price - target_distance
+            signed_qty = -qty
+
+        now_ts = int(time.time())
+        conn.execute(
+            "UPDATE paper_account SET cash=?, btc=?, updated_iso=? WHERE id=1",
+            (cash, btc, utc_now().isoformat()),
+        )
+        _paper_log(
+            conn,
+            f"OPEN_{side}",
+            price,
+            signed_qty,
+            notional,
+            cash,
+            btc,
+            note,
+        )
+        conn.execute(
+            """UPDATE auto_paper_state
+               SET side=?,entry_price=?,entry_ts=?,entry_qty=?,stop_loss=?,take_profit=?,
+                   last_message=?
+               WHERE id=1""",
+            (
+                side, price, now_ts, qty, stop_loss, take_profit,
+                f"Opened automatic paper {side} at ${price:,.2f}.",
+            ),
+        )
+        conn.commit()
+
+    return {
+        "ok": True,
+        "message": f"Opened paper {side}: {qty:.6f} BTC at ${price:,.2f}.",
+        "side": side,
+        "stop_loss": stop_loss,
+        "take_profit": take_profit,
+    }
+
+
+def close_paper_position(price, reason="Exit rule"):
+    state = get_auto_state()
+    side = state["side"]
+    if side not in {"LONG", "SHORT"}:
+        return {"ok": False, "message": "No open paper position to close."}
+
+    entry_price = safe_float(state["entry_price"])
+    entry_qty = abs(safe_float(state["entry_qty"], 0.0))
+    if entry_qty <= 0 or pd.isna(entry_price):
+        return {"ok": False, "message": "Open paper position state is invalid."}
+
+    with db_conn() as conn:
+        row = conn.execute("SELECT * FROM paper_account WHERE id=1").fetchone()
+        cash, btc = float(row["cash"]), float(row["btc"])
+
+        if side == "LONG":
+            qty = min(entry_qty, max(0.0, btc))
             notional = qty * price
             cash += notional
             btc -= qty
+            realized = (price - entry_price) * qty
             signed_qty = -qty
+        else:
+            qty = min(entry_qty, abs(min(0.0, btc)))
+            notional = qty * price
+            cash -= notional
+            btc += qty
+            realized = (entry_price - price) * qty
+            signed_qty = qty
+
+        # Remove tiny floating-point leftovers.
+        if abs(btc) < 1e-12:
+            btc = 0.0
 
         conn.execute(
             "UPDATE paper_account SET cash=?, btc=?, updated_iso=? WHERE id=1",
             (cash, btc, utc_now().isoformat()),
         )
+        _paper_log(
+            conn,
+            f"CLOSE_{side}",
+            price,
+            signed_qty,
+            notional,
+            cash,
+            btc,
+            f"{reason} | realized_pnl=${realized:,.2f}",
+        )
         conn.execute(
-            """INSERT INTO paper_trades
-               (created_iso,action,price,btc_qty,notional,cash_after,btc_after,note)
-               VALUES(?,?,?,?,?,?,?,?)""",
-            (utc_now().isoformat(), action, price, signed_qty, notional, cash, btc, note),
+            """UPDATE auto_paper_state
+               SET side='NONE',entry_price=NULL,entry_ts=NULL,entry_qty=NULL,
+                   stop_loss=NULL,take_profit=NULL,last_exit_ts=?,last_message=?
+               WHERE id=1""",
+            (
+                int(time.time()),
+                f"Closed paper {side} at ${price:,.2f}: {reason}; realized P&L ${realized:,.2f}.",
+            ),
         )
         conn.commit()
-    return {"ok": True, "message": f"Paper {action}: {abs(signed_qty):.6f} BTC at ${price:,.2f}."}
+
+    return {
+        "ok": True,
+        "message": f"Closed paper {side} at ${price:,.2f} — {reason}. Realized P&L ${realized:,.2f}.",
+        "realized_pnl": realized,
+    }
+
+
+def manage_auto_paper(decision, risk, price, hist):
+    """One automatic paper-trading cycle.
+
+    Opens only approved BUY/SELL signals. An open position is exited by
+    take-profit, stop-loss, 15-minute horizon, or a strong reversal.
+    """
+    state = get_auto_state()
+    if not bool(state["enabled"]):
+        return {"event": False, "message": state.get("last_message", "Auto paper trading is off.")}
+
+    now_ts = int(time.time())
+    side = state["side"]
+
+    if side in {"LONG", "SHORT"}:
+        entry = safe_float(state["entry_price"])
+        stop = safe_float(state["stop_loss"])
+        target = safe_float(state["take_profit"])
+        entry_ts = int(state["entry_ts"] or now_ts)
+        elapsed = now_ts - entry_ts
+
+        exit_reason = None
+        if side == "LONG":
+            if price <= stop:
+                exit_reason = "stop-loss"
+            elif price >= target:
+                exit_reason = "take-profit"
+            elif decision["action"] == "SELL" and decision["confidence"] >= 0.68 and decision["consensus"] >= 0.35:
+                exit_reason = "strong master reversal"
+        else:
+            if price >= stop:
+                exit_reason = "stop-loss"
+            elif price <= target:
+                exit_reason = "take-profit"
+            elif decision["action"] == "BUY" and decision["confidence"] >= 0.68 and decision["consensus"] >= 0.35:
+                exit_reason = "strong master reversal"
+
+        if exit_reason is None and elapsed >= PREDICTION_HORIZON_MIN * 60:
+            exit_reason = f"{PREDICTION_HORIZON_MIN}-minute horizon"
+
+        if exit_reason:
+            result = close_paper_position(price, exit_reason)
+            return {"event": result["ok"], "message": result["message"]}
+
+        unrealized = ((price / entry) - 1.0) * 100 if side == "LONG" else ((entry / price) - 1.0) * 100
+        msg = (
+            f"AUTO {side} open • {elapsed//60:02d}:{elapsed%60:02d} elapsed • "
+            f"unrealized {unrealized:+.3f}% • stop ${stop:,.2f} • target ${target:,.2f}"
+        )
+        return {"event": False, "message": msg}
+
+    # 60-second cooldown prevents an immediate re-entry after an exit.
+    last_exit_ts = int(state.get("last_exit_ts") or 0)
+    if now_ts - last_exit_ts < 60:
+        return {"event": False, "message": f"Auto paper cooldown: {60 - (now_ts-last_exit_ts)}s."}
+
+    if risk["approved"] and decision["action"] in {"BUY", "SELL"}:
+        result = open_paper_position(
+            decision["action"],
+            price,
+            risk["position_pct"],
+            hist,
+            note=(
+                f"AUTO master={decision['score']:+.3f}, "
+                f"confidence={decision['confidence']:.3f}, consensus={decision['consensus']:.3f}"
+            ),
+        )
+        return {"event": result["ok"], "message": result["message"]}
+
+    return {"event": False, "message": f"Waiting: {risk['reason']}."}
+
+
+def execute_paper_trade(action, price, position_pct, hist, note=""):
+    """Manual fallback using the same position engine as AUTO PAPER TRADING."""
+    return open_paper_position(action, price, position_pct, hist, note=note)
 
 # ============================================================
 # MARKET DATA — FAST CACHE
@@ -616,8 +858,14 @@ def risk_evaluate(decision, account, hist, futures):
     position_pct = max(0.02, min(0.15, base * (1 - volatility_penalty)))
     risk_score = clamp(0.6 - confidence * 0.35 - consensus * 0.15 + volatility_penalty, 0, 1)
 
-    if decision["action"] == "SELL" and account["btc"] * px < 10:
-        return {"approved": False, "position_pct": 0.0, "risk_score": risk_score, "reason": "No paper BTC position to sell"}
+    state = get_auto_state()
+    if state["side"] != "NONE":
+        return {
+            "approved": False,
+            "position_pct": 0.0,
+            "risk_score": risk_score,
+            "reason": f"Paper {state['side']} already open",
+        }
 
     return {"approved": True, "position_pct": position_pct, "risk_score": risk_score, "reason": "Paper-trade risk checks passed"}
 
@@ -794,6 +1042,26 @@ refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3
 record_predictions = st.sidebar.checkbox("Auto-journal predictions", value=True)
 show_raw = st.sidebar.checkbox("Show diagnostics", value=False)
 
+db_auto_state = get_auto_state()
+if "auto_paper_enabled" not in st.session_state:
+    st.session_state.auto_paper_enabled = bool(db_auto_state["enabled"])
+auto_paper_enabled = st.sidebar.toggle(
+    "AUTO PAPER TRADING",
+    key="auto_paper_enabled",
+    help="Automatically opens and manages simulated long/short BTC positions. PAPER ONLY.",
+)
+if bool(db_auto_state["enabled"]) != bool(auto_paper_enabled):
+    set_auto_enabled(auto_paper_enabled)
+    db_auto_state = get_auto_state()
+
+if auto_paper_enabled:
+    st.sidebar.success("AUTO PAPER: ON")
+    st.sidebar.caption("Approved signals execute automatically. Stops, targets, reversals and the 15-minute horizon can close positions.")
+    # Automatic execution requires the Streamlit session to keep rerunning.
+    auto_refresh = True
+else:
+    st.sidebar.info("AUTO PAPER: OFF")
+
 st.sidebar.divider()
 st.sidebar.subheader("Safety")
 st.sidebar.warning("Paper trading only. This app intentionally contains no live order endpoint and asks for no exchange API key.")
@@ -845,6 +1113,11 @@ results = run_specialists(hist, agg, futures, kalshi)
 decision = master_decision(results, hist)
 account = get_account(price)
 risk = risk_evaluate(decision, account, hist, futures)
+
+auto_result = manage_auto_paper(decision, risk, price, hist)
+if auto_result.get("event"):
+    account = get_account(price)
+    risk = risk_evaluate(decision, account, hist, futures)
 
 if record_predictions:
     maybe_record_prediction(decision, price, min_seconds=60)
@@ -960,14 +1233,61 @@ with tab_flow:
             st.code(kalshi.get("error", "Unknown Kalshi error"))
 
 with tab_paper:
-    st.subheader("Paper Trading Account")
+    st.subheader("Automatic Paper Trading")
+    auto_state = get_auto_state()
     account = get_account(price)
+
+    status1, status2, status3, status4 = st.columns(4)
+    status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
+    status2.metric("Position", auto_state["side"])
+    status3.metric("Master", decision["action"])
+    status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
+
+    if bool(auto_state["enabled"]):
+        st.success(auto_result["message"] if auto_result.get("message") else auto_state.get("last_message", "AUTO PAPER running."))
+    else:
+        st.info("AUTO PAPER TRADING is off. Turn it on in the sidebar to let approved paper signals execute automatically.")
+
+    st.subheader("Paper Account")
     a1, a2, a3, a4, a5 = st.columns(5)
     a1.metric("Cash", fmt_money(account["cash"]))
-    a2.metric("BTC", f"{account['btc']:.6f}")
+    a2.metric("BTC exposure", f"{account['btc']:+.6f}")
     a3.metric("Equity", fmt_money(account["equity"]))
     a4.metric("P&L", fmt_money(account["pnl"]))
     a5.metric("Return", f"{account['return_pct']:+.2f}%")
+
+    auto_state = get_auto_state()
+    if auto_state["side"] in {"LONG", "SHORT"}:
+        entry = safe_float(auto_state["entry_price"])
+        stop = safe_float(auto_state["stop_loss"])
+        target = safe_float(auto_state["take_profit"])
+        qty = abs(safe_float(auto_state["entry_qty"], 0.0))
+        entry_ts = int(auto_state["entry_ts"] or int(time.time()))
+        elapsed = max(0, int(time.time()) - entry_ts)
+        if auto_state["side"] == "LONG":
+            unrealized_dollars = (price - entry) * qty
+        else:
+            unrealized_dollars = (entry - price) * qty
+
+        st.subheader("Active Position")
+        p1, p2, p3, p4, p5, p6 = st.columns(6)
+        p1.metric("Side", auto_state["side"])
+        p2.metric("Entry", fmt_money(entry))
+        p3.metric("Current", fmt_money(price))
+        p4.metric("Stop", fmt_money(stop))
+        p5.metric("Target", fmt_money(target))
+        p6.metric("Unrealized", fmt_money(unrealized_dollars))
+        st.caption(
+            f"Quantity {qty:.6f} BTC • elapsed {elapsed//60:02d}:{elapsed%60:02d} • "
+            f"automatic time exit at {PREDICTION_HORIZON_MIN}:00"
+        )
+        if st.button("Close Paper Position Now", use_container_width=True):
+            result = close_paper_position(price, "manual close")
+            if result["ok"]:
+                st.success(result["message"])
+            else:
+                st.error(result["message"])
+            st.rerun()
 
     st.subheader("Risk Manager")
     r1, r2, r3, r4 = st.columns(4)
@@ -977,25 +1297,28 @@ with tab_paper:
     r4.metric("Decision", decision["action"])
     st.caption(risk["reason"])
 
-    if st.button("Execute Approved Paper Trade", type="primary", use_container_width=True):
-        if risk["approved"]:
-            result = execute_paper_trade(
-                decision["action"],
-                price,
-                risk["position_pct"],
-                note=f"master={decision['score']:+.3f}, confidence={decision['confidence']:.3f}",
-            )
-            if result["ok"]:
-                st.success(result["message"])
+    if not bool(auto_state["enabled"]) and auto_state["side"] == "NONE":
+        if st.button("Execute Approved Paper Trade", type="primary", use_container_width=True):
+            if risk["approved"]:
+                result = execute_paper_trade(
+                    decision["action"],
+                    price,
+                    risk["position_pct"],
+                    hist,
+                    note=f"MANUAL master={decision['score']:+.3f}, confidence={decision['confidence']:.3f}",
+                )
+                if result["ok"]:
+                    st.success(result["message"])
+                else:
+                    st.error(result["message"])
+                st.rerun()
             else:
-                st.error(result["message"])
-            st.rerun()
-        else:
-            st.error(f"Paper trade blocked: {risk['reason']}")
+                st.error(f"Paper trade blocked: {risk['reason']}")
 
     with db_conn() as conn:
         trades = pd.read_sql_query("SELECT * FROM paper_trades ORDER BY id DESC LIMIT 100", conn)
     if not trades.empty:
+        st.subheader("Paper Trade Log")
         st.dataframe(trades, use_container_width=True, hide_index=True)
     else:
         st.info("No paper trades yet.")
@@ -1050,13 +1373,15 @@ if show_raw:
             "kalshi_status": {"ok": kalshi.get("ok"), "market_count": len(kalshi.get("markets", [])), "feed_ms": kalshi.get("feed_ms")},
             "decision": decision,
             "risk": risk,
+            "auto_paper": get_auto_state(),
+            "auto_cycle": auto_result,
             "full_cycle_ms": full_cycle_ms,
         })
 
 st.divider()
 st.caption(
     f"Last update {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')} • "
-    "Safety: PAPER ONLY • no order API keys • no real-money exchange execution."
+    "Safety: PAPER ONLY • automatic simulation may trade long/short • no order API keys • no real-money exchange execution."
 )
 
 # ============================================================
