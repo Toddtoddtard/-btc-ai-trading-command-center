@@ -40,7 +40,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r30-kalshi-sidebar-timer"
+APP_VERSION = "2026.09.04-r31-kalshi-timer-fixed"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -3157,9 +3157,21 @@ st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learni
 # SIDEBAR
 # ============================================================
 
-# Persistent browser-side Kalshi 15-minute countdown.
-# It polls Kalshi directly and ticks locally every second so the timer stays smooth
-# even when the Streamlit dashboard itself is not rerunning.
+# Persistent Kalshi 15-minute countdown.
+# Seed the timer from Streamlit's server-side Kalshi request (avoids browser CORS issues),
+# then tick locally in the browser for smooth second-by-second updates.
+_timer_close_ms = 0
+_timer_ticker = ""
+try:
+    _timer_payload = fetch_kalshi_bitcoin_markets()
+    _timer_market = (_timer_payload or {}).get("current") or {}
+    _timer_close_ts = kalshi_close_timestamp(_timer_market)
+    if pd.notna(_timer_close_ts):
+        _timer_close_ms = int(float(_timer_close_ts) * 1000)
+    _timer_ticker = str(_timer_market.get("ticker") or "")
+except Exception:
+    pass
+
 _kalshi_timer_html = r"""
 <!doctype html>
 <html>
@@ -3190,9 +3202,9 @@ _kalshi_timer_html = r"""
 </div>
 <script>
 (() => {
-  const API='https://external-api.kalshi.com/trade-api/v2';
   const TOTAL=15*60;
-  let closeMs=null, ticker='';
+  let closeMs=Number('__CLOSE_MS__') || null;
+  let ticker='__TICKER__';
   const cd=document.getElementById('countdown');
   const fill=document.getElementById('fill');
   const elapsedEl=document.getElementById('elapsed');
@@ -3207,29 +3219,25 @@ _kalshi_timer_html = r"""
     fill.style.width=(Math.max(0,Math.min(1,elapsed/TOTAL))*100).toFixed(2)+'%';
     if(remain<=0){ status.textContent='Market ended — loading next 15m market…'; }
   }
-  function closeTime(m){const raw=m?.close_time||m?.expiration_time||m?.expected_expiration_time;const t=Date.parse(raw||'');return Number.isFinite(t)?t:null;}
-  async function refreshMarket(){
-    try{
-      const r=await fetch(API+'/markets?limit=100&status=open&series_ticker=KXBTC15M',{cache:'no-store'});
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      const j=await r.json();
-      const now=Date.now();
-      const rows=(j.markets||[]).map(m=>({m,t:closeTime(m)})).filter(x=>x.t&&x.t>now).sort((a,b)=>a.t-b.t||String(a.m.ticker||'').localeCompare(String(b.m.ticker||'')));
-      if(!rows.length){closeMs=null;ticker='';status.textContent='No open KXBTC15M market found';render();return;}
-      ticker=String(rows[0].m.ticker||'');
-      closeMs=rows[0].t;
-      status.textContent=ticker;
-      render();
-    }catch(e){status.textContent='Kalshi timer reconnecting…';}
+  function rollWindowIfNeeded(){
+    if(closeMs && Date.now() >= closeMs){
+      // KXBTC15M markets are sequential 15-minute windows. Continue the timer
+      // immediately while Streamlit refreshes the exact active ticker in the background.
+      const step=15*60*1000;
+      while(Date.now() >= closeMs) closeMs += step;
+      ticker='';
+      status.textContent='Next Kalshi 15m market';
+    }
   }
-  render(); refreshMarket();
-  setInterval(render,250);
-  setInterval(refreshMarket,5000);
+  status.textContent=ticker || (closeMs ? 'Kalshi 15m market' : 'Waiting for Kalshi market…');
+  render();
+  setInterval(()=>{rollWindowIfNeeded();render();},250);
 })();
 </script>
 </body>
 </html>
 """
+_kalshi_timer_html = _kalshi_timer_html.replace("__CLOSE_MS__", str(_timer_close_ms)).replace("__TICKER__", _timer_ticker.replace("\\", "").replace("'", ""))
 with st.sidebar:
     components.html(_kalshi_timer_html, height=205, scrolling=False)
 
