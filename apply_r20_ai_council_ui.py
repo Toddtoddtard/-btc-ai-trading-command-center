@@ -74,3 +74,4 @@ s = s.replace('APP_VERSION = "2026.09.04-single-file-r19-canonical-kalshi-target
 compile(s, 'app.py', 'exec')
 p.write_text(s)
 print('R20 AI Council usability patch applied successfully')
+# trigger
