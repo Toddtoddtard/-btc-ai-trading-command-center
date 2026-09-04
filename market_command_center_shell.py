@@ -9,25 +9,33 @@ SHELL_COPY = {
         "symbol": "XAU",
         "market": "Gold",
         "subtitle": "Gold market command center shell",
-        "feed": "Gold spot/futures feed not connected yet",
+        "feed": "Kalshi Gold integration queued next",
+        "kalshi": "AVAILABLE",
+        "kalshi_note": "Kalshi lists Gold markets, including short-window Up/Down contracts.",
     },
     "gas": {
         "symbol": "GAS",
         "market": "Gas Prices",
         "subtitle": "Gas-prices market command center shell",
-        "feed": "Gasoline / natural-gas market feed not connected yet",
+        "feed": "Kalshi gas-market integration queued next",
+        "kalshi": "AVAILABLE",
+        "kalshi_note": "Kalshi lists gasoline and natural-gas markets. The exact contract family will be shown rather than mixing the two.",
     },
     "zec": {
         "symbol": "ZEC",
         "market": "Zcash",
         "subtitle": "ZEC market command center shell",
-        "feed": "ZEC market feed not connected yet",
+        "feed": "No verified Kalshi ZEC market currently available",
+        "kalshi": "UNAVAILABLE",
+        "kalshi_note": "This page stays UI-only until Kalshi offers a real ZEC contract or you approve a separate free ZEC source.",
     },
-    "eth": {
-        "symbol": "ETH",
-        "market": "Ethereum",
-        "subtitle": "ETH market command center shell",
-        "feed": "ETH market feed not connected yet",
+    "wti": {
+        "symbol": "WTI",
+        "market": "WTI Crude Oil",
+        "subtitle": "WTI oil market command center shell",
+        "feed": "Kalshi WTI integration queued next",
+        "kalshi": "AVAILABLE",
+        "kalshi_note": "Chosen as the fifth market because Kalshi offers WTI Up/Down 15-minute contracts that fit the BTC-style decision window.",
     },
 }
 
@@ -78,13 +86,13 @@ def render_market_shell(market_key):
         '<div class="shell-banner">COMMAND CENTER PREVIEW — layout only. No automated signals, AI decisions, or paper trades are active on this market yet.</div>',
         unsafe_allow_html=True,
     )
-    st.caption(f"{data['subtitle']} • phase 1: command center UI • phase 2: live data • phase 3: specialist AI council")
+    st.caption(f"{data['subtitle']} • phase 1: command center UI • phase 2: live/Kalshi data • phase 3: specialist AI council")
 
     st.markdown(
         f"""
         <div class="shell-grid">
           <div class="shell-card"><div class="shell-label">MARKET</div><div class="shell-value">{data['market']}</div><div class="shell-muted">{data['symbol']} command center</div></div>
-          <div class="shell-card"><div class="shell-label">LIVE FEED</div><div class="shell-value">NOT CONNECTED</div><div class="shell-muted">{data['feed']}</div></div>
+          <div class="shell-card"><div class="shell-label">KALSHI</div><div class="shell-value">{data['kalshi']}</div><div class="shell-muted">{data['kalshi_note']}</div></div>
           <div class="shell-card"><div class="shell-label">AI COUNCIL</div><div class="shell-value">COMING NEXT</div><div class="shell-muted">Separate specialists will be trained for this market</div></div>
           <div class="shell-card"><div class="shell-label">PAPER TRADING</div><div class="shell-value">LOCKED</div><div class="shell-muted">Will stay off until feed + validation are ready</div></div>
         </div>
@@ -101,7 +109,7 @@ def render_market_shell(market_key):
             f"""
             <div class="shell-panel">
               <h3>{data['market']} Market View</h3>
-              <p>This is where the live price chart, trend structure, volatility, support/resistance and multi-timeframe market data will live.</p>
+              <p>This is where the live price chart, Kalshi target/odds when available, trend structure, volatility, support/resistance and multi-timeframe market data will live.</p>
               <span class="shell-chip">1m</span><span class="shell-chip">3m</span><span class="shell-chip">5m</span><span class="shell-chip">15m</span><span class="shell-chip">1h</span>
               <p><b>No fake price is shown.</b> The chart stays empty until the real market feed is connected.</p>
             </div>
@@ -115,7 +123,7 @@ def render_market_shell(market_key):
             <div class="shell-panel">
               <h3>Specialist AI Council</h3>
               <p>The council will be market-specific rather than copying Bitcoin's learned weights.</p>
-              <span class="shell-chip">Trend AI</span><span class="shell-chip">Momentum AI</span><span class="shell-chip">Volume AI</span><span class="shell-chip">S/R AI</span><span class="shell-chip">Volatility AI</span><span class="shell-chip">Regime AI</span><span class="shell-chip">Liquidity AI</span><span class="shell-chip">Historical AI</span>
+              <span class="shell-chip">Trend AI</span><span class="shell-chip">Momentum AI</span><span class="shell-chip">Volume AI</span><span class="shell-chip">S/R AI</span><span class="shell-chip">Volatility AI</span><span class="shell-chip">Regime AI</span><span class="shell-chip">Liquidity AI</span><span class="shell-chip">Historical AI</span><span class="shell-chip">Kalshi Context AI</span>
               <p>Scores and confidence remain disabled until each specialist has a real input source.</p>
             </div>
             """,
