@@ -18,6 +18,8 @@ from market_guide import render_market_guide
 from shared_learning import fetch_shared_learning_state
 
 from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
+from council_v4 import council_vote
+from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
     learned_policy, learned_trade_gate, regime_specialist_weight,
@@ -53,7 +55,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r41-consistent-dark-tables"
+APP_VERSION = "2026.09.04-r42-bot-intelligence-v4"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -1598,19 +1600,14 @@ def master_decision(results, hist, kalshi=None):
     remote_learning = fetch_remote_learning_state() or {}
     regime_name = detect_regime(hist)
     policy = learned_policy(remote_learning, regime_name)
-    weighted_sum = 0.0
-    total_weight = 0.0
-    signs = []
 
-    for name, result in results.items():
-        weight = adaptive_specialist_weight(name, regime_name)
-        weighted_sum += result["score"] * result["confidence"] * weight
-        total_weight += result["confidence"] * weight
-        signs.append(np.sign(result["score"]))
-
-    base_score = clamp(weighted_sum / total_weight if total_weight else 0.0)
-    directional = [s for s in signs if s != 0]
-    consensus = abs(sum(directional)) / len(directional) if directional else 0.0
+    # Bot Intelligence v4 is the single authoritative source-council vote.
+    # It excludes Combination AI to avoid double-counting the council's own
+    # aggregate, and applies learned + regime-specific specialist reliability.
+    v4_council = council_vote(results, remote_learning, regime_name)
+    base_score = clamp(v4_council["base_score"])
+    consensus = float(v4_council["consensus"])
+    council_confidence = float(v4_council["confidence"])
 
     px = float(hist["close"].iloc[-1])
     atr = safe_float(hist["atr14"].iloc[-1], px * 0.002)
@@ -1653,7 +1650,7 @@ def master_decision(results, hist, kalshi=None):
             abs(projected_edge) / max(target_scale, 1.0),
         )
 
-        confidence = min(
+        target_confidence = min(
             0.97,
             max(
                 0.45,
@@ -1663,6 +1660,13 @@ def master_decision(results, hist, kalshi=None):
                 + distance_strength * 0.10,
             ),
         )
+        # Never let target geometry erase the reliability calibration learned
+        # by v4. Blend both views and cap at the safer of their high extremes.
+        confidence = float(np.clip(
+            0.58 * target_confidence + 0.42 * council_confidence,
+            0.40,
+            min(0.97, max(target_confidence, council_confidence)),
+        ))
 
         # -----------------------------------------------------------
         # LOCK semantics
@@ -4834,6 +4838,19 @@ def live_dashboard():
             )
         st.info(decision["reason"])
 
+        try:
+            _bot_learning_state = fetch_remote_learning_state() or {}
+            _bot_regime = detect_regime(hist)
+            render_bot_intelligence_dashboard(
+                results,
+                _bot_learning_state,
+                _bot_regime,
+                dark_mode=dark_mode,
+            )
+        except Exception as _bot_ui_exc:
+            st.caption(f"Bot Intelligence v4 panel temporarily unavailable: {_bot_ui_exc}")
+
+        st.markdown("### Live specialist signals")
         rows = []
         for r in results.values():
             rows.append({
