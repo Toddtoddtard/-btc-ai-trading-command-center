@@ -76,3 +76,5 @@ The bot is deliberately designed to skip weak setups. More trades does not mean 
 10. If signals conflict: **WAIT**
 """
         )
+
+# The guide is intentionally static so every approved user starts from the same market-analysis framework.
