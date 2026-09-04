@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ============================================================
 # BTC AI TRADING COMMAND CENTER — PAPER TRADING ONLY
@@ -37,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r12-no-market-flash"
+APP_VERSION = "2026.09.04-single-file-r13-persistent-live-chart"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -2167,6 +2168,377 @@ st.markdown(
 )
 
 # ============================================================
+# PERSISTENT LIVE MARKET CHART
+# ============================================================
+
+def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True):
+    """
+    Browser-side Plotly chart.
+
+    Unlike st.plotly_chart inside a Streamlit fragment, this iframe is mounted
+    outside the live dashboard fragment. JavaScript updates the existing Plotly
+    graph in place, so Streamlit does not remove/recreate the chart each refresh.
+    """
+
+    tail = initial_hist.tail(60).copy() if initial_hist is not None else pd.DataFrame()
+
+    initial_rows = []
+    if not tail.empty:
+        for _, row in tail.iterrows():
+            try:
+                ts = pd.Timestamp(row["time"]).isoformat()
+                initial_rows.append(
+                    {
+                        "time": ts,
+                        "open": float(row["open"]),
+                        "high": float(row["high"]),
+                        "low": float(row["low"]),
+                        "close": float(row["close"]),
+                    }
+                )
+            except Exception:
+                continue
+
+    payload = json.dumps(
+        {
+            "candles": initial_rows,
+            "target": (
+                float(initial_target)
+                if pd.notna(initial_target)
+                else None
+            ),
+            "ticker": initial_ticker or "",
+            "dark": bool(dark_mode),
+        }
+    ).replace("</", "<\\/")
+
+    bg = "#0d141f" if dark_mode else "#ffffff"
+    paper = "#080d14" if dark_mode else "#ffffff"
+    fg = "#eef3fa" if dark_mode else "#111827"
+    grid = "rgba(255,255,255,0.10)" if dark_mode else "rgba(0,0,0,0.09)"
+
+    html = f"""
+    <div id="market-wrap" style="
+        width:100%;
+        background:{bg};
+        border-radius:10px;
+        overflow:hidden;
+        min-height:445px;
+    ">
+        <div id="market-status" style="
+            height:26px;
+            padding:5px 10px 0 10px;
+            color:{fg};
+            font-family:Arial,sans-serif;
+            font-size:12px;
+            opacity:.82;
+            box-sizing:border-box;
+        ">Live BTC 1m candles • Kalshi 15m target</div>
+        <div id="persistent-market-chart" style="width:100%;height:415px;"></div>
+    </div>
+
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script>
+    (() => {{
+        const initial = {payload};
+        const chart = document.getElementById("persistent-market-chart");
+        const status = document.getElementById("market-status");
+
+        let currentTarget = initial.target;
+        let currentTicker = initial.ticker || "";
+        let lastCandleSignature = "";
+        let busy = false;
+
+        const paperBg = "{paper}";
+        const plotBg = "{bg}";
+        const fontColor = "{fg}";
+        const gridColor = "{grid}";
+
+        function candleTrace(rows) {{
+            return {{
+                type: "candlestick",
+                x: rows.map(r => r.time),
+                open: rows.map(r => r.open),
+                high: rows.map(r => r.high),
+                low: rows.map(r => r.low),
+                close: rows.map(r => r.close),
+                name: "BTC 1m",
+                increasing: {{
+                    line: {{color:"#12b886", width:1.7}},
+                    fillcolor:"#12b886"
+                }},
+                decreasing: {{
+                    line: {{color:"#fa5252", width:1.7}},
+                    fillcolor:"#fa5252"
+                }},
+                whiskerwidth: 0.35,
+                hoverinfo: "x+open+high+low+close"
+            }};
+        }}
+
+        function targetShape() {{
+            if (!Number.isFinite(currentTarget)) return [];
+            return [{{
+                type: "line",
+                xref: "paper",
+                x0: 0,
+                x1: 1,
+                yref: "y",
+                y0: currentTarget,
+                y1: currentTarget,
+                line: {{
+                    color: "#ffd43b",
+                    width: 4
+                }}
+            }}];
+        }}
+
+        function targetAnnotation() {{
+            if (!Number.isFinite(currentTarget)) return [];
+            return [{{
+                xref: "paper",
+                x: 0.01,
+                yref: "y",
+                y: currentTarget,
+                text: "KALSHI TARGET  $" + currentTarget.toLocaleString(undefined, {{
+                    minimumFractionDigits:2,
+                    maximumFractionDigits:2
+                }}),
+                showarrow: false,
+                xanchor: "left",
+                yanchor: "bottom",
+                bgcolor: "rgba(8,13,20,0.90)",
+                bordercolor: "#ffd43b",
+                borderwidth: 1,
+                font: {{size: 13, color:"#fff3bf"}}
+            }}];
+        }}
+
+        const layout = {{
+            paper_bgcolor: paperBg,
+            plot_bgcolor: plotBg,
+            font: {{color: fontColor}},
+            margin: {{l:8,r:62,t:8,b:28}},
+            xaxis: {{
+                rangeslider: {{visible:false}},
+                showgrid:false,
+                zeroline:false,
+                fixedrange:false
+            }},
+            yaxis: {{
+                side:"right",
+                gridcolor:gridColor,
+                zeroline:false,
+                tickprefix:"$",
+                tickformat:",.0f",
+                fixedrange:false
+            }},
+            hovermode:"x unified",
+            dragmode:"pan",
+            showlegend:false,
+            uirevision:"persistent-kalshi-market",
+            shapes: targetShape(),
+            annotations: targetAnnotation(),
+            transition: {{duration:0}}
+        }};
+
+        const config = {{
+            displaylogo:false,
+            responsive:true,
+            scrollZoom:true,
+            doubleClick:"reset",
+            displayModeBar:"hover"
+        }};
+
+        let rows = initial.candles || [];
+
+        Plotly.newPlot(
+            chart,
+            [candleTrace(rows)],
+            layout,
+            config
+        );
+
+        function signature(data) {{
+            if (!data || !data.length) return "";
+            const last = data[data.length - 1];
+            return [
+                data.length,
+                last.time,
+                last.open,
+                last.high,
+                last.low,
+                last.close
+            ].join("|");
+        }}
+
+        async function fetchCandles() {{
+            const urls = [
+                "https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=60",
+                "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=60"
+            ];
+
+            let payload = null;
+            for (const url of urls) {{
+                try {{
+                    const resp = await fetch(url, {{cache:"no-store"}});
+                    if (!resp.ok) continue;
+                    payload = await resp.json();
+                    if (Array.isArray(payload)) break;
+                }} catch (e) {{}}
+            }}
+
+            if (!Array.isArray(payload)) return null;
+
+            return payload.map(k => ({{
+                time: new Date(k[0]).toISOString(),
+                open: Number(k[1]),
+                high: Number(k[2]),
+                low: Number(k[3]),
+                close: Number(k[4])
+            }}));
+        }}
+
+        function parseTime(value) {{
+            if (!value) return NaN;
+            const ms = Date.parse(value);
+            return Number.isFinite(ms) ? ms : NaN;
+        }}
+
+        async function fetchKalshiTarget() {{
+            const url =
+                "https://external-api.kalshi.com/trade-api/v2/markets" +
+                "?limit=100&status=open&series_ticker=KXBTC15M";
+
+            try {{
+                const resp = await fetch(url, {{cache:"no-store"}});
+                if (!resp.ok) return null;
+                const payload = await resp.json();
+                const markets = Array.isArray(payload.markets) ? payload.markets : [];
+                const now = Date.now();
+
+                const candidates = markets.map(m => {{
+                    const closeRaw =
+                        m.close_time ||
+                        m.expiration_time ||
+                        m.expected_expiration_time;
+
+                    const closeMs = parseTime(closeRaw);
+
+                    let target = Number(m.floor_strike);
+                    if (!Number.isFinite(target) || target <= 0) {{
+                        target = Number(m.cap_strike);
+                    }}
+
+                    return {{
+                        ticker: String(m.ticker || ""),
+                        target,
+                        closeMs
+                    }};
+                }}).filter(m =>
+                    Number.isFinite(m.target) &&
+                    m.target > 0 &&
+                    Number.isFinite(m.closeMs) &&
+                    m.closeMs > now
+                );
+
+                candidates.sort((a,b) => a.closeMs - b.closeMs);
+                return candidates.length ? candidates[0] : null;
+            }} catch (e) {{
+                return null;
+            }}
+        }}
+
+        async function updateCandles() {{
+            if (busy) return;
+            busy = true;
+
+            try {{
+                const fresh = await fetchCandles();
+                if (!fresh || !fresh.length) return;
+
+                const sig = signature(fresh);
+                if (sig === lastCandleSignature) return;
+                lastCandleSignature = sig;
+                rows = fresh;
+
+                // Plotly.react updates the already-mounted graph rather than
+                // allowing Streamlit to delete/recreate the chart container.
+                await Plotly.react(
+                    chart,
+                    [candleTrace(rows)],
+                    {{
+                        ...layout,
+                        shapes: targetShape(),
+                        annotations: targetAnnotation()
+                    }},
+                    config
+                );
+
+                status.textContent =
+                    "Live BTC 1m candles • " +
+                    (currentTicker ? currentTicker + " • " : "") +
+                    "updated " + new Date().toLocaleTimeString();
+            }} finally {{
+                busy = false;
+            }}
+        }}
+
+        async function updateTarget() {{
+            const market = await fetchKalshiTarget();
+            if (!market) return;
+
+            const changed =
+                market.ticker !== currentTicker ||
+                market.target !== currentTarget;
+
+            if (!changed) return;
+
+            currentTicker = market.ticker;
+            currentTarget = market.target;
+
+            // Relayout only the horizontal target + label. Candles remain mounted.
+            await Plotly.relayout(chart, {{
+                shapes: targetShape(),
+                annotations: targetAnnotation()
+            }});
+
+            status.textContent =
+                "New Kalshi 15m market • " +
+                currentTicker +
+                " • target $" +
+                currentTarget.toLocaleString(undefined, {{
+                    minimumFractionDigits:2,
+                    maximumFractionDigits:2
+                }});
+        }}
+
+        // Candle updates are quick but do not rebuild the iframe.
+        const candleTimer = setInterval(updateCandles, 1500);
+
+        // Kalshi target only changes when a new 15-minute contract becomes active.
+        const kalshiTimer = setInterval(updateTarget, 3000);
+
+        // Prime once after load.
+        setTimeout(updateCandles, 250);
+        setTimeout(updateTarget, 500);
+
+        window.addEventListener("beforeunload", () => {{
+            clearInterval(candleTimer);
+            clearInterval(kalshiTimer);
+        }});
+    }})();
+    </script>
+    """
+
+    components.html(
+        html,
+        height=445,
+        scrolling=False,
+    )
+
+
+# ============================================================
 # DASHBOARD THEME
 # ============================================================
 
@@ -2281,6 +2653,57 @@ else:
         unsafe_allow_html=True,
     )
 
+
+
+# ============================================================
+# PERSISTENT MARKET PANEL
+# This is intentionally OUTSIDE the auto-refreshing fragment.
+# ============================================================
+
+try:
+    _persistent_raw_hist, _ = fetch_klines("1m", 90)
+    _persistent_hist = enrich_history(_persistent_raw_hist)
+except Exception:
+    _persistent_hist = pd.DataFrame()
+
+try:
+    _persistent_ticker = fetch_spot_ticker()
+    _persistent_px = safe_float(
+        _persistent_ticker.get("price"),
+        safe_float(_persistent_hist["close"].iloc[-1])
+        if not _persistent_hist.empty else np.nan,
+    )
+except Exception:
+    _persistent_px = (
+        safe_float(_persistent_hist["close"].iloc[-1])
+        if not _persistent_hist.empty else np.nan
+    )
+
+try:
+    _persistent_kalshi = fetch_kalshi_bitcoin_markets()
+    _persistent_ctx = stable_kalshi_contract(
+        _persistent_kalshi,
+        _persistent_px,
+    )
+except Exception:
+    _persistent_ctx = {
+        "available": False,
+        "target": np.nan,
+        "ticker": "",
+    }
+
+st.subheader("Live Kalshi BTC Market")
+st.caption(
+    "Persistent AGGR-style candle chart — this chart updates in place "
+    "and is not rebuilt by the dashboard refresh."
+)
+
+persistent_kalshi_market_chart(
+    _persistent_hist,
+    _persistent_ctx.get("target", np.nan),
+    _persistent_ctx.get("ticker", ""),
+    dark_mode=dark_mode,
+)
 
 @st.fragment(run_every=live_run_every)
 def live_dashboard():
@@ -2405,18 +2828,9 @@ def live_dashboard():
                 ),
             )
 
-            st.plotly_chart(
-                kalshi_15m_chart(
-                    hist, price, kctx, decision["projected_end"]
-                ),
-                use_container_width=True,
-                key="kalshi_15m_live_chart",
-                config={
-                    "displaylogo": False,
-                    "scrollZoom": True,
-                    "responsive": True,
-                    "doubleClick": "reset",
-                },
+            st.caption(
+                "The live candlestick chart is pinned above the tabs so it can "
+                "update continuously without Streamlit rebuilding it."
             )
 
             side_text = (
