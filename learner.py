@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -173,6 +174,16 @@ def futures_snapshot():
 def strike(market):
     if not isinstance(market, dict):
         return None
+    for key in ("yes_sub_title", "subtitle", "title"):
+        text = str(market.get(key) or "")
+        match = re.search(r"Target\s*Price\s*:\s*\$?([0-9][0-9,]*(?:\.[0-9]+)?)", text, re.I)
+        if match:
+            try:
+                value = float(match.group(1).replace(",", ""))
+                if math.isfinite(value) and value > 0:
+                    return value
+            except Exception:
+                pass
     strike_type = str(market.get("strike_type") or "").lower()
     keys = ("cap_strike", "floor_strike") if strike_type in {"less", "less_equal", "less-than", "less_than"} else ("floor_strike", "cap_strike")
     for key in keys:

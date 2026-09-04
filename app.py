@@ -797,15 +797,22 @@ def fetch_futures_snapshot():
 
 
 def kalshi_numeric_target(market):
-    """Return the numeric settlement strike exactly as Kalshi exposes it."""
+    """Return the displayed KXBTC15M Target Price, with strike fields as fallback."""
     if not isinstance(market, dict):
         return np.nan
+    # KXBTC15M is an up/down contract. Kalshi exposes the user-facing opening
+    # reference as `Target Price: $xx,xxx.xx` in the subtitle fields. That is
+    # the number the dashboard must match. Do not substitute a threshold field
+    # when the explicit target label is present.
+    for key in ("yes_sub_title", "subtitle", "title"):
+        text = str(market.get(key) or "")
+        match = re.search(r"Target\s*Price\s*:\s*\$?([0-9][0-9,]*(?:\.[0-9]+)?)", text, re.I)
+        if match:
+            value = safe_float(match.group(1).replace(",", ""))
+            if pd.notna(value) and value > 0:
+                return float(value)
     strike_type = str(market.get("strike_type") or "").lower()
-    preferred = (
-        ("cap_strike", "floor_strike")
-        if strike_type in {"less", "less_equal", "less-than", "less_than"}
-        else ("floor_strike", "cap_strike")
-    )
+    preferred = (("cap_strike", "floor_strike") if strike_type in {"less", "less_equal", "less-than", "less_than"} else ("floor_strike", "cap_strike"))
     for key in preferred:
         value = safe_float(market.get(key))
         if pd.notna(value) and value > 0:
@@ -3855,6 +3862,14 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 
         function numericKalshiTarget(m) {{
             if (!m) return NaN;
+            for (const key of ["yes_sub_title", "subtitle", "title"]) {{
+                const text = String(m[key] || "");
+                const hit = text.match(/Target\s*Price\s*:\s*\$?([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+                if (hit) {{
+                    const explicitTarget = Number(hit[1].replace(/,/g, ""));
+                    if (Number.isFinite(explicitTarget) && explicitTarget > 0) return explicitTarget;
+                }}
+            }}
             const strikeType = String(m.strike_type || "").toLowerCase();
             const preferCap = ["less", "less_equal", "less-than", "less_than"].includes(strikeType);
             const first = Number(preferCap ? m.cap_strike : m.floor_strike);
