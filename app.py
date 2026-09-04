@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r22-signal-badges"
+APP_VERSION = "2026.09.04-single-file-r23-directional-call-badges"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -75,6 +75,26 @@ st.markdown(
     .paper-banner {
         padding: 0.7rem 1rem; border: 1px solid rgba(255,255,255,.15);
         border-radius: 10px; margin-bottom: 0.8rem; font-weight: 700;
+    }
+    .direction-call {
+        display:inline-flex; align-items:center; justify-content:center;
+        min-width:116px; padding:7px 13px; border-radius:9px;
+        font-weight:800; letter-spacing:.02em; line-height:1;
+        border:1px solid transparent; box-shadow:0 0 18px rgba(0,0,0,.12);
+        white-space:nowrap;
+    }
+    .direction-call.compact {min-width:92px; padding:5px 10px; font-size:.9rem;}
+    .direction-call.call-up {
+        color:#20f0bd; background:rgba(0,230,179,.12);
+        border-color:rgba(0,230,179,.72); box-shadow:0 0 14px rgba(0,230,179,.13);
+    }
+    .direction-call.call-down {
+        color:#ff5d72; background:rgba(255,73,100,.12);
+        border-color:rgba(255,73,100,.78); box-shadow:0 0 14px rgba(255,73,100,.12);
+    }
+    .direction-call.call-neutral {
+        color:#c2d1e6; background:rgba(140,160,190,.11);
+        border-color:rgba(140,160,190,.45);
     }
 
     /* Prevent Streamlit's "stale" rerun state from dimming live numbers.
@@ -156,6 +176,19 @@ def fmt_money(x):
 
 def fmt_pct(x, digits=2):
     return "N/A" if pd.isna(x) else f"{x:.{digits}f}%"
+
+
+def directional_badge_html(label, compact=False):
+    """Visual-only badge for directional calls; does not change decision logic."""
+    text = str(label or "HOLD").upper().strip()
+    if any(k in text for k in ("LOCK UP", "SCALP UP", "BULLISH")) or text == "UP":
+        cls, icon = "call-up", "▲"
+    elif any(k in text for k in ("LOCK DOWN", "SCALP DOWN", "BEARISH")) or text == "DOWN":
+        cls, icon = "call-down", "▼"
+    else:
+        cls, icon = "call-neutral", "•"
+    size_cls = " compact" if compact else ""
+    return f'<span class="direction-call {cls}{size_cls}">{icon}&nbsp;&nbsp;{text}</span>'
 
 
 def http_json(url, params=None, timeout=2.8):
@@ -4563,7 +4596,9 @@ def live_dashboard():
     with tab_ai:
         st.subheader("Master Kalshi 15-minute Prediction AI")
         d1, d2, d3, d4, d5 = st.columns(5)
-        d1.metric("Call", decision["action"])
+        with d1:
+            st.caption("Call")
+            st.markdown(directional_badge_html(decision["action"]), unsafe_allow_html=True)
         d2.metric("Master score", f"{decision['score']:+.3f}")
         d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
         d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
@@ -4605,7 +4640,8 @@ def live_dashboard():
         else:
             agreement_word = "Council is heavily divided"
 
-        st.markdown(f"### {call_icon} Council verdict: **{action}**")
+        st.markdown("### Council verdict")
+        st.markdown(directional_badge_html(action), unsafe_allow_html=True)
         st.write(plain_call)
         s1, s2, s3 = st.columns(3)
         s1.metric("How sure?", f"{confidence_pct:.0f}%", confidence_word)
@@ -4618,6 +4654,7 @@ def live_dashboard():
             "A strong call with low consensus means the council still has meaningful disagreement."
         )
         if decision["action"] in {"LOCK UP", "LOCK DOWN"}:
+            st.markdown(directional_badge_html(decision["action"]), unsafe_allow_html=True)
             st.warning(
                 f"LOCKED SIDE: {decision['locked_side']} — "
                 "hold call until Kalshi market expiration."
