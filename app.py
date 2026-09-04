@@ -38,7 +38,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file-r23-directional-call-badges"
+APP_VERSION = "2026.09.04-single-file-r25-unified-council-style"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -96,6 +96,21 @@ st.markdown(
         color:#c2d1e6; background:rgba(140,160,190,.11);
         border-color:rgba(140,160,190,.45);
     }
+    .direction-card {
+        width:100%; min-height:92px; box-sizing:border-box;
+        display:flex; align-items:center; justify-content:center;
+        padding:14px 16px; border-radius:13px;
+        background:linear-gradient(180deg,rgba(11,27,47,.96),rgba(7,20,35,.96));
+        border:1px solid #1687ff;
+        box-shadow:0 10px 28px rgba(0,0,0,.18), 0 0 0 1px rgba(22,135,255,.10) inset;
+    }
+    .direction-card .direction-call {
+        min-width:150px; padding:10px 18px; font-size:1.08rem;
+    }
+    .direction-card.verdict-card {
+        width:min(100%, 330px); min-height:82px; justify-content:flex-start;
+    }
+    .direction-card.verdict-card .direction-call {min-width:165px;}
 
     /* Prevent Streamlit's "stale" rerun state from dimming live numbers.
        Old values stay fully visible until the new values replace them. */
@@ -3381,10 +3396,19 @@ if dark_mode:
         /* Cards / metrics */
         [data-testid="stMetric"] {
             background:linear-gradient(180deg,rgba(11,27,47,.96),rgba(7,20,35,.96)) !important;
-            border:1px solid var(--cc-border) !important;
+            border:1px solid #1687ff !important;
             border-radius:13px !important;
             padding:.85rem 1rem !important;
-            box-shadow:0 10px 28px rgba(0,0,0,.18) !important;
+            min-height:92px !important;
+            box-shadow:0 10px 28px rgba(0,0,0,.18), 0 0 0 1px rgba(22,135,255,.08) inset !important;
+        }
+        [data-testid="stMetric"]:hover {border-color:#4aa3ff !important;}
+        [data-testid="stTabs"] [data-testid="stVerticalBlock"] > div {
+            border-radius:12px;
+        }
+        [data-testid="stTabs"] h2, [data-testid="stTabs"] h3 {
+            padding-bottom:.35rem;
+            border-bottom:1px solid rgba(22,135,255,.24);
         }
         [data-testid="stMetricLabel"] {color:var(--cc-muted) !important;}
         [data-testid="stMetricValue"] {color:var(--cc-text) !important; font-weight:750 !important;}
@@ -3417,10 +3441,11 @@ if dark_mode:
 
         /* Alerts and banners */
         [data-testid="stAlert"] {
-            background:#0a1a2d !important;
-            border:1px solid #24466b !important;
+            background:linear-gradient(180deg,#0a1a2d,#081522) !important;
+            border:1px solid #1687ff !important;
             border-radius:12px !important;
             color:#eaf2ff !important;
+            box-shadow:0 8px 22px rgba(0,0,0,.14) !important;
         }
         .paper-banner {
             background:linear-gradient(90deg,rgba(0,230,179,.12),rgba(22,135,255,.08)) !important;
@@ -4448,7 +4473,12 @@ def live_dashboard():
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("BTC", fmt_money(price))
     m2.metric("24h", fmt_pct(ticker.get("change_24h")))
-    m3.metric("Master", decision["action"])
+    with m3:
+        st.caption("Master")
+        st.markdown(
+            f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+            unsafe_allow_html=True,
+        )
     m4.metric("Confidence", f"{decision['confidence']*100:.1f}%")
     m5.metric("Consensus", f"{decision['consensus']*100:.1f}%")
     m6.metric("Spot feed", "N/A" if pd.isna(ticker.get("feed_ms")) else f"{ticker['feed_ms']:.0f} ms")
@@ -4523,7 +4553,12 @@ def live_dashboard():
             )
 
             call1, call2, call3, call4 = st.columns(4)
-            call1.metric("CALL", decision["action"])
+            with call1:
+                st.caption("CALL")
+                st.markdown(
+                    f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+                    unsafe_allow_html=True,
+                )
             call2.metric("Side", side_text)
             call3.metric(
                 "AI projected end", fmt_money(decision["projected_end"])
@@ -4598,7 +4633,10 @@ def live_dashboard():
         d1, d2, d3, d4, d5 = st.columns(5)
         with d1:
             st.caption("Call")
-            st.markdown(directional_badge_html(decision["action"]), unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="direction-card">{directional_badge_html(decision["action"])}</div>',
+                unsafe_allow_html=True,
+            )
         d2.metric("Master score", f"{decision['score']:+.3f}")
         d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
         d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
@@ -4641,7 +4679,10 @@ def live_dashboard():
             agreement_word = "Council is heavily divided"
 
         st.markdown("### Council verdict")
-        st.markdown(directional_badge_html(action), unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="direction-card verdict-card">{directional_badge_html(action)}</div>',
+            unsafe_allow_html=True,
+        )
         st.write(plain_call)
         s1, s2, s3 = st.columns(3)
         s1.metric("How sure?", f"{confidence_pct:.0f}%", confidence_word)
@@ -4697,7 +4738,7 @@ def live_dashboard():
                 """
                 <style>
                 .ai-council-wrap {
-                    width: 100%; overflow-x: auto; border: 1px solid #263447;
+                    width: 100%; overflow-x: auto; border: 1px solid #1687ff;
                     border-radius: 12px; background: #0b1220;
                 }
                 .ai-council-table {
@@ -4766,10 +4807,12 @@ def live_dashboard():
             f"${hourly_ai['projected_move']:+,.2f}",
             f"{hourly_ai['projected_move_pct']*100:+.3f}%",
         )
-        h3.metric(
-            "Direction",
-            hourly_ai["direction"],
-        )
+        with h3:
+            st.caption("Direction")
+            st.markdown(
+                f'<div class="direction-card">{directional_badge_html(hourly_ai["direction"])}</div>',
+                unsafe_allow_html=True,
+            )
         h4.metric(
             "Confidence",
             f"{hourly_ai['confidence']*100:.1f}%",
