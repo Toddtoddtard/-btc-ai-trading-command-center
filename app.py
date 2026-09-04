@@ -53,7 +53,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r40-journal-dark-ui"
+APP_VERSION = "2026.09.04-r41-consistent-dark-tables"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -247,6 +247,103 @@ def directional_badge_html(label, compact=False):
     size_cls = " compact" if compact else ""
     return f'<span class="direction-call {cls}{size_cls}">{icon}&nbsp;&nbsp;{text}</span>'
 
+
+
+def render_dashboard_table(df, formatters=None):
+    """Render dashboard tables with the same dark visual language as AI Council.
+
+    Presentation only: underlying dataframe values and trading logic are untouched.
+    """
+    if not st.session_state.get("dashboard_dark_mode", True):
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        return
+
+    view = df.copy()
+    fmts = dict(formatters or {})
+
+    def _semantic_badge(value):
+        text = str(value if value is not None else "").strip()
+        upper = text.upper()
+        positive = {
+            "BULLISH", "UP", "SCALP UP", "LOCK UP", "LONG", "BUY",
+            "CORRECT", "IMPROVING", "RESOLVED", "YES", "WIN", "TRUE",
+        }
+        negative = {
+            "BEARISH", "DOWN", "SCALP DOWN", "LOCK DOWN", "SHORT", "SELL",
+            "WRONG", "DECLINING", "LOSS", "NO", "FALSE",
+        }
+        if upper in positive or upper in {"1", "1.0"}:
+            cls = "dash-positive"
+        elif upper in negative or upper in {"0", "0.0"}:
+            cls = "dash-negative"
+        else:
+            cls = "dash-neutral"
+        return f'<span class="dash-badge {cls}">{text}</span>'
+
+    semantic_cols = {
+        "signal", "action", "direction", "trend", "correct", "resolved",
+        "side", "approved", "result", "status",
+    }
+    for col in view.columns:
+        if str(col).strip().lower() in semantic_cols and col not in fmts:
+            fmts[col] = _semantic_badge
+
+    table_html = view.to_html(
+        index=False,
+        border=0,
+        classes="dashboard-dark-table",
+        escape=False,
+        formatters=fmts,
+    )
+    st.markdown(
+        """
+        <style>
+        .dashboard-dark-wrap {
+            width:100%; overflow-x:auto; border:1px solid #1687ff;
+            border-radius:12px; background:#0b1220;
+        }
+        .dashboard-dark-table {
+            width:100%; border-collapse:collapse; color:#e8eef8;
+            background:#0b1220; font-size:.93rem; margin:0;
+        }
+        .dashboard-dark-table thead th {
+            position:sticky; top:0; z-index:1; text-align:left;
+            color:#b8cff7; background:#111c2e; font-weight:700;
+            border-bottom:1px solid #2b3b52; padding:10px 12px;
+            white-space:nowrap;
+        }
+        .dashboard-dark-table tbody td {
+            color:#e7edf7; background:#0b1220;
+            border-bottom:1px solid #1e2b3d; padding:9px 12px;
+            vertical-align:middle; white-space:nowrap;
+        }
+        .dashboard-dark-table tbody tr:nth-child(even) td {background:#0f1828;}
+        .dashboard-dark-table tbody tr:hover td {background:#15243a;}
+        .dash-badge {
+            display:inline-block; min-width:78px; text-align:center;
+            padding:4px 9px; border-radius:7px; font-weight:800;
+            letter-spacing:.02em; line-height:1.2; box-sizing:border-box;
+        }
+        .dash-positive {
+            color:#00f0b5; background:rgba(0,240,181,.13);
+            border:1px solid rgba(0,240,181,.80);
+        }
+        .dash-negative {
+            color:#ff536b; background:rgba(255,83,107,.13);
+            border:1px solid rgba(255,83,107,.85);
+        }
+        .dash-neutral {
+            color:#b8c6dc; background:rgba(184,198,220,.09);
+            border:1px solid rgba(184,198,220,.42);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div class="dashboard-dark-wrap">{table_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 def http_json(url, params=None, timeout=2.8):
     if params:
@@ -4931,7 +5028,7 @@ def live_dashboard():
             f3.metric("Flow imbalance", f"{imbalance*100:+.1f}%")
             f4.metric("Trades sampled", f"{len(agg):,}")
             show = agg[["time", "aggressor", "price", "qty", "notional"]].tail(80).sort_values("time", ascending=False)
-            st.dataframe(show, use_container_width=True, hide_index=True)
+            render_dashboard_table(show)
         else:
             st.warning("Aggregate trade feed unavailable.")
 
@@ -4982,7 +5079,7 @@ def live_dashboard():
                         "Volume": m.get("volume_fp", ""),
                         "Close": m.get("close_time", ""),
                     })
-                st.dataframe(pd.DataFrame(krows), use_container_width=True, hide_index=True)
+                render_dashboard_table(pd.DataFrame(krows))
             else:
                 st.info("Kalshi responded, but no open market in the returned page matched Bitcoin/BTC right now.")
         else:
@@ -5086,7 +5183,7 @@ def live_dashboard():
             trades = pd.read_sql_query("SELECT * FROM paper_trades ORDER BY id DESC LIMIT 100", conn)
         if not trades.empty:
             st.subheader("Paper Trade Log")
-            st.dataframe(trades, use_container_width=True, hide_index=True)
+            render_dashboard_table(trades)
         else:
             st.info("No paper trades yet.")
 
@@ -5279,11 +5376,7 @@ def live_dashboard():
                 errors="coerce",
             ).round(2)
 
-        st.dataframe(
-            rolling_master_df,
-            use_container_width=True,
-            hide_index=True,
-        )
+        render_dashboard_table(rolling_master_df)
 
         _m100 = rolling_master_accuracy(100)
         _m1000 = rolling_master_accuracy(1000)
@@ -5337,11 +5430,7 @@ def live_dashboard():
                 "market conditions change."
             )
 
-            st.dataframe(
-                specialist_multi,
-                use_container_width=True,
-                hide_index=True,
-            )
+            render_dashboard_table(specialist_multi)
 
         specialist_df = specialist_learning_dataframe()
 
@@ -5373,11 +5462,7 @@ def live_dashboard():
                 errors="coerce",
             ).round(3)
 
-            st.dataframe(
-                specialist_df,
-                use_container_width=True,
-                hide_index=True,
-            )
+            render_dashboard_table(specialist_df)
 
         learning_df = recent_learning_windows(50)
         if learning_df.empty:
@@ -5396,11 +5481,7 @@ def live_dashboard():
                         errors="coerce"
                     ).round(2)
 
-            st.dataframe(
-                learning_df,
-                use_container_width=True,
-                hide_index=True,
-            )
+            render_dashboard_table(learning_df)
 
 
     with tab_backtest:
@@ -5421,7 +5502,7 @@ def live_dashboard():
                 view = bt[["time", "close", "signal", "future_return", "strategy_return", "correct"]].tail(200).copy()
                 view["future_return"] = (view["future_return"] * 100).round(3)
                 view["strategy_return"] = (view["strategy_return"] * 100).round(3)
-                st.dataframe(view, use_container_width=True, hide_index=True)
+                render_dashboard_table(view)
 
     # ============================================================
     # DIAGNOSTICS / STATUS
