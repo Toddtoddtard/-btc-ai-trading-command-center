@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Attach v5 specialist knowledge to the existing v3.1 learning-state payload."""
+"""Attach specialist knowledge to the live learning-state payload."""
 import json
 import os
 from datetime import datetime, timezone
@@ -9,15 +9,11 @@ from ai_core import SPECIALIST_NAMES
 from specialist_knowledge_v5 import specialist_posterior
 
 PATH = Path(os.getenv("LEARNING_STATE_OUTPUT", "/tmp/learning_state.json"))
+HISTORICAL_SPECIALIST_INPUT = Path(os.getenv("HISTORICAL_SPECIALIST_INPUT", "/tmp/historical_specialist_knowledge_v7.json"))
 
 
 def resolve_current_regime(state):
-    """Resolve the freshest real regime label available in the state.
-
-    Older v5 code looked for validation.current_regime, but walk-forward validation
-    does not emit that field, so the knowledge layer silently fell back to UNKNOWN.
-    Prefer the active pending window, then learner status, then the latest graded row.
-    """
+    """Resolve the freshest real regime label available in the state."""
     pending = state.get("pending") if isinstance(state.get("pending"), dict) else {}
     regime = str((pending or {}).get("regime") or "").strip()
     if regime and regime != "UNKNOWN":
@@ -36,8 +32,26 @@ def resolve_current_regime(state):
     return "UNKNOWN"
 
 
+def load_historical_specialist_prior(state):
+    """Load a validated v7 report when the workflow supplied one."""
+    if not HISTORICAL_SPECIALIST_INPUT.exists():
+        return False
+    try:
+        report = json.loads(HISTORICAL_SPECIALIST_INPUT.read_text())
+    except Exception:
+        return False
+    if not isinstance(report, dict) or report.get("version") != 7 or report.get("walk_forward") is not True:
+        return False
+    specialists = report.get("specialists")
+    if not isinstance(specialists, dict) or not specialists:
+        return False
+    state["historical_specialist_knowledge_v7"] = report
+    return True
+
+
 def main():
     state = json.loads(PATH.read_text())
+    historical_loaded = load_historical_specialist_prior(state)
     regime = resolve_current_regime(state)
     names = [n for n in SPECIALIST_NAMES if n != "Combination AI"]
     knowledge = {}
@@ -52,18 +66,21 @@ def main():
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "regime": regime,
         "target_precision": 0.90,
-        "method": "Bayesian posterior from graded specialist history plus optional walk-forward priors",
+        "method": "Bayesian posterior from graded live history plus optional five-year regime-specific walk-forward priors",
+        "historical_specialist_v7_loaded": historical_loaded,
         "bots": knowledge,
         "ranking": [x["name"] for x in ranked],
         "warning": "90% is a target, not a guaranteed or reported accuracy. Precision gate may abstain heavily.",
     }
-    state.setdefault("status", {})["intelligence_version"] = 5
+    state.setdefault("status", {})["intelligence_version"] = 7 if historical_loaded else 6
     state["status"]["specialist_self_learning_v5"] = True
     state["status"]["specialist_knowledge_regime"] = regime
+    state["status"]["historical_specialist_v7_loaded"] = historical_loaded
     PATH.write_text(json.dumps(state, indent=2, sort_keys=True))
     print(json.dumps({
-        "intelligence_version": 5,
+        "intelligence_version": state["status"]["intelligence_version"],
         "regime": regime,
+        "historical_specialist_v7_loaded": historical_loaded,
         "top_bots": state["specialist_knowledge_v5"]["ranking"][:5],
     }, indent=2))
 

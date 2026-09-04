@@ -1,0 +1,32 @@
+name: Specialist Intelligence v7 CI
+
+on:
+  push:
+    branches:
+      - specialist-history-v7
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Compile v7 files
+        run: python -m py_compile historical_specialist_backtest_v7.py specialist_knowledge_v5.py enrich_learning_state_v5.py audit_scorecard_v7.py tests/test_specialist_history_v7.py
+      - name: Run v7 tests
+        run: python -m unittest tests.test_specialist_history_v7 -v
+      - name: Run Audit v6 tests
+        run: python -m unittest tests.test_audit_v6 -v
+      - name: Static integration validation
+        run: python tools/validate_specialist_v7.py
