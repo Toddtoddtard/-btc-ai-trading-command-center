@@ -1,8 +1,8 @@
 import unittest
-from datetime import datetime, timezone
 
 import pandas as pd
 
+from learner_v31 import challenger_qualifies
 from reliability_v31 import (
     calibrate_confidence,
     exact_expiry_row,
@@ -16,6 +16,9 @@ from reliability_v31 import (
 class ReliabilityTests(unittest.TestCase):
     def test_execution_cost_positive(self):
         self.assertAlmostEqual(execution_cost_bps(10000), 6.5, places=6)
+
+    def test_round_trip_cost_is_thirteen_bps(self):
+        self.assertAlmostEqual(execution_cost_bps(10000) * 2, 13.0, places=6)
 
     def test_exact_expiry_rejects_stale(self):
         now = pd.Timestamp("2026-09-04T12:00:00Z")
@@ -50,6 +53,23 @@ class ReliabilityTests(unittest.TestCase):
         allowed, reason = learned_trade_gate("SCALP DOWN", 0.9, -0.5, 0.05, policy, source_health=1.0)
         self.assertFalse(allowed)
         self.assertIn("CONFLICT", reason)
+
+    def test_challenger_cannot_promote_on_small_sample(self):
+        champ = {"samples": 19, "accuracy": 0.50, "median_error": 100.0}
+        challenger = {"samples": 19, "accuracy": 0.80, "median_error": 60.0}
+        self.assertFalse(challenger_qualifies(champ, challenger))
+
+    def test_challenger_requires_five_point_accuracy_margin(self):
+        champ = {"samples": 25, "accuracy": 0.60, "median_error": 100.0}
+        challenger = {"samples": 25, "accuracy": 0.64, "median_error": 80.0}
+        self.assertFalse(challenger_qualifies(champ, challenger))
+        challenger["accuracy"] = 0.66
+        self.assertTrue(challenger_qualifies(champ, challenger))
+
+    def test_challenger_cannot_buy_accuracy_with_bad_error(self):
+        champ = {"samples": 25, "accuracy": 0.55, "median_error": 100.0}
+        challenger = {"samples": 25, "accuracy": 0.70, "median_error": 111.0}
+        self.assertFalse(challenger_qualifies(champ, challenger))
 
 
 if __name__ == "__main__":
