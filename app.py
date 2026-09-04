@@ -37,7 +37,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-single-file"
+APP_VERSION = "2026.09.04-single-file-r2"
 
 SPECIALIST_WEIGHTS = {
     "Trend AI": 1.15,
@@ -688,8 +688,17 @@ def recent_predictions(limit=100):
             params=(int(limit),),
         )
     if not df.empty:
-        df["confidence"] = (df["confidence"] * 100).round(1)
-        df["consensus"] = (df["consensus"] * 100).round(1)
+        # Existing Streamlit Cloud databases can contain values written by an
+        # older build as strings/objects. Coerce display columns back to
+        # numeric before arithmetic/rounding so legacy rows cannot crash the UI.
+        numeric_cols = ["confidence", "consensus", "score", "price",
+                        "target_price", "resolved_price", "return_pct", "correct"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df["confidence"] = (df["confidence"] * 100.0).round(1)
+        df["consensus"] = (df["consensus"] * 100.0).round(1)
         df["score"] = df["score"].round(3)
         df["return_pct"] = df["return_pct"].round(3)
     return df
