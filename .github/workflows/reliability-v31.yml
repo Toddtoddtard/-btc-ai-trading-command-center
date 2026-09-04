@@ -40,10 +40,11 @@ jobs:
         run: python -m unittest tests/test_reliability_v31.py -v
       - name: Verify upgrade markers
         run: |
-          grep -q 'r36-reliability-v31' app.py
+          grep -q 'r37-reliability-v31' app.py
           grep -q 'source_health_from_specialists' app.py
           grep -q 'execution_cost_bps' app.py
           grep -q 'regime_specialist_weight' app.py
+          grep -q 'entry_cost_est = execution_cost_bps(qty \* entry_price)' app.py
           ! grep -q 'strong_move_up and up_price_favorable and confidence >= 0.58' app.py
           ! grep -q 'strong_move_down and down_price_favorable and confidence >= 0.58' app.py
       - name: Commit upgraded app safely
