@@ -1,0 +1,75 @@
+name: BTC AI Five-Year Specialist Priors v7
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'historical_specialist_backtest_v7.py'
+      - '.github/workflows/historical-specialist-v7.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: btc-ai-historical-specialist-v7
+  cancel-in-progress: false
+
+jobs:
+  specialist-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r learner-requirements.txt
+      - name: Compile evaluator
+        run: python -m py_compile historical_specialist_backtest_v7.py ai_core.py reliability_v31.py
+      - name: Run five-year specialist walk-forward
+        env:
+          HISTORICAL_SPECIALIST_OUTPUT: /tmp/historical_specialist_knowledge_v7.json
+        run: python historical_specialist_backtest_v7.py
+      - name: Validate report
+        run: |
+          python - <<'PY'
+          import json
+          p='/tmp/historical_specialist_knowledge_v7.json'
+          d=json.load(open(p))
+          assert d.get('version') == 7
+          assert d.get('walk_forward') is True
+          assert d.get('evaluated_windows', 0) >= 10000
+          bots=d.get('specialists', {})
+          required={'Trend AI','Momentum AI','Volume AI','Pattern AI','Support/Resistance AI','Volatility AI','Market Regime AI','Historical Pattern AI'}
+          assert required.issubset(bots)
+          for name in required:
+              assert bots[name].get('samples', 0) > 1000
+              assert isinstance(bots[name].get('regimes', {}), dict)
+          print('validated', d['evaluated_windows'], 'historical specialist windows')
+          PY
+      - name: Publish report to learning-state branch
+        shell: bash
+        run: |
+          set -e
+          git config user.name 'btc-ai-historical-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git fetch origin learning-state:refs/remotes/origin/learning-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
+            git checkout -B learning-state refs/remotes/origin/learning-state
+          else
+            git checkout --orphan learning-state
+            git rm -rf . || true
+          fi
+          cp /tmp/historical_specialist_knowledge_v7.json ./historical_specialist_knowledge_v7.json
+          git add historical_specialist_knowledge_v7.json
+          if git diff --cached --quiet; then
+            echo 'No historical specialist report change.'
+            exit 0
+          fi
+          git commit -m 'Update five-year specialist priors v7'
+          git push origin learning-state --force-with-lease
