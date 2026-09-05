@@ -3,95 +3,24 @@ name: Global metric right-padding fix
 on:
   push:
     paths:
+      - 'app.py'
       - '.github/workflows/global-metric-padding-v1.yml'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  update:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          ref: main
-
-      - name: Shift metric values left globally
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('app.py')
-          text = p.read_text()
-          old = '''    [data-testid="stMetricValue"] {
-        font-size: clamp(.88rem, 1.55vw, 1.55rem) !important;
-        line-height: 1.15 !important;
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        min-width: 0 !important;
-    }
-    [data-testid="stMetricValue"] > div,
-    [data-testid="stMetricValue"] p {
-        font-size: inherit !important;
-        line-height: inherit !important;
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        max-width: none !important;
-    }
-    [data-testid="stMetric"] {
-        min-width: 0 !important;
-    }
-'''
-          new = '''    [data-testid="stMetricValue"] {
-        font-size: clamp(.84rem, 1.48vw, 1.48rem) !important;
-        line-height: 1.15 !important;
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        min-width: 0 !important;
-        width: 100% !important;
-        box-sizing: border-box !important;
-        padding-right: .65rem !important;
-    }
-    [data-testid="stMetricValue"] > div,
-    [data-testid="stMetricValue"] p {
-        font-size: inherit !important;
-        line-height: inherit !important;
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-        padding-right: .10rem !important;
-    }
-    [data-testid="stMetric"] {
-        min-width: 0 !important;
-        box-sizing: border-box !important;
-        padding-right: .20rem !important;
-    }
-'''
-          if old not in text:
-              raise SystemExit('Current metric style block not found; refusing partial update')
-          text = text.replace(old, new, 1)
-          text = text.replace('APP_VERSION = "2026.09.05-r49-metric-fit"', 'APP_VERSION = "2026.09.05-r50-global-metric-padding"', 1)
-          p.write_text(text)
-          PY
-
-      - name: Validate Python syntax
+          python-version: '3.12'
+      - name: Validate app syntax
         run: python -m py_compile app.py
-
-      - name: Commit app update
+      - name: Verify metric padding is installed
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py
-          git diff --cached --check
-          if git diff --cached --quiet; then
-            echo "No app.py changes to commit."
-            exit 0
-          fi
-          git commit -m "Shift metric values inward globally"
-          git push origin main
-
-# retrigger
+          grep -q 'padding-right: .65rem !important;' app.py
+          grep -q 'padding-right: .20rem !important;' app.py
