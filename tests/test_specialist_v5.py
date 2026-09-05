@@ -1,6 +1,6 @@
 import unittest
 
-from specialist_knowledge_v5 import specialist_posterior, knowledge_council_vote
+from specialist_knowledge_v5 import specialist_posterior, knowledge_council_vote, precision_gate
 from profitability_v5 import summarize_trades, profitability_gate
 
 
@@ -22,15 +22,35 @@ class SpecialistV5Tests(unittest.TestCase):
         self.assertEqual(p["live_samples"], 40)
         self.assertTrue(p["mature"])
 
-    def test_precision_gate_abstains_when_immature(self):
-        results = {
-            "Trend AI": {"score": 0.9, "confidence": 0.95},
-            "Momentum AI": {"score": 0.8, "confidence": 0.90},
-            "Volume AI": {"score": 0.7, "confidence": 0.88},
+    def test_precision_gate_does_not_deadlock_bootstrap(self):
+        vote = {
+            "action": "SCALP UP",
+            "consensus": 0.70,
+            "confidence": 0.72,
+            "source_health": 0.95,
         }
-        vote = knowledge_council_vote(results, {}, "TREND_UP", target_precision=0.90)
-        self.assertEqual(vote["action"], "WAIT")
-        self.assertFalse(vote["precision_gate_passed"])
+        ok, reason = precision_gate(vote, {}, target_precision=0.90)
+        self.assertTrue(ok)
+        self.assertIn("PASS", reason)
+
+    def test_precision_gate_blocks_clearly_weak_learned_evidence(self):
+        knowledge = {
+            f"bot{i}": {
+                "mature": True,
+                "posterior_accuracy": 0.42,
+                "lower95_accuracy": 0.30,
+            }
+            for i in range(5)
+        }
+        vote = {
+            "action": "SCALP DOWN",
+            "consensus": 0.70,
+            "confidence": 0.72,
+            "source_health": 0.95,
+        }
+        ok, reason = precision_gate(vote, knowledge)
+        self.assertFalse(ok)
+        self.assertIn("weak", reason.lower())
 
     def test_profitability_metrics_apply_costs(self):
         rows = [

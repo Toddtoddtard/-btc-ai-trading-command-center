@@ -1,0 +1,64 @@
+name: BTC Full Audit v16
+
+on:
+  pull_request:
+    paths:
+      - 'specialist_knowledge_v5.py'
+      - 'historical_specialist_backtest_v7.py'
+      - 'political_event_monitor.py'
+      - 'political_event_watch.py'
+      - 'tests/**'
+      - 'tools/apply_btc_audit_v16.py'
+      - '.github/workflows/btc-audit-v16.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'specialist_knowledge_v5.py'
+      - 'historical_specialist_backtest_v7.py'
+      - 'political_event_monitor.py'
+      - 'political_event_watch.py'
+      - 'tests/**'
+      - 'tools/apply_btc_audit_v16.py'
+      - '.github/workflows/btc-audit-v16.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Apply audited BTC decision policy
+        run: python tools/apply_btc_audit_v16.py
+      - name: Syntax check critical modules
+        run: python -m py_compile app.py ai_core.py council_v4.py specialist_knowledge_v5.py reliability_v31.py political_event_watch.py political_event_monitor.py historical_specialist_backtest_v7.py
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Verify repaired call path exists
+        run: |
+          grep -q 'forecast_move >= max(atr \* 0.22, px \* 0.00022)' app.py
+          grep -q 'not up_market_conflict' app.py
+          grep -q 'not down_market_conflict' app.py
+          grep -q 'Political Event Watch AI' ai_core.py
+          ! grep -q 'official/verified handle' political_event_monitor.py
+      - name: Install audited app policy on main
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          if git diff --quiet -- app.py; then
+            echo 'BTC app policy already installed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Install BTC audit v16 decision fixes'
+          git push origin main
