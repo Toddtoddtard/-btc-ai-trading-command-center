@@ -99,6 +99,8 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
     for name, item in results.items():
         if name in exclude or not isinstance(item, dict):
             continue
+        if name == "Political Event Watch AI" and str(item.get("event_status", "INACTIVE")).upper() != "ACTIVE":
+            continue
         score = float(np.clip(_safe_float(item.get("score"), 0.0), -1.0, 1.0))
         confidence = float(np.clip(_safe_float(item.get("confidence"), 0.5), 0.05, 0.99))
         weight = specialist_weight(name, state, regime)
