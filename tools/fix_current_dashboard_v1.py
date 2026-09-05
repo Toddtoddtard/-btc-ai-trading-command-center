@@ -13,7 +13,7 @@ s = re.sub(
     count=1,
 )
 
-# Make the custom Confidence card match the surrounding Streamlit metric cards.
+# Make the custom Confidence card visually match the other top metric cards.
 confidence_css = '''    .confidence-metric-card {
         width:100%;
         min-height:92px;
@@ -39,10 +39,8 @@ s, n_css = re.subn(
 if n_css != 1:
     raise SystemExit("confidence card CSS anchor not found")
 
-# Resolve every prediction at the candle nearest its own target timestamp instead
-# of using whatever live price happens to be present on a later dashboard rerun.
-# Also self-heal legacy actionable rows that were marked resolved with correct=NULL.
 new_resolver = '''def resolve_predictions(hist, current_price=None):
+    """Resolve journal rows at the BTC candle nearest each row's target time."""
     now_ts = int(time.time())
     if hist is None or hist.empty:
         return 0
@@ -89,8 +87,7 @@ new_resolver = '''def resolve_predictions(hist, current_price=None):
             elif action in {"SCALP DOWN", "LOCK DOWN"}:
                 correct = int(resolved_price < strike) if pd.notna(strike) else int(resolved_price < start_price)
             else:
-                # HOLD/WAIT are tracked as resolved decision-quality observations,
-                # but are not counted as wins/losses in directional accuracy.
+                # HOLD/WAIT remain tracked and resolved, but do not count as wins/losses.
                 correct = None
 
             conn.execute(
@@ -103,8 +100,8 @@ new_resolver = '''def resolve_predictions(hist, current_price=None):
     return updated
 '''
 s, n_resolve = re.subn(
-    r'def resolve_predictions\(current_price\):.*?\n\ndef recent_predictions\(limit=100\):',
-    new_resolver + '\n\ndef recent_predictions(limit=100):',
+    r'def resolve_predictions\(current_price\):.*?(?=\ndef recent_predictions\(limit=100\):)',
+    new_resolver + '\n',
     s,
     count=1,
     flags=re.S,
@@ -112,8 +109,6 @@ s, n_resolve = re.subn(
 if n_resolve != 1:
     raise SystemExit("prediction resolver anchor not found")
 
-# Accuracy is trade-call accuracy only. HOLD/WAIT stay tracked separately and no
-# longer inflate or dilute the displayed win/loss rate.
 new_stats = '''def prediction_stats():
     with db_conn() as conn:
         row = conn.execute(
@@ -140,8 +135,8 @@ new_stats = '''def prediction_stats():
     }
 '''
 s, n_stats = re.subn(
-    r'def prediction_stats\(\):.*?\n# ============================================================\n# WALK-FORWARD BACKTEST',
-    new_stats + '\n# ============================================================\n# WALK-FORWARD BACKTEST',
+    r'def prediction_stats\(\):.*?(?=\n# ============================================================\n# WALK-FORWARD BACKTEST)',
+    new_stats + '\n',
     s,
     count=1,
     flags=re.S,
@@ -149,8 +144,6 @@ s, n_stats = re.subn(
 if n_stats != 1:
     raise SystemExit("prediction stats anchor not found")
 
-# Pass candle history into the resolver so each target timestamp gets an actual
-# historical settlement-near price.
 s, n_call = re.subn(
     r'    resolve_predictions\(price\)',
     '    resolve_predictions(hist, price)',
@@ -160,7 +153,6 @@ s, n_call = re.subn(
 if n_call != 1:
     raise SystemExit("resolve_predictions call anchor not found")
 
-# Journal metrics clearly separate actionable calls from HOLD/WAIT observations.
 old_metrics = '''        j1, j2, j3, j4 = st.columns(4)
         j1.metric("Predictions", stats["n"])
         j2.metric("Resolved", stats["resolved"])
@@ -178,8 +170,6 @@ if old_metrics not in s:
     raise SystemExit("journal metrics anchor not found")
 s = s.replace(old_metrics, new_metrics, 1)
 
-# Journal display: HOLD/WAIT rows should say NO TRADE instead of looking broken,
-# and unresolved rows should say OPEN instead of N/A.
 needle = '''                journal_view = journal_df.copy()
 
                 def _journal_action_badge(value):'''
@@ -194,17 +184,6 @@ if needle not in s:
     raise SystemExit("journal view anchor not found")
 s = s.replace(needle, replacement, 1)
 
-old_badge = '''                def _journal_result_badge(value):
-                    try:
-                        if pd.isna(value):
-                            return '<span class="journal-result journal-pending">PENDING</span>'
-                        return (
-                            '<span class="journal-result journal-win">✓ CORRECT</span>'
-                            if int(float(value)) == 1
-                            else '<span class="journal-result journal-loss">✕ WRONG</span>'
-                        )
-                    except Exception:
-                        return '<span class="journal-result journal-pending">PENDING</span>' '''
 new_badge = '''                def _journal_result_badge(value):
                     label = str(value).upper().strip()
                     if label == "NO TRADE":
@@ -218,10 +197,18 @@ new_badge = '''                def _journal_result_badge(value):
                             else '<span class="journal-result journal-loss">✕ WRONG</span>'
                         )
                     except Exception:
-                        return '<span class="journal-result journal-pending">OPEN</span>' '''
-if old_badge not in s:
+                        return '<span class="journal-result journal-pending">OPEN</span>'
+
+'''
+s, n_badge = re.subn(
+    r'                def _journal_result_badge\(value\):.*?(?=                def _journal_resolved_badge\(value\):)',
+    new_badge,
+    s,
+    count=1,
+    flags=re.S,
+)
+if n_badge != 1:
     raise SystemExit("journal result badge anchor not found")
-s = s.replace(old_badge, new_badge, 1)
 
 if s == original:
     raise SystemExit("no changes made")
