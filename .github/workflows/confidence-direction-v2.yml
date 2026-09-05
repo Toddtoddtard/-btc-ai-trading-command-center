@@ -1,0 +1,30 @@
+name: Install Confidence UP DOWN UI
+
+on:
+  push:
+    paths:
+      - 'tools/apply_confidence_direction_v2.py'
+      - '.github/workflows/confidence-direction-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Confidence direction patch
+        run: python tools/apply_confidence_direction_v2.py
+      - name: Commit app.py if changed
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Add UP DOWN lean to Confidence card"
+          git push
