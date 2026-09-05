@@ -1,4 +1,4 @@
-# v1.0.1 - trigger installation on main
+# v1.0.2 - validated installer workflow
 name: Install FVG MACD Technical AI
 
 on:
@@ -24,6 +24,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install -r learner-requirements.txt
 
       - name: Install FVG and MACD technical AI
         run: python tools/install_fvg_macd_v1.py
