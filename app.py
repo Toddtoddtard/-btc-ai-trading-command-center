@@ -57,7 +57,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r44-journal-confidence-repair"
+APP_VERSION = "2026.09.05-r45-journal-backfill"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -3076,16 +3076,72 @@ def maybe_record_prediction(decision, price, min_seconds=60):
 
 
 def resolve_predictions(hist, current_price=None):
-    """Resolve journal rows at the BTC candle nearest each row's target time."""
-    now_ts = int(time.time())
-    if hist is None or hist.empty:
-        return 0
+    """Resolve expired journal rows at the 1m candle nearest each target time.
 
-    hist2 = hist.copy()
-    hist2["_ts"] = pd.to_datetime(hist2["time"], utc=True, errors="coerce")
-    hist2 = hist2.dropna(subset=["_ts"])
-    if hist2.empty:
-        return 0
+    Recent targets use the already-loaded dashboard history. Older targets that
+    fall outside that window are backfilled directly from Binance around the
+    row's exact target timestamp.
+    """
+    now_ts = int(time.time())
+
+    hist2 = pd.DataFrame()
+    if hist is not None and not hist.empty:
+        hist2 = hist.copy()
+        hist2["_ts"] = pd.to_datetime(hist2["time"], utc=True, errors="coerce")
+        hist2 = hist2.dropna(subset=["_ts"])
+
+    def _price_near_target(target_ts):
+        target_dt = pd.to_datetime(int(target_ts), unit="s", utc=True)
+
+        # Fast path: use the dashboard's in-memory 1m candles when the target is
+        # inside that recent window. Require the nearest candle to be close
+        # enough that we do not accidentally grade an old prediction on today's price.
+        if not hist2.empty:
+            deltas = (hist2["_ts"] - target_dt).abs()
+            idx = deltas.idxmin()
+            if pd.notna(idx) and deltas.loc[idx] <= pd.Timedelta(minutes=2):
+                price = safe_float(hist2.loc[idx, "close"])
+                if pd.notna(price) and price > 0:
+                    return price
+
+        # Backfill path for legacy/older rows. Ask Binance for a few 1m candles
+        # bracketing the exact target time, then choose the closest candle open.
+        start_ms = max(0, (int(target_ts) - 120) * 1000)
+        end_ms = (int(target_ts) + 120) * 1000
+        try:
+            rows, _ = try_bases(
+                SPOT_BASES,
+                "/api/v3/klines",
+                {
+                    "symbol": SYMBOL,
+                    "interval": "1m",
+                    "startTime": start_ms,
+                    "endTime": end_ms,
+                    "limit": 5,
+                },
+                timeout=3.2,
+            )
+            if not rows:
+                return np.nan
+
+            best_price = np.nan
+            best_delta = None
+            target_ms = int(target_ts) * 1000
+            for candle in rows:
+                try:
+                    open_ms = int(candle[0])
+                    close_price = safe_float(candle[4])
+                    if pd.isna(close_price) or close_price <= 0:
+                        continue
+                    delta = abs(open_ms - target_ms)
+                    if best_delta is None or delta < best_delta:
+                        best_delta = delta
+                        best_price = close_price
+                except Exception:
+                    continue
+            return best_price
+        except Exception:
+            return np.nan
 
     with db_conn() as conn:
         rows = conn.execute(
@@ -3105,12 +3161,7 @@ def resolve_predictions(hist, current_price=None):
             if pd.isna(start_price) or start_price <= 0:
                 continue
 
-            target_dt = pd.to_datetime(int(row["target_ts"]), unit="s", utc=True)
-            nearest = hist2.iloc[(hist2["_ts"] - target_dt).abs().argsort()[:1]]
-            if nearest.empty:
-                continue
-
-            resolved_price = safe_float(nearest.iloc[0]["close"])
+            resolved_price = _price_near_target(int(row["target_ts"]))
             if pd.isna(resolved_price) or resolved_price <= 0:
                 continue
 
@@ -3123,7 +3174,7 @@ def resolve_predictions(hist, current_price=None):
             elif action in {"SCALP DOWN", "LOCK DOWN"}:
                 correct = int(resolved_price < strike) if pd.notna(strike) else int(resolved_price < start_price)
             else:
-                # HOLD/WAIT remain tracked and resolved, but do not count as wins/losses.
+                # HOLD/WAIT are resolved observations, not directional wins/losses.
                 correct = None
 
             conn.execute(
