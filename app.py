@@ -57,7 +57,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r51-up-down-position-labels"
+APP_VERSION = "2026.09.05-r52-signal-status-colors"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5470,7 +5470,15 @@ def live_dashboard():
         status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
 
         if bool(auto_state["enabled"]):
-            st.success(auto_result["message"] if auto_result.get("message") else auto_state.get("last_message", "AUTO PAPER running."))
+            _status_message = auto_result["message"] if auto_result.get("message") else auto_state.get("last_message", "AUTO PAPER running.")
+            _status_side = str(auto_state.get("side", "NONE")).upper()
+            _decision_action = str(decision.get("action", "HOLD")).upper()
+            if _status_side == "LONG" or _decision_action in {"SCALP UP", "LOCK UP", "UP"}:
+                st.success(_status_message)
+            elif _status_side == "SHORT" or _decision_action in {"SCALP DOWN", "LOCK DOWN", "DOWN"}:
+                st.error(_status_message)
+            else:
+                st.info(_status_message)
         else:
             st.info("AUTO PAPER TRADING is off. Turn it on in the sidebar to let approved paper signals execute automatically.")
 
