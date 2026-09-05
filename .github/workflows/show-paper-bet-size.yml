@@ -17,7 +17,7 @@ jobs:
           ref: main
 
       - name: Update app
-        run: python scripts/add_paper_bet_size.py
+        run: python scripts/apply_global_metric_padding.py
 
       - name: Validate Python syntax
         run: python -m py_compile app.py
@@ -32,5 +32,5 @@ jobs:
             echo "No app.py changes to commit."
             exit 0
           fi
-          git commit -m "Show dollar bet size for paper trades"
+          git commit -m "Shift metric values inward globally"
           git push origin main
