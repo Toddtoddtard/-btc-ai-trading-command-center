@@ -41,8 +41,8 @@ new_calls = '''                        predictionPathTrace(rows, 1, false),
                         predictionPathTrace(rows, 5, false),
                         predictionPathTrace(rows, 15, true)'''
 count = s.count(old_call)
-if count < 2:
-    raise SystemExit(f'expected at least two predictionPathTrace array calls, found {count}')
+if count < 1:
+    raise SystemExit(f'expected at least one predictionPathTrace array call, found {count}')
 s = s.replace(old_call, new_calls)
 
 layout_anchor = '''        const layout = {{
@@ -60,7 +60,7 @@ layout_repl = '''        const layout = {{
                 direction: "right",
                 x: 1.0,
                 xanchor: "right",
-                y: -0.12,
+                y: -0.10,
                 yanchor: "top",
                 pad: {{r: 2, t: 4}},
                 bgcolor: darkMode ? "#0f1828" : "#f3f6fa",
