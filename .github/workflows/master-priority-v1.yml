@@ -1,0 +1,43 @@
+name: Master Scalp-First Priority v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_master_priority_v1.py'
+      - '.github/workflows/master-priority-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply scalp-first master priority
+        run: python tools/apply_master_priority_v1.py
+      - name: Syntax check
+        run: python -m py_compile app.py
+      - name: Verify priority logic
+        run: |
+          grep -q 'scalp_likelihood' app.py
+          grep -q 'lock_likelihood' app.py
+          grep -q 'lock_likelihood > scalp_likelihood' app.py
+      - name: Commit installed policy
+        run: |
+          if git diff --quiet -- app.py; then
+            echo 'Master scalp-first policy already installed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Install scalp-first master decision priority'
+          git push origin main
