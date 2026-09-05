@@ -57,7 +57,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 100_000.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.04-r43-specialist-self-learning-v5"
+APP_VERSION = "2026.09.05-r44-journal-confidence-repair"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -154,9 +154,19 @@ st.markdown(
         box-sizing:border-box;
     }
     .confidence-metric-card {
+        width:100%;
         min-height:92px;
         box-sizing:border-box;
-        padding:.45rem .6rem;
+        padding:.72rem 1rem;
+        border:1px solid #1687ff;
+        border-radius:13px;
+        background:linear-gradient(180deg,rgba(11,27,47,.96),rgba(7,20,35,.96));
+        box-shadow:0 10px 28px rgba(0,0,0,.18), 0 0 0 1px rgba(22,135,255,.10) inset;
+        display:flex;
+        flex-direction:column;
+        align-items:flex-start;
+        justify-content:flex-start;
+        gap:.30rem;
     }
     .confidence-metric-label {
         color:#9fb2ce;
@@ -3065,51 +3075,65 @@ def maybe_record_prediction(decision, price, min_seconds=60):
     return True
 
 
-def resolve_predictions(current_price):
+def resolve_predictions(hist, current_price=None):
+    """Resolve journal rows at the BTC candle nearest each row's target time."""
     now_ts = int(time.time())
+    if hist is None or hist.empty:
+        return 0
+
+    hist2 = hist.copy()
+    hist2["_ts"] = pd.to_datetime(hist2["time"], utc=True, errors="coerce")
+    hist2 = hist2.dropna(subset=["_ts"])
+    if hist2.empty:
+        return 0
+
     with db_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM predictions WHERE resolved=0 AND target_ts<=? ORDER BY id ASC LIMIT 100",
+            """SELECT * FROM predictions
+               WHERE target_ts<=?
+                 AND (
+                    resolved=0
+                    OR (resolved=1 AND correct IS NULL AND action NOT IN ('HOLD','WAIT'))
+                 )
+               ORDER BY id ASC LIMIT 250""",
             (now_ts,),
         ).fetchall()
+
+        updated = 0
         for row in rows:
-            start_price = float(row["price"])
-            ret = (current_price / start_price - 1) * 100
-            action = row["action"]
+            start_price = safe_float(row["price"])
+            if pd.isna(start_price) or start_price <= 0:
+                continue
+
+            target_dt = pd.to_datetime(int(row["target_ts"]), unit="s", utc=True)
+            nearest = hist2.iloc[(hist2["_ts"] - target_dt).abs().argsort()[:1]]
+            if nearest.empty:
+                continue
+
+            resolved_price = safe_float(nearest.iloc[0]["close"])
+            if pd.isna(resolved_price) or resolved_price <= 0:
+                continue
+
+            ret = (resolved_price / start_price - 1.0) * 100.0
+            action = str(row["action"] or "HOLD").upper().strip()
             strike = safe_float(row["target_price"])
 
-            if action == "SCALP UP":
-                correct = (
-                    int(current_price >= strike)
-                    if pd.notna(strike)
-                    else int(current_price > start_price)
-                )
-            elif action == "SCALP DOWN":
-                correct = (
-                    int(current_price < strike)
-                    if pd.notna(strike)
-                    else int(current_price < start_price)
-                )
-            elif action == "LOCK UP":
-                correct = (
-                    int(current_price >= strike)
-                    if pd.notna(strike)
-                    else int(current_price > start_price)
-                )
-            elif action == "LOCK DOWN":
-                correct = (
-                    int(current_price < strike)
-                    if pd.notna(strike)
-                    else int(current_price < start_price)
-                )
+            if action in {"SCALP UP", "LOCK UP"}:
+                correct = int(resolved_price >= strike) if pd.notna(strike) else int(resolved_price > start_price)
+            elif action in {"SCALP DOWN", "LOCK DOWN"}:
+                correct = int(resolved_price < strike) if pd.notna(strike) else int(resolved_price < start_price)
             else:
-                correct = int(abs(ret) < 0.15)
+                # HOLD/WAIT remain tracked and resolved, but do not count as wins/losses.
+                correct = None
+
             conn.execute(
                 "UPDATE predictions SET resolved=1,resolved_price=?,return_pct=?,correct=? WHERE id=?",
-                (current_price, ret, correct, int(row["id"])),
+                (resolved_price, ret, correct, int(row["id"])),
             )
+            updated += 1
+
         conn.commit()
-    return len(rows)
+    return updated
 
 
 def recent_predictions(limit=100):
@@ -3143,19 +3167,26 @@ def prediction_stats():
         row = conn.execute(
             """SELECT COUNT(*) AS n,
                       SUM(CASE WHEN resolved=1 THEN 1 ELSE 0 END) AS resolved_n,
-                      SUM(CASE WHEN resolved=1 AND correct=1 THEN 1 ELSE 0 END) AS correct_n,
+                      SUM(CASE WHEN resolved=1 AND action NOT IN ('HOLD','WAIT') THEN 1 ELSE 0 END) AS trade_resolved_n,
+                      SUM(CASE WHEN resolved=1 AND action NOT IN ('HOLD','WAIT') AND correct=1 THEN 1 ELSE 0 END) AS correct_n,
+                      SUM(CASE WHEN resolved=1 AND action IN ('HOLD','WAIT') THEN 1 ELSE 0 END) AS wait_resolved_n,
                       AVG(CASE WHEN resolved=1 THEN ABS(return_pct) END) AS avg_abs_move
                FROM predictions"""
         ).fetchone()
     n = int(row["n"] or 0)
     resolved_n = int(row["resolved_n"] or 0)
+    trade_resolved_n = int(row["trade_resolved_n"] or 0)
     correct_n = int(row["correct_n"] or 0)
+    wait_resolved_n = int(row["wait_resolved_n"] or 0)
     return {
         "n": n,
         "resolved": resolved_n,
-        "accuracy": correct_n / resolved_n if resolved_n else np.nan,
+        "trade_resolved": trade_resolved_n,
+        "wait_resolved": wait_resolved_n,
+        "accuracy": correct_n / trade_resolved_n if trade_resolved_n else np.nan,
         "avg_abs_move": safe_float(row["avg_abs_move"]),
     }
+
 
 # ============================================================
 # WALK-FORWARD BACKTEST
@@ -4709,7 +4740,7 @@ def live_dashboard():
 
     if record_predictions:
         maybe_record_prediction(decision, price, min_seconds=60)
-    resolve_predictions(price)
+    resolve_predictions(hist, price)
 
     full_cycle_ms = (time.perf_counter() - load_started) * 1000
 
@@ -5359,15 +5390,22 @@ def live_dashboard():
         stats = prediction_stats()
         j1, j2, j3, j4 = st.columns(4)
         j1.metric("Predictions", stats["n"])
-        j2.metric("Resolved", stats["resolved"])
-        j3.metric("Accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
-        j4.metric("Avg |15m move|", "N/A" if pd.isna(stats["avg_abs_move"]) else f"{stats['avg_abs_move']:.3f}%")
+        j2.metric("Trade calls resolved", stats["trade_resolved"])
+        j3.metric("Trade-call accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
+        j4.metric("HOLD/WAIT resolved", stats["wait_resolved"])
+        st.caption(
+            "Win/loss accuracy counts only SCALP/LOCK calls. HOLD/WAIT decisions are still recorded and resolved for learning, but are not treated as wins or losses."
+        )
         journal_df = recent_predictions(150)
         if not journal_df.empty:
             if dark_mode:
                 # Match the AI Council table: dark card, blue outline, and
                 # directional visual cues. This is presentation-only.
                 journal_view = journal_df.copy()
+                _journal_actions = journal_view["action"].astype(str).str.upper().str.strip()
+                _journal_resolved = pd.to_numeric(journal_view["resolved"], errors="coerce").fillna(0).astype(int)
+                journal_view.loc[_journal_actions.isin(["HOLD", "WAIT"]), "correct"] = "NO TRADE"
+                journal_view.loc[_journal_resolved != 1, "correct"] = "OPEN"
 
                 def _journal_action_badge(value):
                     label = str(value or "HOLD").upper().strip()
@@ -5380,16 +5418,19 @@ def live_dashboard():
                     return f'<span class="journal-badge {cls}">{icon}&nbsp;&nbsp;{label}</span>'
 
                 def _journal_result_badge(value):
+                    label = str(value).upper().strip()
+                    if label == "NO TRADE":
+                        return '<span class="journal-result journal-neutral">NO TRADE</span>'
+                    if label == "OPEN" or pd.isna(value):
+                        return '<span class="journal-result journal-pending">OPEN</span>'
                     try:
-                        if pd.isna(value):
-                            return '<span class="journal-result journal-pending">PENDING</span>'
                         return (
                             '<span class="journal-result journal-win">✓ CORRECT</span>'
                             if int(float(value)) == 1
                             else '<span class="journal-result journal-loss">✕ WRONG</span>'
                         )
                     except Exception:
-                        return '<span class="journal-result journal-pending">PENDING</span>'
+                        return '<span class="journal-result journal-pending">OPEN</span>'
 
                 def _journal_resolved_badge(value):
                     try:
