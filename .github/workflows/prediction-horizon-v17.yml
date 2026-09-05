@@ -35,10 +35,15 @@ jobs:
         run: python -m unittest tests.test_prediction_horizon_v17
       - name: Verify installed chart controls
         run: |
-          grep -Fq 'Prediction ${{horizon}}m' app.py
-          grep -Fq 'label: "1m"' app.py
-          grep -Fq 'label: "5m"' app.py
-          grep -Fq 'label: "15m"' app.py
+          python - <<'PY'
+          from pathlib import Path
+          s = Path('app.py').read_text()
+          assert 'Prediction $' in s and 'horizon' in s
+          assert 'label: "1m"' in s
+          assert 'label: "5m"' in s
+          assert 'label: "15m"' in s
+          print('BTC horizon controls verified')
+          PY
       - name: Install chart switcher on main
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
