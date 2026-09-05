@@ -1,0 +1,27 @@
+name: Export repository ZIP
+
+on:
+  push:
+    paths:
+      - '.github/workflows/export-repository-zip.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build repository ZIP
+        run: |
+          zip -r btc-ai-trading-command-center-main.zip . -x '.git/*' -x 'btc-ai-trading-command-center-main.zip'
+      - name: Upload repository ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-ai-trading-command-center-main
+          path: btc-ai-trading-command-center-main.zip
+          if-no-files-found: error
+          retention-days: 7
