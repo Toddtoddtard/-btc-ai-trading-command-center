@@ -57,7 +57,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r48-paper-bet-size"
+APP_VERSION = "2026.09.05-r49-metric-fit"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -90,7 +90,26 @@ st.markdown(
     """
     <style>
     .block-container {padding-top: 1.2rem; padding-bottom: 2rem;}
-    [data-testid="stMetricValue"] {font-size: 1.55rem;}
+    [data-testid="stMetricValue"] {
+        font-size: clamp(.88rem, 1.55vw, 1.55rem) !important;
+        line-height: 1.15 !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        min-width: 0 !important;
+    }
+    [data-testid="stMetricValue"] > div,
+    [data-testid="stMetricValue"] p {
+        font-size: inherit !important;
+        line-height: inherit !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        max-width: none !important;
+    }
+    [data-testid="stMetric"] {
+        min-width: 0 !important;
+    }
     .paper-banner {
         padding: 0.7rem 1rem; border: 1px solid rgba(255,255,255,.15);
         border-radius: 10px; margin-bottom: 0.8rem; font-weight: 700;
