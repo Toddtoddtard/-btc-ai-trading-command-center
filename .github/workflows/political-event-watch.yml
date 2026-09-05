@@ -31,19 +31,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install specialist into AI core
+      - name: Install specialist into BTC council
         run: python tools/apply_political_event_watch_v15.py
       - name: Syntax check
-        run: python -m py_compile ai_core.py political_event_watch.py political_event_monitor.py
+        run: python -m py_compile ai_core.py council_v4.py political_event_watch.py political_event_monitor.py
       - name: Commit integration if needed
         run: |
-          if git diff --quiet -- ai_core.py; then
-            echo 'AI core already integrated.'
+          if git diff --quiet -- ai_core.py council_v4.py; then
+            echo 'Political Event Watch AI already fully integrated.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ai_core.py
+          git add ai_core.py council_v4.py
           git commit -m 'Install Political Event Watch AI into BTC council'
           git push origin main
 
