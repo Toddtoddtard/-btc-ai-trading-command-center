@@ -1,24 +1,66 @@
-name: BTC Full Audit v16
+name: BTC Full Audit v17
 
 on:
   pull_request:
     paths:
+      - 'app.py'
+      - 'ai_core.py'
+      - 'council_v4.py'
+      - 'reliability_v31.py'
       - 'specialist_knowledge_v5.py'
       - 'historical_specialist_backtest_v7.py'
+      - 'historical_backtest.py'
+      - 'learner.py'
+      - 'learner_v3.py'
+      - 'learner_v31.py'
+      - 'shared_learning.py'
+      - 'profitability_v5.py'
+      - 'bot_intelligence_dashboard.py'
+      - 'bot_intelligence_report.py'
+      - 'multi_asset_command_center.py'
+      - 'multi_asset_theme.py'
+      - 'multi_market_nav.py'
+      - 'market_command_center_shell.py'
+      - 'market_guide.py'
       - 'political_event_monitor.py'
       - 'political_event_watch.py'
+      - 'requirements.txt'
+      - 'learner-requirements.txt'
+      - 'pages/**'
       - 'tests/**'
-      - 'tools/apply_btc_audit_v16.py'
+      - 'tools/**'
+      - 'scripts/**'
       - '.github/workflows/btc-audit-v16.yml'
   push:
     branches: [main]
     paths:
+      - 'app.py'
+      - 'ai_core.py'
+      - 'council_v4.py'
+      - 'reliability_v31.py'
       - 'specialist_knowledge_v5.py'
       - 'historical_specialist_backtest_v7.py'
+      - 'historical_backtest.py'
+      - 'learner.py'
+      - 'learner_v3.py'
+      - 'learner_v31.py'
+      - 'shared_learning.py'
+      - 'profitability_v5.py'
+      - 'bot_intelligence_dashboard.py'
+      - 'bot_intelligence_report.py'
+      - 'multi_asset_command_center.py'
+      - 'multi_asset_theme.py'
+      - 'multi_market_nav.py'
+      - 'market_command_center_shell.py'
+      - 'market_guide.py'
       - 'political_event_monitor.py'
       - 'political_event_watch.py'
+      - 'requirements.txt'
+      - 'learner-requirements.txt'
+      - 'pages/**'
       - 'tests/**'
-      - 'tools/apply_btc_audit_v16.py'
+      - 'tools/**'
+      - 'scripts/**'
       - '.github/workflows/btc-audit-v16.yml'
   workflow_dispatch:
 
@@ -39,8 +81,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Apply audited BTC decision policy
         run: python tools/apply_btc_audit_v16.py
-      - name: Syntax check critical modules
-        run: python -m py_compile app.py ai_core.py council_v4.py specialist_knowledge_v5.py reliability_v31.py political_event_watch.py political_event_monitor.py historical_specialist_backtest_v7.py
+      - name: Compile every Python file
+        run: python -m compileall -q .
       - name: Run regression tests
         run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Verify repaired call path exists
@@ -50,6 +92,9 @@ jobs:
           grep -q 'not down_market_conflict' app.py
           grep -q 'Political Event Watch AI' ai_core.py
           ! grep -q 'official/verified handle' political_event_monitor.py
+          grep -q '_journal_resolved' app.py
+          grep -q 'display_position_side' app.py
+          grep -q '_status_side' app.py
       - name: Install audited app policy on main
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
@@ -60,5 +105,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py
-          git commit -m 'Install BTC audit v16 decision fixes'
+          git commit -m 'Install BTC audit v17 decision fixes'
           git push origin main
