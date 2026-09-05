@@ -17,7 +17,7 @@ jobs:
           ref: main
 
       - name: Update app
-        run: python scripts/apply_global_metric_padding.py
+        run: python scripts/show_up_down_labels.py
 
       - name: Validate Python syntax
         run: python -m py_compile app.py
@@ -32,5 +32,5 @@ jobs:
             echo "No app.py changes to commit."
             exit 0
           fi
-          git commit -m "Shift metric values inward globally"
+          git commit -m "Show LONG as UP and SHORT as DOWN"
           git push origin main
