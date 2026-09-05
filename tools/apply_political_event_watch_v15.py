@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
+# ----- ai_core.py -----
 path = Path("ai_core.py")
 text = path.read_text()
 
@@ -24,6 +25,20 @@ if "out[\"Political Event Watch AI\"]" not in text:
     if needle not in text:
         raise SystemExit("Could not locate Combination AI insertion point")
     text = text.replace(needle, replacement, 1)
-
 path.write_text(text)
-print("Political Event Watch AI integrated into ai_core.py")
+
+# ----- council_v4.py -----
+# The council normally gives every member a minimum confidence floor. That is
+# correct for ordinary specialists but would let an INACTIVE event watcher dilute
+# the denominator. Explicitly skip it unless its trigger state is ACTIVE.
+cpath = Path("council_v4.py")
+council = cpath.read_text()
+loop_needle = '    for name, item in results.items():\n        if name in exclude or not isinstance(item, dict):\n            continue\n'
+loop_replacement = '    for name, item in results.items():\n        if name in exclude or not isinstance(item, dict):\n            continue\n        if name == "Political Event Watch AI" and str(item.get("event_status", "INACTIVE")).upper() != "ACTIVE":\n            continue\n'
+if 'name == "Political Event Watch AI" and str(item.get("event_status"' not in council:
+    if loop_needle not in council:
+        raise SystemExit("Could not locate council member loop")
+    council = council.replace(loop_needle, loop_replacement, 1)
+cpath.write_text(council)
+
+print("Political Event Watch AI integrated with true zero-weight inactive gating")
