@@ -1704,25 +1704,26 @@ def master_decision(results, hist, kalshi=None):
         # A lower probability means cheaper contracts and more upside,
         # but we avoid extremely low-probability lottery-style entries.
         # -----------------------------------------------------------
+        # BTC scalp calls are directional market calls. The prior thresholds
+        # accidentally required roughly a 0.56 council score in low-volatility
+        # conditions, far above the learned edge floor, so valid setups almost
+        # never reached SCALP. Align movement/consensus with the learned policy.
         strong_move_up = (
             base_score >= policy["edge_floor"]
-            and forecast_move >= max(atr * 0.50, px * 0.0007)
-            and consensus >= 0.30
+            and forecast_move >= max(atr * 0.22, px * 0.00022)
+            and consensus >= 0.22
         )
         strong_move_down = (
             base_score <= -policy["edge_floor"]
-            and forecast_move <= -max(atr * 0.50, px * 0.0007)
-            and consensus >= 0.30
+            and forecast_move <= -max(atr * 0.22, px * 0.00022)
+            and consensus >= 0.22
         )
 
-        up_price_favorable = (
-            pd.notna(up_prob)
-            and 0.18 <= up_prob <= 0.72
-        )
-        down_price_favorable = (
-            pd.notna(down_prob)
-            and 0.18 <= down_prob <= 0.72
-        )
+        # Kalshi is context/confirmation for BTC scalps, not the instrument being
+        # scalp-traded. Only an extreme opposing prediction-market signal blocks
+        # the call; a high same-direction probability is confirmation, not a veto.
+        up_market_conflict = pd.notna(up_prob) and up_prob < 0.20
+        down_market_conflict = pd.notna(down_prob) and down_prob < 0.20
 
         # Persistent lock state for the current Kalshi contract.
         lock_ticker = st.session_state.get("kalshi_lock_ticker", "")
@@ -1754,11 +1755,11 @@ def master_decision(results, hist, kalshi=None):
             action = "LOCK DOWN"
             locked_side = "DOWN"
 
-        elif strong_move_up and up_price_favorable and confidence >= policy["trade_confidence_floor"]:
+        elif strong_move_up and not up_market_conflict and confidence >= policy["trade_confidence_floor"]:
             action = "SCALP UP"
             locked_side = None
 
-        elif strong_move_down and down_price_favorable and confidence >= policy["trade_confidence_floor"]:
+        elif strong_move_down and not down_market_conflict and confidence >= policy["trade_confidence_floor"]:
             action = "SCALP DOWN"
             locked_side = None
 
@@ -1812,8 +1813,8 @@ def master_decision(results, hist, kalshi=None):
             locked_side = None
             gate_note = f"{gated_action}; learned reliability gate blocked trade"
 
-    # v5 selective-precision gate: the live app must not take a trade merely
-    # because the older threshold fired. The Bayesian evidence floor must pass.
+    # Learned precision layer is a final safety veto only. It must not duplicate
+    # the council trade gate or permanently deadlock otherwise-valid calls.
     if action not in {"HOLD", "WAIT"} and not bool(v5_council.get("precision_gate_passed")):
         if action.startswith("LOCK"):
             st.session_state.pop("kalshi_lock_ticker", None)
