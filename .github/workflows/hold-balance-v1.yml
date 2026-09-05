@@ -1,0 +1,45 @@
+name: HOLD Balance v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_hold_balance_v1.py'
+      - 'reliability_v31.py'
+      - '.github/workflows/hold-balance-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rebalance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply HOLD balance policy
+        run: python tools/apply_hold_balance_v1.py
+      - name: Syntax check
+        run: python -m py_compile app.py reliability_v31.py
+      - name: Verify directional thresholds
+        run: |
+          grep -q 'forecast_move >= max(atr \* 0.14, px \* 0.00014)' app.py
+          grep -q 'forecast_move <= -max(atr \* 0.14, px \* 0.00014)' app.py
+          grep -q 'consensus >= 0.12' app.py
+          grep -q 'if source_health < 0.60' reliability_v31.py
+      - name: Commit installed policy
+        run: |
+          if git diff --quiet -- app.py; then
+            echo 'HOLD-balance app policy already installed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Rebalance HOLD and directional participation'
+          git push origin main
