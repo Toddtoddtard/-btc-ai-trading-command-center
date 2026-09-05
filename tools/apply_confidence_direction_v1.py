@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Installer v1.0.1 — visual-only Confidence direction label.
 p = Path("app.py")
 s = p.read_text(encoding="utf-8")
 old = '''    m4.metric("Confidence", f"{decision['confidence']*100:.1f}%")'''
