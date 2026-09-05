@@ -1,3 +1,5 @@
+from multi_asset_theme import apply_multi_asset_theme
 from multi_asset_command_center import render_market_command_center
 
+apply_multi_asset_theme()
 render_market_command_center("wti")
