@@ -1,0 +1,58 @@
+name: Install FVG MACD Technical AI
+
+on:
+  push:
+    paths:
+      - 'tools/install_fvg_macd_v1.py'
+      - '.github/workflows/fvg-macd-technical-ai-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install FVG and MACD technical AI
+        run: python tools/install_fvg_macd_v1.py
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile app.py ai_core.py council_v4.py council_backtest_v4.py historical_specialist_backtest_v7.py
+
+      - name: Verify integration markers
+        run: |
+          grep -q 'FVG / MACD AI' ai_core.py
+          grep -q 'bull_fvg' ai_core.py
+          grep -q 'macd_hist' ai_core.py
+          grep -q 'TradingView-style FVG + MACD Technical Lab' app.py
+          grep -q 'FVG / MACD AI' council_v4.py
+          grep -q 'FVG / MACD AI' council_backtest_v4.py
+          grep -q 'FVG / MACD AI' historical_specialist_backtest_v7.py
+
+      - name: Run focused tests
+        run: |
+          python -m unittest tests.test_council_v4 tests.test_audit_v6
+
+      - name: Commit installed integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py ai_core.py council_v4.py council_backtest_v4.py historical_specialist_backtest_v7.py
+          if git diff --cached --quiet; then
+            echo "FVG/MACD integration already installed."
+            exit 0
+          fi
+          git commit -m "Add FVG MACD technical AI and charts"
+          git push origin main
