@@ -1,0 +1,73 @@
+name: BTC Political Event Watch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - political_event_watch.py
+      - political_event_monitor.py
+      - tools/apply_political_event_watch_v15.py
+      - .github/workflows/political-event-watch.yml
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: btc-political-event-watch
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install specialist into AI core
+        run: python tools/apply_political_event_watch_v15.py
+      - name: Syntax check
+        run: python -m py_compile ai_core.py political_event_watch.py political_event_monitor.py
+      - name: Commit integration if needed
+        run: |
+          if git diff --quiet -- ai_core.py; then
+            echo 'AI core already integrated.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ai_core.py
+          git commit -m 'Install Political Event Watch AI into BTC council'
+          git push origin main
+
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Scan political events and public accounts
+        run: python political_event_monitor.py --output /tmp/political_event_watch.json
+      - name: Publish live state without redeploying Streamlit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin learning-state
+          git worktree add /tmp/political-state origin/learning-state
+          cd /tmp/political-state
+          git checkout -B learning-state origin/learning-state
+          cp /tmp/political_event_watch.json political_event_watch.json
+          git add political_event_watch.json
+          git commit -m 'Update political event watch state' || exit 0
+          git push origin learning-state
