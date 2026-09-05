@@ -1,0 +1,29 @@
+name: Install AUTO PAPER default ON
+
+on:
+  push:
+    paths:
+      - 'tools/apply_auto_paper_default_on_v1.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply AUTO PAPER default-on patch
+        run: python tools/apply_auto_paper_default_on_v1.py
+      - name: Commit app.py if changed
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "No app.py changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Default AUTO PAPER trading to ON"
+          git push
