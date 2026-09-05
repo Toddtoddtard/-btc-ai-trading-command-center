@@ -43,8 +43,7 @@ jobs:
           if old not in text:
               raise SystemExit('AUTO PAPER status block not found; refusing partial update')
           text = text.replace(old, new, 1)
-          if 'APP_VERSION = "2026.09.05-r51-up-down-position-labels"' in text:
-              text = text.replace('APP_VERSION = "2026.09.05-r51-up-down-position-labels"', 'APP_VERSION = "2026.09.05-r52-signal-status-colors"', 1)
+          text = text.replace('APP_VERSION = "2026.09.05-r51-up-down-position-labels"', 'APP_VERSION = "2026.09.05-r52-signal-status-colors"', 1)
           p.write_text(text)
           PY
 
@@ -63,3 +62,5 @@ jobs:
           fi
           git commit -m "Color auto paper status by trade direction"
           git push origin main
+
+# trigger: 2026-09-05T18:03-04:00
