@@ -1710,13 +1710,13 @@ def master_decision(results, hist, kalshi=None):
         # never reached SCALP. Align movement/consensus with the learned policy.
         strong_move_up = (
             base_score >= policy["edge_floor"]
-            and forecast_move >= max(atr * 0.22, px * 0.00022)
-            and consensus >= 0.22
+            and forecast_move >= max(atr * 0.14, px * 0.00014)
+            and consensus >= 0.12
         )
         strong_move_down = (
             base_score <= -policy["edge_floor"]
-            and forecast_move <= -max(atr * 0.22, px * 0.00022)
-            and consensus >= 0.22
+            and forecast_move <= -max(atr * 0.14, px * 0.00014)
+            and consensus >= 0.12
         )
 
         # Kalshi is context/confirmation for BTC scalps, not the instrument being
@@ -1896,7 +1896,7 @@ def risk_evaluate(decision, account, hist, futures):
     if decision["action"] in {"HOLD", "LOCK UP", "LOCK DOWN"}:
         reason = "LOCK: hold current Kalshi call to expiration" if decision["action"].startswith("LOCK") else "HOLD signal"
         return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": reason}
-    if source_health < 0.68:
+    if source_health < 0.60:
         return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": "Market-data health below reliability floor"}
     if confidence < learned_conf_floor:
         return {"approved": False, "position_pct": 0.0, "risk_score": 0.9, "reason": f"Confidence below learned floor ({learned_conf_floor:.0%})"}
