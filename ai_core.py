@@ -2,6 +2,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from political_event_watch import political_specialist_result
+
 SPECIALIST_NAMES = [
     "Trend AI",
     "Momentum AI",
@@ -15,6 +17,7 @@ SPECIALIST_NAMES = [
     "Derivatives AI",
     "Kalshi Context AI",
     "Historical Pattern AI",
+    "Political Event Watch AI",
     "Combination AI",
 ]
 
@@ -200,6 +203,11 @@ def run_specialists_core(hist, agg, futures, kctx):
     agreement = abs(np.mean(np.sign(base_scores))) if len(base_scores) else 0.0
     combo = clamp(np.mean(base_scores) * (0.8 + 0.5 * agreement)) if len(base_scores) else 0.0
     out["Combination AI"] = _specialist("Combination AI", combo, f"Cross-specialist directional agreement {agreement*100:.0f}%")
+
+    # Event-driven specialist: zero score/confidence unless a fresh qualifying
+    # political event is active. Added after Combination so an inactive watcher
+    # cannot dilute or distort the normal technical specialist ensemble.
+    out["Political Event Watch AI"] = political_specialist_result(hist)
     return out
 
 
