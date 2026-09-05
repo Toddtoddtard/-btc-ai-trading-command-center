@@ -32,7 +32,7 @@ OUT = Path(os.getenv("HISTORICAL_SPECIALIST_OUTPUT", "/tmp/historical_specialist
 ELIGIBLE = {
     "Trend AI", "Momentum AI", "Volume AI", "Pattern AI",
     "Support/Resistance AI", "Volatility AI", "Market Regime AI",
-    "Historical Pattern AI",
+    "Historical Pattern AI", "FVG / MACD AI",
 }
 HORIZON_NS = 15 * 60 * 1_000_000_000
 MAX_RESOLUTION_LATENESS_NS = 90 * 1_000_000_000

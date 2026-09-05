@@ -33,6 +33,7 @@ BASE_WEIGHTS = {
     "Derivatives AI": 1.02,
     "Kalshi Context AI": 0.88,
     "Historical Pattern AI": 0.76,
+    "FVG / MACD AI": 0.92,
 }
 
 # Combination AI is intentionally excluded from the source council so the

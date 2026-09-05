@@ -17,6 +17,7 @@ SPECIALIST_NAMES = [
     "Derivatives AI",
     "Kalshi Context AI",
     "Historical Pattern AI",
+    "FVG / MACD AI",
     "Political Event Watch AI",
     "Combination AI",
 ]
@@ -53,6 +54,18 @@ def enrich_history_core(df):
     ema26 = c.ewm(span=26, adjust=False).mean()
     x["macd"] = ema12 - ema26
     x["macd_signal"] = x["macd"].ewm(span=9, adjust=False).mean()
+    x["macd_hist"] = x["macd"] - x["macd_signal"]
+
+    # Three-candle fair-value gaps (ICT-style imbalance zones).
+    # Bullish FVG: current low is above the high from two candles ago.
+    # Bearish FVG: current high is below the low from two candles ago.
+    x["bull_fvg"] = x["low"] > x["high"].shift(2)
+    x["bull_fvg_lower"] = np.where(x["bull_fvg"], x["high"].shift(2), np.nan)
+    x["bull_fvg_upper"] = np.where(x["bull_fvg"], x["low"], np.nan)
+    x["bear_fvg"] = x["high"] < x["low"].shift(2)
+    x["bear_fvg_lower"] = np.where(x["bear_fvg"], x["high"], np.nan)
+    x["bear_fvg_upper"] = np.where(x["bear_fvg"], x["low"].shift(2), np.nan)
+
     x["vol20"] = x["ret1"].rolling(20).std() * np.sqrt(20)
     x["sma20"] = c.rolling(20).mean()
     x["std20"] = c.rolling(20).std()
@@ -197,6 +210,79 @@ def run_specialists_core(hist, agg, futures, kctx):
     recent3 = safe_float((hist["close"].iloc[-1] / hist["close"].iloc[-4] - 1), 0.0) if len(hist) >= 4 else 0.0
     hist_score = clamp(np.sign(recent3) * min(abs(recent3) / 0.003, 1.0) * 0.5)
     out["Historical Pattern AI"] = _specialist("Historical Pattern AI", hist_score, f"Recent 3-minute move {recent3*100:+.3f}%")
+
+    # FVG / MACD Technical AI: combines price imbalance structure with
+    # momentum confirmation. It is intentionally one council member rather
+    # than a master override so live learning can raise/lower its influence.
+    macd_hist = safe_float(last.get("macd_hist"), safe_float(last["macd"] - last["macd_signal"], 0.0))
+    prev_macd = safe_float(prev["macd"], 0.0)
+    prev_signal = safe_float(prev["macd_signal"], 0.0)
+    now_macd = safe_float(last["macd"], 0.0)
+    now_signal = safe_float(last["macd_signal"], 0.0)
+    if now_macd > now_signal and prev_macd <= prev_signal:
+        macd_cross = 1.0
+        macd_state = "bullish cross"
+    elif now_macd < now_signal and prev_macd >= prev_signal:
+        macd_cross = -1.0
+        macd_state = "bearish cross"
+    elif macd_hist > 0:
+        macd_cross = 0.35
+        macd_state = "bullish histogram"
+    elif macd_hist < 0:
+        macd_cross = -0.35
+        macd_state = "bearish histogram"
+    else:
+        macd_cross = 0.0
+        macd_state = "flat"
+
+    macd_strength = math.tanh(macd_hist / max(px * 0.00035, 1e-9))
+    macd_score = clamp(0.65 * macd_strength + 0.35 * macd_cross)
+
+    fvg_score = 0.0
+    fvg_state = "no fresh FVG"
+    lookback = hist.tail(60)
+    candidates = []
+    for age, (_, row) in enumerate(reversed(list(lookback.iterrows()))):
+        decay = max(0.20, 1.0 - age / 60.0)
+        if bool(row.get("bull_fvg", False)):
+            lower = safe_float(row.get("bull_fvg_lower"))
+            upper = safe_float(row.get("bull_fvg_upper"))
+            if pd.notna(lower) and pd.notna(upper):
+                if lower <= px <= upper:
+                    state = f"inside bullish FVG ${lower:,.0f}-${upper:,.0f}"
+                    score = 0.90 * decay
+                elif px > upper:
+                    state = f"bullish FVG support ${lower:,.0f}-${upper:,.0f}"
+                    score = 0.62 * decay
+                else:
+                    state = f"bullish FVG filled ${lower:,.0f}-${upper:,.0f}"
+                    score = 0.10 * decay
+                candidates.append((age, score, state))
+        if bool(row.get("bear_fvg", False)):
+            lower = safe_float(row.get("bear_fvg_lower"))
+            upper = safe_float(row.get("bear_fvg_upper"))
+            if pd.notna(lower) and pd.notna(upper):
+                if lower <= px <= upper:
+                    state = f"inside bearish FVG ${lower:,.0f}-${upper:,.0f}"
+                    score = -0.90 * decay
+                elif px < lower:
+                    state = f"bearish FVG resistance ${lower:,.0f}-${upper:,.0f}"
+                    score = -0.62 * decay
+                else:
+                    state = f"bearish FVG filled ${lower:,.0f}-${upper:,.0f}"
+                    score = -0.10 * decay
+                candidates.append((age, score, state))
+
+    if candidates:
+        age, fvg_score, fvg_state = min(candidates, key=lambda item: item[0])
+        fvg_state += f"; age {age}m"
+
+    technical_score = clamp(0.55 * fvg_score + 0.45 * macd_score)
+    technical_reason = (
+        f"{fvg_state}; MACD {macd_state}; histogram {macd_hist:+.2f}; "
+        f"FVG score {fvg_score:+.2f}; MACD score {macd_score:+.2f}"
+    )
+    out["FVG / MACD AI"] = _specialist("FVG / MACD AI", technical_score, technical_reason)
 
     base_names = list(out.keys())
     base_scores = np.array([out[k]["score"] for k in base_names], dtype=float)

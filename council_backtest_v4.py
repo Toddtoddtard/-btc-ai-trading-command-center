@@ -32,7 +32,7 @@ OUT = Path(os.getenv("COUNCIL_BACKTEST_OUTPUT", "/tmp/council_backtest_v4.json")
 REPLAYABLE = [
     "Trend AI", "Momentum AI", "Volume AI", "Pattern AI",
     "Support/Resistance AI", "Volatility AI", "Market Regime AI",
-    "Whale AI", "Historical Pattern AI",
+    "Whale AI", "Historical Pattern AI", "FVG / MACD AI",
 ]
 NON_REPLAYABLE = ["Liquidity AI", "Derivatives AI", "Kalshi Context AI"]
 

@@ -79,6 +79,7 @@ SPECIALIST_WEIGHTS = {
     "Derivatives AI": 0.85,
     "Kalshi Context AI": 0.55,
     "Historical Pattern AI": 0.75,
+    "FVG / MACD AI": 0.90,
     "Combination AI": 1.25,
 }
 
@@ -4984,6 +4985,79 @@ def live_dashboard():
 
     with tab_market:
         kctx = stable_kalshi_contract(kalshi, price)
+
+        st.subheader("TradingView-style FVG + MACD Technical Lab")
+        st.caption("Calculated locally from the same live BTC candles used by the bots — no TradingView scraping or paid key required.")
+
+        _tech = results.get("FVG / MACD AI", {})
+        _tech_cols = st.columns(4)
+        _tech_cols[0].metric("Technical AI", _tech.get("signal", "NEUTRAL"))
+        _tech_cols[1].metric("Confidence", f"{safe_float(_tech.get('confidence'), 0.0)*100:.1f}%")
+        _tech_cols[2].metric("MACD histogram", f"{safe_float(hist['macd_hist'].iloc[-1], 0.0):+.2f}")
+        _fresh_fvg = hist.tail(60)
+        _bull_count = int(_fresh_fvg.get("bull_fvg", pd.Series(dtype=bool)).fillna(False).sum())
+        _bear_count = int(_fresh_fvg.get("bear_fvg", pd.Series(dtype=bool)).fillna(False).sum())
+        _tech_cols[3].metric("Fresh FVGs (60m)", f"{_bull_count} bull / {_bear_count} bear")
+        st.caption(_tech.get("reason", "FVG/MACD specialist warming up"))
+
+        _tv = hist.tail(180).copy()
+        _price_fig = go.Figure()
+        _price_fig.add_trace(go.Candlestick(
+            x=_tv["time"], open=_tv["open"], high=_tv["high"],
+            low=_tv["low"], close=_tv["close"], name="BTCUSDT"
+        ))
+
+        # Highlight the most recent bullish and bearish fair-value-gap zones.
+        _zone_rows = []
+        for _idx, _row in _tv.iterrows():
+            if bool(_row.get("bull_fvg", False)):
+                _zone_rows.append((
+                    _row["time"], safe_float(_row.get("bull_fvg_lower")),
+                    safe_float(_row.get("bull_fvg_upper")), "bull"
+                ))
+            if bool(_row.get("bear_fvg", False)):
+                _zone_rows.append((
+                    _row["time"], safe_float(_row.get("bear_fvg_lower")),
+                    safe_float(_row.get("bear_fvg_upper")), "bear"
+                ))
+        for _x0, _low, _high, _kind in _zone_rows[-10:]:
+            if not (pd.notna(_low) and pd.notna(_high)):
+                continue
+            _price_fig.add_shape(
+                type="rect", x0=_x0, x1=_tv["time"].iloc[-1], y0=_low, y1=_high,
+                line=dict(width=1, color="#00d6a3" if _kind == "bull" else "#ff4d68"),
+                fillcolor="rgba(0,214,163,0.13)" if _kind == "bull" else "rgba(255,77,104,0.13)",
+                layer="below",
+            )
+        _price_fig.update_layout(
+            template="plotly_dark", height=470, margin=dict(l=10, r=10, t=35, b=10),
+            title="BTC 1-minute candles with Fair Value Gaps",
+            xaxis_rangeslider_visible=False,
+            paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
+            legend=dict(orientation="h"),
+        )
+        st.plotly_chart(_price_fig, use_container_width=True, key="fvg_price_chart")
+
+        _macd_fig = go.Figure()
+        _macd_fig.add_trace(go.Scatter(
+            x=_tv["time"], y=_tv["macd"], mode="lines", name="MACD", line=dict(width=2)
+        ))
+        _macd_fig.add_trace(go.Scatter(
+            x=_tv["time"], y=_tv["macd_signal"], mode="lines", name="Signal", line=dict(width=2)
+        ))
+        _hist_colors = ["#00d6a3" if safe_float(v, 0.0) >= 0 else "#ff4d68" for v in _tv["macd_hist"]]
+        _macd_fig.add_trace(go.Bar(
+            x=_tv["time"], y=_tv["macd_hist"], name="Histogram", marker_color=_hist_colors, opacity=0.72
+        ))
+        _macd_fig.add_hline(y=0, line_width=1, line_dash="dot")
+        _macd_fig.update_layout(
+            template="plotly_dark", height=300, margin=dict(l=10, r=10, t=35, b=10),
+            title="MACD (12, 26, 9)", paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
+            legend=dict(orientation="h"),
+        )
+        st.plotly_chart(_macd_fig, use_container_width=True, key="fvg_macd_chart")
+
+        st.divider()
 
         st.subheader("Kalshi BTC 15-minute target tracker")
 
