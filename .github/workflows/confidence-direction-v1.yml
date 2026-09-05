@@ -1,31 +1,30 @@
-name: Install confidence direction UI
+name: Confidence direction UI validation
 
 on:
   push:
     paths:
+      - 'app.py'
       - 'tools/apply_confidence_direction_v1.py'
+      - 'tools/apply_confidence_direction_v2.py'
+      - '.github/workflows/confidence-direction-v1.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  install:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
-      - name: Apply confidence direction UI
-        run: python tools/apply_confidence_direction_v1.py
-      - name: Commit app update
+          python-version: '3.12'
+      - name: Validate relevant Python files
+        run: python -m py_compile app.py tools/apply_confidence_direction_v1.py tools/apply_confidence_direction_v2.py
+      - name: Verify confidence direction UI is installed
         run: |
-          if git diff --quiet -- app.py; then
-            echo "No app.py changes needed"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py
-          git commit -m "Show UP DOWN direction beside Confidence"
-          git push
+          grep -q '_confidence_direction' app.py
+          grep -q 'confidence-metric-card' app.py
+          grep -q 'confidence-metric-label' app.py
+          grep -q 'confidence-metric-value' app.py
