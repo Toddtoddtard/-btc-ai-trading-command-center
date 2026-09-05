@@ -57,7 +57,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r50-global-metric-padding"
+APP_VERSION = "2026.09.05-r51-up-down-position-labels"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -298,6 +298,18 @@ def fmt_money(x):
 
 def fmt_pct(x, digits=2):
     return "N/A" if pd.isna(x) else f"{x:.{digits}f}%"
+
+
+def display_position_side(side):
+    """UI-only translation: LONG means UP, SHORT means DOWN."""
+    s = str(side or "NONE").upper().strip()
+    if s == "LONG":
+        return "LONG (UP)"
+    if s == "SHORT":
+        return "SHORT (DOWN)"
+    if s in {"NONE", "HOLD", "WAIT"}:
+        return "HOLD / NO TRADE"
+    return s
 
 
 def directional_badge_html(label, compact=False):
@@ -5453,7 +5465,7 @@ def live_dashboard():
 
         status1, status2, status3, status4 = st.columns(4)
         status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
-        status2.metric("Position", auto_state["side"])
+        status2.metric("Position", display_position_side(auto_state["side"]))
         status3.metric("Kalshi call", decision["action"])
         status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
 
@@ -5512,7 +5524,7 @@ def live_dashboard():
             st.subheader("Active Position")
             bet_size_dollars = qty * entry
             p1, p2, p3, p4, p5, p6, p7 = st.columns(7)
-            p1.metric("Side", auto_state["side"])
+            p1.metric("Side", display_position_side(auto_state["side"]))
             p2.metric("Bet Size", fmt_money(bet_size_dollars))
             p3.metric("Entry", fmt_money(entry))
             p4.metric("Current", fmt_money(price))
