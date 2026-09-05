@@ -11,7 +11,7 @@ class PredictionHorizonV17Tests(unittest.TestCase):
         self.assertIn('data-horizon="15"', text)
         self.assertIn('let selectedPredictionHorizon = 15;', text)
         self.assertIn('predictionPathTrace(rows, selectedPredictionHorizon)', text)
-        self.assertNotIn('updatemenus:', text)
+        self.assertIn('setPredictionHorizon', text)
 
 
 if __name__ == '__main__':
