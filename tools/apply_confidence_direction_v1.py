@@ -1,6 +1,6 @@
 from pathlib import Path
 
-# Installer v1.0.1 — visual-only Confidence direction label.
+# Installer v1.0.2 — visual-only Confidence direction label.
 p = Path("app.py")
 s = p.read_text(encoding="utf-8")
 old = '''    m4.metric("Confidence", f"{decision['confidence']*100:.1f}%")'''
@@ -17,12 +17,12 @@ new = '''    # Visual-only directional lean beside Confidence. For directional M
     _confidence_arrow = "▲" if _confidence_direction == "UP" else "▼"
     with m4:
         st.markdown(
-            f'''<div style="padding:.45rem .6rem;min-height:92px;box-sizing:border-box;">
-                <div style="color:#9fb2ce;font-size:.90rem;line-height:1.15;font-weight:500;white-space:nowrap;">
-                    Confidence <span style="font-size:.72rem;font-weight:800;color:{_confidence_color};margin-left:.28rem;">{_confidence_arrow} {_confidence_direction}</span>
+            f"""<div style=\"padding:.45rem .6rem;min-height:92px;box-sizing:border-box;\">
+                <div style=\"color:#9fb2ce;font-size:.90rem;line-height:1.15;font-weight:500;white-space:nowrap;\">
+                    Confidence <span style=\"font-size:.72rem;font-weight:800;color:{_confidence_color};margin-left:.28rem;\">{_confidence_arrow} {_confidence_direction}</span>
                 </div>
-                <div style="font-size:1.55rem;font-weight:750;line-height:1.65;">{decision['confidence']*100:.1f}%</div>
-            </div>''',
+                <div style=\"font-size:1.55rem;font-weight:750;line-height:1.65;\">{decision['confidence']*100:.1f}%</div>
+            </div>""",
             unsafe_allow_html=True,
         )'''
 if old not in s:
