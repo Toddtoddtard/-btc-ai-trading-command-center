@@ -35,10 +35,10 @@ jobs:
         run: python -m unittest tests.test_prediction_horizon_v17
       - name: Verify installed chart controls
         run: |
-          grep -q 'Prediction ${horizon}m' app.py
-          grep -q 'label: "1m"' app.py
-          grep -q 'label: "5m"' app.py
-          grep -q 'label: "15m"' app.py
+          grep -Fq 'Prediction ${{horizon}}m' app.py
+          grep -Fq 'label: "1m"' app.py
+          grep -Fq 'label: "5m"' app.py
+          grep -Fq 'label: "15m"' app.py
       - name: Install chart switcher on main
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
