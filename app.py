@@ -55,9 +55,9 @@ KALSHI_BASES = [
     "https://external-api.kalshi.com/trade-api/v2",
 ]
 DB_PATH = "btc_ai_command_center.db"
-STARTING_CASH = 100_000.0
+STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r46-batched-journal-settlement"
+APP_VERSION = "2026.09.05-r47-paper-500-total-pl"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -498,11 +498,26 @@ def init_db():
                    (id,enabled,side,entry_price,entry_ts,entry_qty,stop_loss,take_profit,last_exit_ts,last_message)
                    VALUES(1,0,'NONE',NULL,NULL,NULL,NULL,NULL,0,'Auto paper trading ready.')"""
             )
-        row = conn.execute("SELECT id FROM paper_account WHERE id=1").fetchone()
+        row = conn.execute("SELECT id, starting_equity FROM paper_account WHERE id=1").fetchone()
         if row is None:
             conn.execute(
                 "INSERT INTO paper_account(id,cash,btc,starting_equity,updated_iso) VALUES(1,?,?,?,?)",
                 (STARTING_CASH, 0.0, STARTING_CASH, utc_now().isoformat()),
+            )
+        elif abs(float(row["starting_equity"]) - STARTING_CASH) > 1e-9:
+            # One-time migration to the new $500 paper baseline. Start clean so
+            # old $100k results do not contaminate the new account performance.
+            conn.execute(
+                "UPDATE paper_account SET cash=?, btc=0, starting_equity=?, updated_iso=? WHERE id=1",
+                (STARTING_CASH, STARTING_CASH, utc_now().isoformat()),
+            )
+            conn.execute("DELETE FROM paper_trades")
+            conn.execute(
+                """UPDATE auto_paper_state
+                   SET side='NONE',entry_price=NULL,entry_ts=NULL,entry_qty=NULL,
+                       stop_loss=NULL,take_profit=NULL,last_exit_ts=0,
+                       last_message='Paper account migrated to $500 starting balance.'
+                   WHERE id=1"""
             )
         conn.commit()
 
@@ -5422,14 +5437,40 @@ def live_dashboard():
             st.info("AUTO PAPER TRADING is off. Turn it on in the sidebar to let approved paper signals execute automatically.")
 
         st.subheader("Paper Account")
-        a1, a2, a3, a4, a5 = st.columns(5)
+        auto_state = get_auto_state()
+
+        # Total bot P/L is current marked-to-market equity minus the original
+        # $500 starting balance. It therefore includes both realized closed
+        # trades and the live unrealized P/L of any currently open position.
+        _open_pnl = 0.0
+        if auto_state["side"] in {"LONG", "SHORT"}:
+            _entry = safe_float(auto_state["entry_price"])
+            _qty = abs(safe_float(auto_state["entry_qty"], 0.0))
+            if pd.notna(_entry) and _qty > 0:
+                _entry_cost = execution_cost_bps(_qty * _entry)
+                if auto_state["side"] == "LONG":
+                    _open_pnl = (price - _entry) * _qty - _entry_cost
+                else:
+                    _open_pnl = (_entry - price) * _qty - _entry_cost
+
+        _closed_pnl = float(account["pnl"]) - float(_open_pnl)
+
+        perf1, perf2, perf3, perf4, perf5 = st.columns(5)
+        perf1.metric("Starting Balance", fmt_money(account["starting_equity"]))
+        perf2.metric("Current Equity", fmt_money(account["equity"]))
+        perf3.metric(
+            "Bot P/L From Start",
+            f"${account['pnl']:+,.2f}",
+            f"{account['return_pct']:+.2f}% from $500 start",
+        )
+        perf4.metric("Closed P/L", f"${_closed_pnl:+,.2f}")
+        perf5.metric("Open P/L", f"${_open_pnl:+,.2f}")
+
+        a1, a2, a3 = st.columns(3)
         a1.metric("Cash", fmt_money(account["cash"]))
         a2.metric("BTC exposure", f"{account['btc']:+.6f}")
-        a3.metric("Equity", fmt_money(account["equity"]))
-        a4.metric("P&L", fmt_money(account["pnl"]))
-        a5.metric("Return", f"{account['return_pct']:+.2f}%")
+        a3.metric("Return", f"{account['return_pct']:+.2f}%")
 
-        auto_state = get_auto_state()
         if auto_state["side"] in {"LONG", "SHORT"}:
             entry = safe_float(auto_state["entry_price"])
             stop = safe_float(auto_state["stop_loss"])
