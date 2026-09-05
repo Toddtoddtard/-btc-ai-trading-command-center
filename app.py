@@ -3973,40 +3973,29 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             }};
         }}
 
-        function predictionPathTrace(rows) {{
+        function predictionPathTrace(rows, horizonMinutes = 15, visible = true) {{
             const forecast = predictedCandles(rows);
+            const horizon = Math.max(1, Math.min(15, Number(horizonMinutes) || 15));
+            const clipped = forecast.slice(0, Math.min(forecast.length, horizon + 1));
 
-            if (!forecast.length) {{
+            if (!clipped.length) {{
                 return {{
-                    type: "scatter",
-                    mode: "lines",
-                    x: [],
-                    y: [],
-                    name: "Prediction path"
+                    type: "scatter", x: [], y: [], mode: "lines",
+                    visible: visible,
+                    name: `Prediction ${{horizon}}m`
                 }};
             }}
 
-            const lastReal = rows[rows.length - 1];
-
             return {{
                 type: "scatter",
-                mode: "lines",
-                x: [
-                    lastReal.time,
-                    ...forecast.map(r => r.time)
-                ],
-                y: [
-                    lastReal.close,
-                    ...forecast.map(r => r.close)
-                ],
-                name: "Prediction path",
-                line: {{
-                    color: "#4dabf7",
-                    width: 2,
-                    dash: "dot"
-                }},
-                hovertemplate:
-                    "Predicted $%{{y:,.2f}}<extra></extra>"
+                x: clipped.map(r => r.time),
+                y: clipped.map(r => r.close),
+                mode: "lines+markers",
+                line: {{width: 3, dash: "dot", color: "#2ea8ff"}},
+                marker: {{size: 5, color: "#2ea8ff"}},
+                visible: visible,
+                name: `Prediction ${{horizon}}m`,
+                hovertemplate: `AI ${{horizon}}m prediction: $%{{y:,.2f}}<extra></extra>`
             }};
         }}
 
@@ -4052,7 +4041,26 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             paper_bgcolor: paperBg,
             plot_bgcolor: plotBg,
             font: {{color: fontColor}},
-            margin: {{l:8,r:62,t:34,b:28}},
+            margin: {{l:8,r:62,t:34,b:62}},
+            updatemenus: [{{
+                type: "buttons",
+                direction: "right",
+                x: 1.0,
+                xanchor: "right",
+                y: -0.10,
+                yanchor: "top",
+                pad: {{r: 2, t: 4}},
+                bgcolor: darkMode ? "#0f1828" : "#f3f6fa",
+                bordercolor: "#1687ff",
+                borderwidth: 1,
+                font: {{color: fontColor, size: 12}},
+                active: 2,
+                buttons: [
+                    {{label: "1m", method: "restyle", args: [{{visible:[true,false,false]}}, [2,3,4]]}},
+                    {{label: "5m", method: "restyle", args: [{{visible:[false,true,false]}}, [2,3,4]]}},
+                    {{label: "15m", method: "restyle", args: [{{visible:[false,false,true]}}, [2,3,4]]}}
+                ]
+            }}],
             xaxis: {{
                 rangeslider: {{visible:false}},
                 showgrid:false,
@@ -4243,7 +4251,9 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     [
                         candleTrace(rows),
                         predictionTrace(rows),
-                        predictionPathTrace(rows)
+                        predictionPathTrace(rows, 1, false),
+                        predictionPathTrace(rows, 5, false),
+                        predictionPathTrace(rows, 15, true)
                     ],
                     {{
                         ...layout,
