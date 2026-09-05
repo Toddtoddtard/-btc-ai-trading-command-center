@@ -79,7 +79,7 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Apply audited BTC decision policy
+      - name: Apply audited BTC decision policy safely
         run: python tools/apply_btc_audit_v16.py
       - name: Compile every Python file
         run: python -m compileall -q .
@@ -87,7 +87,9 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Verify repaired call path exists
         run: |
-          grep -q 'forecast_move >= max(atr \* 0.22, px \* 0.00022)' app.py
+          grep -q 'forecast_move >= max(atr \* 0.14, px \* 0.00014)' app.py
+          grep -q 'forecast_move <= -max(atr \* 0.14, px \* 0.00014)' app.py
+          grep -q 'consensus >= 0.12' app.py
           grep -q 'not up_market_conflict' app.py
           grep -q 'not down_market_conflict' app.py
           grep -q 'Political Event Watch AI' ai_core.py
