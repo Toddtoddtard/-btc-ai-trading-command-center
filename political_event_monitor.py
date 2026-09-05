@@ -2,9 +2,10 @@
 """Automated public political-event watcher for the BTC command center.
 
 Runs without paid API keys. It watches fast public news/RSS discovery for major
-presidential remarks and public-account references, including @realDonaldTrump and
-the verified-but-historically-inactive @BARRONTRUMP handle. It never treats an
-unverified impersonator as Barron Trump.
+presidential remarks and attributable public-account references. Donald Trump's
+@realDonaldTrump handle is monitored directly when a public mirror is reachable.
+Barron Trump is monitored through attributable news/search references unless an
+official handle can be independently confirmed; the bot does not guess identity.
 """
 from __future__ import annotations
 
@@ -12,7 +13,6 @@ import argparse
 import hashlib
 import json
 import re
-import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 QUERIES = [
     ("presidential_event", 'Donald Trump president speech remarks address press conference White House bitcoin crypto tariff sanctions when:1h'),
     ("trump_x", 'site:x.com/realDonaldTrump (bitcoin OR crypto OR tariff OR sanctions OR treasury OR fed) when:1h'),
-    ("barron_x", 'site:x.com/BARRONTRUMP (bitcoin OR crypto) when:1h'),
+    ("barron_reference", '"Barron Trump" (bitcoin OR crypto OR X OR post) when:1h'),
     ("white_house", 'White House Trump remarks speech executive order bitcoin crypto tariff sanctions when:1h'),
 ]
 
@@ -103,8 +103,7 @@ def age_minutes(item, now):
 
 def relevance(text):
     t = text.lower()
-    raw = sum(weight for term, weight in EVENT_TERMS.items() if term in t)
-    return min(1.0, raw)
+    return min(1.0, sum(weight for term, weight in EVENT_TERMS.items() if term in t))
 
 
 def direction(text):
@@ -116,8 +115,7 @@ def direction(text):
 
 def build_state():
     now = datetime.now(timezone.utc)
-    all_items = []
-    health = {}
+    all_items, health = [], {}
 
     for key, query in QUERIES:
         try:
@@ -129,12 +127,14 @@ def build_state():
         except Exception as exc:
             health[f"google_news:{key}"] = f"UNAVAILABLE: {str(exc)[:100]}"
 
-    for handle, channel in [("realDonaldTrump", "trump_x_direct"), ("BARRONTRUMP", "barron_x_direct")]:
-        rows, status = nitter_account(handle)
-        health[f"x:{handle}"] = status
-        for row in rows:
-            row["channel"] = channel
-            all_items.append(row)
+    # Only a handle that is independently attributable is treated as a direct
+    # account source. Do not monitor an unverified Barron handle as if authentic.
+    rows, status = nitter_account("realDonaldTrump")
+    health["x:realDonaldTrump"] = status
+    for row in rows:
+        row["channel"] = "trump_x_direct"
+        all_items.append(row)
+    health["x:BarronTrump"] = "NO CONFIRMED OFFICIAL HANDLE — attributable reports only"
 
     unique = {}
     for item in all_items:
@@ -147,12 +147,14 @@ def build_state():
         if age > 75:
             continue
         rel = relevance(item["title"])
-        # Direct account posts get a relevance floor only when BTC/macro terms are present.
         lower = item["title"].lower()
-        direct = item.get("channel") in {"trump_x_direct", "barron_x_direct", "trump_x", "barron_x"}
+        direct = item.get("channel") in {"trump_x_direct", "trump_x"}
+        attributable_barron = item.get("channel") == "barron_reference" and "barron trump" in lower
         crypto_or_macro = any(x in lower for x in ("bitcoin", "crypto", "tariff", "sanction", "treasury", "fed", "reserve", "war", "emergency"))
         if direct and crypto_or_macro:
             rel = max(rel, 0.58)
+        if attributable_barron and any(x in lower for x in ("bitcoin", "crypto")):
+            rel = max(rel, 0.50)
         if rel < 0.22:
             continue
         d = direction(item["title"])
@@ -170,7 +172,6 @@ def build_state():
         weights = [max(0.05, x["impact"]) for x in active_items]
         dscore = sum(x["direction_score"] * w for x, w in zip(active_items, weights)) / sum(weights)
         impact = max(x["impact"] for x in active_items)
-        # Pure volatility events can be direction-neutral; do not force a trade direction.
         confidence = min(0.88, 0.48 + impact * 0.32 + min(abs(dscore), 0.5) * 0.16)
         status = "ACTIVE"
         lead = active_items[0]
@@ -181,7 +182,7 @@ def build_state():
         reason = "No qualifying high-impact political/crypto event in the active window"
 
     return {
-        "version": 1,
+        "version": 2,
         "generated_at": now.isoformat(),
         "active": active,
         "status": status,
@@ -192,8 +193,8 @@ def build_state():
         "events": top,
         "source_health": health,
         "watched_accounts": {
-            "Donald Trump": "@realDonaldTrump",
-            "Barron Trump": "@BARRONTRUMP (official/verified handle; impersonator accounts excluded)",
+            "Donald Trump": "@realDonaldTrump (direct when public mirror is reachable; indexed fallback otherwise)",
+            "Barron Trump": "No independently confirmed official X handle; attributable reports monitored, impersonators excluded",
         },
         "policy": "Zero voting influence unless a qualifying recent event is active.",
     }
