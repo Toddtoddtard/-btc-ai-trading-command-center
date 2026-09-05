@@ -1,0 +1,53 @@
+name: BTC Prediction Horizon v17
+
+on:
+  pull_request:
+    paths:
+      - 'tools/apply_prediction_horizon_v17.py'
+      - 'tests/test_prediction_horizon_v17.py'
+      - '.github/workflows/prediction-horizon-v17.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_prediction_horizon_v17.py'
+      - 'tests/test_prediction_horizon_v17.py'
+      - '.github/workflows/prediction-horizon-v17.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply chart horizon patch
+        run: python tools/apply_prediction_horizon_v17.py
+      - name: Syntax check
+        run: python -m py_compile app.py tools/apply_prediction_horizon_v17.py
+      - name: Run horizon regression test
+        run: python -m unittest tests.test_prediction_horizon_v17
+      - name: Verify installed chart controls
+        run: |
+          grep -q 'Prediction ${horizon}m' app.py
+          grep -q 'label: "1m"' app.py
+          grep -q 'label: "5m"' app.py
+          grep -q 'label: "15m"' app.py
+      - name: Install chart switcher on main
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          if git diff --quiet -- app.py; then
+            echo 'Prediction horizon switcher already installed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Install BTC prediction horizon switcher'
+          git push origin main
