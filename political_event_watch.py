@@ -1,10 +1,20 @@
+import base64
 import json
 import math
 import time
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 
-STATE_URL = "https://raw.githubusercontent.com/Toddtoddtard/-btc-ai-trading-command-center/learning-state/political_event_watch.json"
+try:
+    import streamlit as st
+except Exception:  # GitHub Actions / non-Streamlit callers
+    st = None
+
+REPO = "Toddtoddtard/-btc-ai-trading-command-center"
+BRANCH = "learning-state"
+PATH = "political_event_watch.json"
+STATE_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/{PATH}"
+API_URL = f"https://api.github.com/repos/{REPO}/contents/{PATH}?ref={BRANCH}"
 _CACHE = {"ts": 0.0, "state": None}
 
 
@@ -16,14 +26,50 @@ def _safe_float(value, default=0.0):
         return default
 
 
+def _secret_token():
+    if st is None:
+        return ""
+    try:
+        token = st.secrets.get("github_token")
+        if token:
+            return str(token).strip()
+        github = st.secrets.get("github", {})
+        if isinstance(github, dict):
+            token = github.get("token")
+            if token:
+                return str(token).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _fetch_state():
+    token = _secret_token()
+    if token:
+        req = Request(
+            API_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "BTC-AI-Political-Watch/1.0",
+                "Cache-Control": "no-cache",
+            },
+        )
+        with urlopen(req, timeout=3.0) as response:
+            wrapper = json.loads(response.read().decode("utf-8"))
+        return json.loads(base64.b64decode(wrapper["content"]).decode("utf-8"))
+
+    req = Request(STATE_URL, headers={"User-Agent": "BTC-AI-Political-Watch/1.0", "Cache-Control": "no-cache"})
+    with urlopen(req, timeout=2.5) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def load_political_event_state(ttl=20.0):
     now = time.time()
     if _CACHE["state"] is not None and now - _CACHE["ts"] < ttl:
         return _CACHE["state"]
     try:
-        req = Request(STATE_URL, headers={"User-Agent": "BTC-AI-Political-Watch/1.0", "Cache-Control": "no-cache"})
-        with urlopen(req, timeout=2.5) as response:
-            state = json.loads(response.read().decode("utf-8"))
+        state = _fetch_state()
         generated = state.get("generated_at")
         if generated:
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(generated.replace("Z", "+00:00"))).total_seconds()
