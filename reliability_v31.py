@@ -61,18 +61,22 @@ def source_health_from_specialists(results):
 def learned_policy(state, regime="UNKNOWN"):
     state = state if isinstance(state, dict) else {}
     wait = state.get("wait_policy", {}) if isinstance(state.get("wait_policy", {}), dict) else {}
-    base_conf = safe_float(wait.get("minimum_calibrated_confidence"), 0.60)
-    base_edge = safe_float(wait.get("minimum_edge_score"), 0.20)
+    base_conf = safe_float(wait.get("minimum_calibrated_confidence"), 0.56)
+    base_edge = safe_float(wait.get("minimum_edge_score"), 0.16)
     regime_state = state.get("regimes", {}).get(regime, {}) if isinstance(state.get("regimes", {}), dict) else {}
     samples = int(safe_float(regime_state.get("samples"), 0))
     acc = safe_float(regime_state.get("ewma_accuracy"), 0.5)
     shrink = min(1.0, samples / 60.0)
     reliability = (acc - 0.5) * 2.0 * shrink
-    trade_conf = float(np.clip(base_conf - 0.035 * reliability, 0.56, 0.72))
-    edge_floor = float(np.clip(base_edge - 0.025 * reliability, 0.16, 0.32))
+
+    # Participation-aware calibration: keep HOLD available, but do not require
+    # near-perfect evidence before the bot is allowed to make a directional call.
+    # Learning can still raise/lower these floors by regime as evidence matures.
+    trade_conf = float(np.clip(base_conf - 0.045 * reliability, 0.50, 0.64))
+    edge_floor = float(np.clip(base_edge - 0.035 * reliability, 0.10, 0.24))
     return {
         "trade_confidence_floor": trade_conf,
-        "lock_confidence_floor": float(np.clip(trade_conf + 0.08, 0.64, 0.82)),
+        "lock_confidence_floor": float(np.clip(trade_conf + 0.10, 0.60, 0.76)),
         "edge_floor": edge_floor,
         "regime": regime,
         "regime_samples": samples,
@@ -98,9 +102,9 @@ def calibrate_confidence(confidence, consensus, policy, source_health=1.0, state
     source_health = float(np.clip(source_health, 0.0, 1.0))
     state = state if isinstance(state, dict) else {}
     brier = safe_float(state.get("confidence_model", {}).get("brier_ewma"), 0.25)
-    calibration_penalty = float(np.clip((brier - 0.20) * 0.50, 0.0, 0.14))
-    disagreement_penalty = max(0.0, 0.35 - consensus) * 0.18
-    feed_penalty = (1.0 - source_health) * 0.18
+    calibration_penalty = float(np.clip((brier - 0.20) * 0.42, 0.0, 0.10))
+    disagreement_penalty = max(0.0, 0.28 - consensus) * 0.14
+    feed_penalty = (1.0 - source_health) * 0.16
     result = confidence - calibration_penalty - disagreement_penalty - feed_penalty
     return float(np.clip(result, 0.40, 0.95))
 
@@ -109,9 +113,9 @@ def learned_trade_gate(action, confidence, base_score, consensus, policy, source
     action = str(action or "HOLD").upper()
     if action in {"HOLD", "WAIT"}:
         return False, "WAIT"
-    if source_health < 0.68:
+    if source_health < 0.60:
         return False, "WAIT — FEED HEALTH"
-    if consensus < 0.18:
+    if consensus < 0.10:
         return False, "WAIT — COUNCIL CONFLICT"
     required = policy["lock_confidence_floor"] if action.startswith("LOCK") else policy["trade_confidence_floor"]
     if confidence < required:
