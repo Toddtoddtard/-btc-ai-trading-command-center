@@ -3788,7 +3788,26 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             opacity:.82;
             box-sizing:border-box;
         ">Live BTC 1m candles • predicted 15m candle path • Kalshi target</div>
-        <div id="persistent-market-chart" style="width:100%;height:415px;"></div>
+        <div style="position:relative;width:100%;height:415px;">
+            <div id="persistent-market-chart" style="width:100%;height:415px;"></div>
+            <div id="prediction-horizon-controls" style="
+                position:absolute;
+                right:14px;
+                bottom:10px;
+                z-index:20;
+                display:flex;
+                gap:4px;
+                padding:4px;
+                border:1px solid #1687ff;
+                border-radius:8px;
+                background:rgba(8,13,20,.90);
+                box-shadow:0 3px 12px rgba(0,0,0,.28);
+            ">
+                <button type="button" data-horizon="1" style="cursor:pointer;border:0;border-radius:6px;padding:5px 9px;font:700 12px Arial;background:#0f1828;color:#c9d6e8;">1m</button>
+                <button type="button" data-horizon="5" style="cursor:pointer;border:0;border-radius:6px;padding:5px 9px;font:700 12px Arial;background:#0f1828;color:#c9d6e8;">5m</button>
+                <button type="button" data-horizon="15" style="cursor:pointer;border:1px solid #2ea8ff;border-radius:6px;padding:5px 9px;font:700 12px Arial;background:#123252;color:#ffffff;">15m</button>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -3973,18 +3992,10 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             }};
         }}
 
-        function predictionPathTrace(rows, horizonMinutes = 15, visible = true) {{
+        function predictionPathTrace(rows, horizonMinutes = 15) {{
             const forecast = predictedCandles(rows);
             const horizon = Math.max(1, Math.min(15, Number(horizonMinutes) || 15));
-            const clipped = forecast.slice(0, Math.min(forecast.length, horizon + 1));
-
-            if (!clipped.length) {{
-                return {{
-                    type: "scatter", x: [], y: [], mode: "lines",
-                    visible: visible,
-                    name: `Prediction ${{horizon}}m`
-                }};
-            }}
+            const clipped = forecast.slice(0, Math.min(forecast.length, horizon));
 
             return {{
                 type: "scatter",
@@ -3993,9 +4004,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 mode: "lines+markers",
                 line: {{width: 3, dash: "dot", color: "#2ea8ff"}},
                 marker: {{size: 5, color: "#2ea8ff"}},
-                visible: visible,
-                name: `Prediction ${{horizon}}m`,
-                hovertemplate: `AI ${{horizon}}m prediction: $%{{y:,.2f}}<extra></extra>`
+                name: "Prediction " + horizon + "m",
+                hovertemplate: "AI " + horizon + "m prediction: $%{{y:,.2f}}<extra></extra>"
             }};
         }}
 
@@ -4041,26 +4051,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             paper_bgcolor: paperBg,
             plot_bgcolor: plotBg,
             font: {{color: fontColor}},
-            margin: {{l:8,r:62,t:34,b:62}},
-            updatemenus: [{{
-                type: "buttons",
-                direction: "right",
-                x: 1.0,
-                xanchor: "right",
-                y: -0.10,
-                yanchor: "top",
-                pad: {{r: 2, t: 4}},
-                bgcolor: darkMode ? "#0f1828" : "#f3f6fa",
-                bordercolor: "#1687ff",
-                borderwidth: 1,
-                font: {{color: fontColor, size: 12}},
-                active: 2,
-                buttons: [
-                    {{label: "1m", method: "restyle", args: [{{visible:[true,false,false]}}, [2,3,4]]}},
-                    {{label: "5m", method: "restyle", args: [{{visible:[false,true,false]}}, [2,3,4]]}},
-                    {{label: "15m", method: "restyle", args: [{{visible:[false,false,true]}}, [2,3,4]]}}
-                ]
-            }}],
+            margin: {{l:8,r:62,t:34,b:28}},
             xaxis: {{
                 rangeslider: {{visible:false}},
                 showgrid:false,
@@ -4099,13 +4090,51 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }};
 
         let rows = initial.candles || [];
+        let selectedPredictionHorizon = 15;
+
+        const horizonButtons = Array.from(
+            document.querySelectorAll('#prediction-horizon-controls button[data-horizon]')
+        );
+
+        function paintHorizonButtons() {{
+            horizonButtons.forEach(btn => {{
+                const active = Number(btn.dataset.horizon) === selectedPredictionHorizon;
+                btn.style.background = active ? '#123252' : '#0f1828';
+                btn.style.color = active ? '#ffffff' : '#c9d6e8';
+                btn.style.border = active ? '1px solid #2ea8ff' : '1px solid transparent';
+            }});
+        }}
+
+        function setPredictionHorizon(minutes) {{
+            selectedPredictionHorizon = [1, 5, 15].includes(Number(minutes)) ? Number(minutes) : 15;
+            paintHorizonButtons();
+            Plotly.react(
+                chart,
+                [
+                    candleTrace(rows),
+                    predictionTrace(rows),
+                    predictionPathTrace(rows, selectedPredictionHorizon)
+                ],
+                {{
+                    ...layout,
+                    shapes: targetShape(),
+                    annotations: targetAnnotation()
+                }},
+                config
+            );
+        }}
+
+        horizonButtons.forEach(btn => {{
+            btn.addEventListener('click', () => setPredictionHorizon(btn.dataset.horizon));
+        }});
+        paintHorizonButtons();
 
         Plotly.newPlot(
             chart,
             [
                 candleTrace(rows),
                 predictionTrace(rows),
-                predictionPathTrace(rows)
+                predictionPathTrace(rows, selectedPredictionHorizon)
             ],
             layout,
             config
@@ -4251,9 +4280,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     [
                         candleTrace(rows),
                         predictionTrace(rows),
-                        predictionPathTrace(rows, 1, false),
-                        predictionPathTrace(rows, 5, false),
-                        predictionPathTrace(rows, 15, true)
+                        predictionPathTrace(rows, selectedPredictionHorizon)
                     ],
                     {{
                         ...layout,
