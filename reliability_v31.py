@@ -129,12 +129,15 @@ def exact_expiry_row(df, expiry_ts, tolerance_seconds=75):
     if df is None or df.empty:
         return None
     expiry = pd.to_datetime(float(expiry_ts), unit="s", utc=True)
-    times = pd.to_datetime(df["time"], utc=True)
-    deltas = (times - expiry).abs().dt.total_seconds()
-    idx = deltas.idxmin()
-    if safe_float(deltas.loc[idx], 1e9) > tolerance_seconds:
+    # Binance timestamps identify candle OPEN time. Settlement must use a
+    # candle that has fully closed at or before expiry, never the candle that
+    # begins at expiry (which contains future price action).
+    closes = pd.to_datetime(df["time"], utc=True, errors="coerce") + pd.Timedelta(minutes=1)
+    ages = (expiry - closes).dt.total_seconds()
+    eligible = ages[(ages >= 0) & (ages <= float(tolerance_seconds))]
+    if eligible.empty:
         return None
-    return df.loc[idx]
+    return df.loc[eligible.idxmin()]
 
 
 def execution_cost_bps(notional, spread_bps=1.0, slippage_bps=1.5, fee_bps=4.0):
