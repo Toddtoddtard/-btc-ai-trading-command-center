@@ -59,6 +59,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertGreaterEqual(summary['cash'], 450)
         self.assertAlmostEqual(summary['open_position']['amount_down'], 500-summary['cash'])
         self.assertIn('Amount: $', event['message'])
+        self.assertIn('Kalshi entry: 50%', event['message'])
+        self.assertNotIn(self.decision['kalshi_ticker'], event['message'])
         self.assertNotIn(' contracts ', event['message'])
         self.assertNotIn(' @ ', event['message'])
 
