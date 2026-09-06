@@ -22,7 +22,7 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
-from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_summary, persistent_lock_side
+from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side
 from learning_prices import closed_price_at
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
@@ -5441,14 +5441,21 @@ def live_dashboard():
         st.subheader("Automatic Paper Trading")
 
         _kp = paper_summary(DB_PATH, STARTING_CASH)
-        st.caption("PRIMARY P/L EVIDENCE — simulated KXBTC15M contracts filled at ask, exited at bid/settlement; general Kalshi taker-fee model applied.")
+        st.caption(
+            "PRIMARY P/L EVIDENCE — every balance, position and trade below "
+            "comes from the same automatic Kalshi paper ledger."
+        )
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")
         k2.metric("Total P/L", f"${_kp['total_pnl']:+,.2f}")
         k3.metric("Realized P/L", f"${_kp['realized_pnl']:+,.2f}")
         k4.metric("Open P/L", f"${_kp['unrealized_pnl']:+,.2f}")
-        _pf = _kp.get('profit_factor')
-        k5.metric("Contract Profit Factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))
+        _pf = _kp.get("profit_factor")
+        k5.metric(
+            "Contract Profit Factor",
+            "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"),
+        )
+
         _open_contract = _kp.get("open_position")
         if _open_contract:
             _paper_direction = "UP" if _open_contract["side"] == "YES" else "DOWN"
@@ -5457,114 +5464,36 @@ def live_dashboard():
                 f"Amount: ${_open_contract['amount_down']:,.2f} • "
                 f"Kalshi entry: {_open_contract['entry_price'] * 100:.0f}%"
             )
-        st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")
 
-        # V5 profitability scorecard uses resolved paper/prediction outcomes and
-        # subtracts simulated fees/slippage before calculating expectancy.
-        _profit_rows = recent_predictions(300)
-        _profit_records = _profit_rows.to_dict("records") if _profit_rows is not None and not _profit_rows.empty else []
-        _profit = summarize_trades(_profit_records, cost_bps=6.5)
-        _profit_ok, _profit_reason = profitability_gate(_profit, min_samples=30)
-        p1, p2, p3, p4, p5 = st.columns(5)
-        p1.metric("Net win rate", "Learning" if _profit.get("win_rate") is None else f"{_profit['win_rate']*100:.1f}%")
-        p2.metric("Net expectancy", "Learning" if _profit.get("expectancy") is None else f"{_profit['expectancy']*100:+.3f}%")
-        _pf = _profit.get("profit_factor")
-        p3.metric("Profit factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))
-        p4.metric("Drawdown proxy", "Learning" if _profit.get("max_drawdown_proxy") is None else f"{_profit['max_drawdown_proxy']*100:.2f}%")
-        p5.metric("Profitability gate", "PASS" if _profit_ok else "WAIT")
-        st.caption(f"V5 net-of-cost analytics • {_profit.get('samples', 0)} resolved trade calls • simulated cost 6.5 bps • {_profit_reason}")
         auto_state = get_auto_state()
-        account = get_account(price)
-
         status1, status2, status3, status4 = st.columns(4)
         status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
-        status2.metric("Contract position", ("UP" if _open_contract['side'] == 'YES' else "DOWN") if _open_contract else "NONE")
+        status2.metric(
+            "Contract position",
+            ("UP" if _open_contract["side"] == "YES" else "DOWN")
+            if _open_contract else "NONE",
+        )
         status3.metric("Kalshi call", decision["action"])
         status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
 
         if bool(auto_state["enabled"]):
-            _status_message = auto_result["message"] if auto_result.get("message") else auto_state.get("last_message", "AUTO PAPER running.")
-            _status_side = str(auto_state.get("side", "NONE")).upper()
+            _status_message = (
+                auto_result["message"]
+                if auto_result.get("message")
+                else auto_state.get("last_message", "AUTO PAPER running.")
+            )
             _decision_action = str(decision.get("action", "HOLD")).upper()
-            if _status_side == "LONG" or _decision_action in {"SCALP UP", "LOCK UP", "UP"}:
+            if _decision_action in {"SCALP UP", "LOCK UP", "UP"}:
                 st.success(_status_message)
-            elif _status_side == "SHORT" or _decision_action in {"SCALP DOWN", "LOCK DOWN", "DOWN"}:
+            elif _decision_action in {"SCALP DOWN", "LOCK DOWN", "DOWN"}:
                 st.error(_status_message)
             else:
                 st.info(_status_message)
         else:
-            st.info("AUTO PAPER TRADING is off. Turn it on in the sidebar to let approved paper signals execute automatically.")
-
-        st.subheader("Paper Account")
-        auto_state = get_auto_state()
-
-        st.subheader("Legacy BTC simulator — separate from Kalshi AUTO PAPER")
-        st.caption("The balances and manual controls below belong to the older BTC simulator, not the contract account above.")
-        # Total bot P/L is current marked-to-market equity minus the original
-        # $500 starting balance. It therefore includes both realized closed
-        # trades and the live unrealized P/L of any currently open position.
-        _open_pnl = 0.0
-        if auto_state["side"] in {"LONG", "SHORT"}:
-            _entry = safe_float(auto_state["entry_price"])
-            _qty = abs(safe_float(auto_state["entry_qty"], 0.0))
-            if pd.notna(_entry) and _qty > 0:
-                _entry_cost = execution_cost_bps(_qty * _entry)
-                if auto_state["side"] == "LONG":
-                    _open_pnl = (price - _entry) * _qty - _entry_cost
-                else:
-                    _open_pnl = (_entry - price) * _qty - _entry_cost
-
-        _closed_pnl = float(account["pnl"]) - float(_open_pnl)
-
-        perf1, perf2, perf3, perf4, perf5 = st.columns(5)
-        perf1.metric("Starting Balance", fmt_money(account["starting_equity"]))
-        perf2.metric("Current Equity", fmt_money(account["equity"]))
-        perf3.metric(
-            "Legacy BTC P/L From Start",
-            f"${account['pnl']:+,.2f}",
-            f"{account['return_pct']:+.2f}% from $500 start",
-        )
-        perf4.metric("Closed P/L", f"${_closed_pnl:+,.2f}")
-        perf5.metric("Open P/L", f"${_open_pnl:+,.2f}")
-
-        a1, a2, a3 = st.columns(3)
-        a1.metric("Cash", fmt_money(account["cash"]))
-        a2.metric("BTC exposure", f"{account['btc']:+.6f}")
-        a3.metric("Return", f"{account['return_pct']:+.2f}%")
-
-        if auto_state["side"] in {"LONG", "SHORT"}:
-            entry = safe_float(auto_state["entry_price"])
-            stop = safe_float(auto_state["stop_loss"])
-            target = safe_float(auto_state["take_profit"])
-            qty = abs(safe_float(auto_state["entry_qty"], 0.0))
-            entry_ts = int(auto_state["entry_ts"] or int(time.time()))
-            elapsed = max(0, int(time.time()) - entry_ts)
-            if auto_state["side"] == "LONG":
-                unrealized_dollars = (price - entry) * qty
-            else:
-                unrealized_dollars = (entry - price) * qty
-
-            st.subheader("Active Position")
-            bet_size_dollars = qty * entry
-            p1, p2, p3, p4, p5, p6, p7 = st.columns(7)
-            p1.metric("Side", display_position_side(auto_state["side"]))
-            p2.metric("Bet Size", fmt_money(bet_size_dollars))
-            p3.metric("Entry", fmt_money(entry))
-            p4.metric("Current", fmt_money(price))
-            p5.metric("Stop", fmt_money(stop))
-            p6.metric("Target", fmt_money(target))
-            p7.metric("Unrealized", fmt_money(unrealized_dollars))
-            st.caption(
-                f"Bet ${bet_size_dollars:,.2f} • Quantity {qty:.6f} BTC • elapsed {elapsed//60:02d}:{elapsed%60:02d} • "
-                f"automatic time exit at {PREDICTION_HORIZON_MIN}:00"
+            st.info(
+                "AUTO PAPER TRADING is off. Turn it on in the sidebar to let "
+                "approved paper signals execute automatically."
             )
-            if st.button("Close Paper Position Now", use_container_width=True):
-                result = close_paper_position(price, "manual close")
-                if result["ok"]:
-                    st.success(result["message"])
-                else:
-                    st.error(result["message"])
-                st.rerun(scope="fragment")
 
         st.subheader("Risk Manager")
         r1, r2, r3, r4 = st.columns(4)
@@ -5572,44 +5501,47 @@ def live_dashboard():
         r2.metric("Position size", f"{risk['position_pct']*100:.2f}%")
         r3.metric("Risk score", f"{risk['risk_score']:.2f}")
         r4.metric("Decision", decision["action"])
-        next_bet_dollars = max(0.0, float(account["equity"]) * float(risk["position_pct"]))
-        st.metric("Next Approved Bet Size", fmt_money(next_bet_dollars) if risk["approved"] else "$0.00")
+        _next_amount = max(
+            0.0,
+            float(_kp["cash"]) * min(0.25, max(0.0, float(risk["position_pct"]))),
+        )
+        st.metric(
+            "Next Approved Amount",
+            f"${_next_amount:,.2f}" if risk["approved"] and not _open_contract else "$0.00",
+        )
         st.caption(risk["reason"])
 
-        if not bool(auto_state["enabled"]) and auto_state["side"] == "NONE":
-            if st.button("Execute Approved Paper Trade", type="primary", use_container_width=True):
-                if risk["approved"]:
-                    internal_action = (
-                        "BUY"
-                        if decision["action"] == "SCALP UP"
-                        else "SELL"
-                    )
-                    result = execute_paper_trade(
-                        internal_action,
-                        price,
-                        risk["position_pct"],
-                        hist,
-                        note=(
-                            f"MANUAL Kalshi-call={decision['action']}, "
-                            f"master={decision['score']:+.3f}, "
-                            f"confidence={decision['confidence']:.3f}"
-                        ),
-                    )
-                    if result["ok"]:
-                        st.success(result["message"])
-                    else:
-                        st.error(result["message"])
-                    st.rerun(scope="fragment")
-                else:
-                    st.error(f"Paper trade blocked: {risk['reason']}")
-
-        with db_conn() as conn:
-            trades = pd.read_sql_query("SELECT * FROM paper_trades ORDER BY id DESC LIMIT 100", conn)
-        if not trades.empty:
-            st.subheader("Paper Trade Log")
-            render_dashboard_table(trades)
+        st.subheader("Automatic Kalshi Paper Trade Log")
+        _contract_history = paper_history(DB_PATH, STARTING_CASH, limit=100)
+        if _contract_history:
+            _history_view = pd.DataFrame([
+                {
+                    "Status": row["status"],
+                    "Direction": row["direction"],
+                    "Strategy": row["strategy"],
+                    "Amount": f"${row['amount']:,.2f}",
+                    "Kalshi Entry": f"{row['kalshi_entry_pct']:.0f}%",
+                    "Current / Exit": (
+                        "N/A" if row["current_or_exit_pct"] is None
+                        else f"{row['current_or_exit_pct']:.0f}%"
+                    ),
+                    "Result": row["result"],
+                    "P/L": f"${row['pnl']:+,.2f}",
+                    "Opened": pd.to_datetime(
+                        row["opened_at"], unit="s", utc=True
+                    ).strftime("%Y-%m-%d %H:%M UTC"),
+                    "Closed": (
+                        "OPEN" if row["closed_at"] is None
+                        else pd.to_datetime(
+                            row["closed_at"], unit="s", utc=True
+                        ).strftime("%Y-%m-%d %H:%M UTC")
+                    ),
+                }
+                for row in _contract_history
+            ])
+            render_dashboard_table(_history_view)
         else:
-            st.info("No paper trades yet.")
+            st.info("No automatic Kalshi paper trades yet.")
 
     with tab_journal:
         stats = prediction_stats()
