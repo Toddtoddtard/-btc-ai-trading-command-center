@@ -84,6 +84,47 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(closed['result'], 'WIN')
         self.assertAlmostEqual(closed['pnl'], engine.paper_summary(self.db)['realized_pnl'])
 
+    def test_scalp_takes_net_profit_at_twenty_five_percent(self):
+        self.decision['action'] = 'SCALP UP'
+        self.open()
+
+        # A modest gain stays open because fees keep net profit below 25%.
+        self.decision['yes_bid_dollars'] = .60
+        self.assertFalse(self.cycle()['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+
+        # The scalp realizes profit once net return clears the 25% target.
+        self.decision['yes_bid_dollars'] = .70
+        closed = self.cycle()
+        self.assertTrue(closed['event'])
+        self.assertIn('TAKE_PROFIT_25_PCT', closed['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_lock_ignores_normal_opposite_signal(self):
+        self.open()
+        self.decision.update(
+            action='LOCK DOWN',
+            score=-.90,
+            whale_score=0.0,
+            whale_confidence=.99,
+        )
+        result = self.cycle()
+        self.assertFalse(result['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_lock_exits_only_on_strong_confirmed_whale_reversal(self):
+        self.open()
+        self.decision.update(
+            score=-.50,
+            whale_score=-.90,
+            whale_confidence=.95,
+            yes_bid_dollars=.45,
+        )
+        result = self.cycle()
+        self.assertTrue(result['event'])
+        self.assertIn('WHALE_REVERSAL', result['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
     def test_paused_blocks_entry_but_settles_existing(self):
         self.cycle(enabled=False)
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
