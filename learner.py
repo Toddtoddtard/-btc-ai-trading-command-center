@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from ai_core import SPECIALIST_NAMES, enrich_history_core, forecast_path_core, run_specialists_core
+from learning_prices import closed_price_at
 
 SPOT = "https://data-api.binance.vision"
 FUTURES = "https://fapi.binance.com"
@@ -303,10 +304,9 @@ def grade(state, df):
     if not pending or time.time() < pending["expires_at"]:
         return False
     expiry = pd.to_datetime(pending["expires_at"], unit="s", utc=True)
-    nearest = df.iloc[(df.time - expiry).abs().argsort()[:1]]
-    if nearest.empty:
+    actual = closed_price_at(df, expiry)
+    if actual is None:
         return False
-    actual = float(nearest.iloc[0].close)
     start = float(pending["start_price"])
     predicted_end = float(pending["predicted_end"])
     actual_direction = 1 if actual >= start else -1
@@ -315,7 +315,8 @@ def grade(state, df):
 
     path_error = abs_error
     pred_path = pending.get("forecast_path") or []
-    actual_window = df.loc[(df.time > expiry - pd.Timedelta(minutes=15)) & (df.time <= expiry)].tail(15)
+    candle_closes = pd.to_datetime(df.time, utc=True, errors="coerce") + pd.Timedelta(minutes=1)
+    actual_window = df.loc[(candle_closes > expiry - pd.Timedelta(minutes=15)) & (candle_closes <= expiry)].tail(15)
     if pred_path and len(actual_window) >= 5:
         pred_closes = np.array([float(point["close"]) for point in pred_path], dtype=float)
         actual_closes = actual_window["close"].astype(float).to_numpy()
