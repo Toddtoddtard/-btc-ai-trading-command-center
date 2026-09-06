@@ -390,8 +390,9 @@ def grade(state, df):
         quality = 0.55 * (learned["ewma_accuracy"] - 0.5) * 2 + 0.25 * np.tanh(learned["ewma_edge"] * 4) + 0.20 * learned["ewma_calibration"]
         target_weight = float(np.clip(1 + quality, 0.35, 1.85))
         learned["adaptive_weight"] = float(np.clip(0.9 * learned["adaptive_weight"] + 0.1 * target_weight, 0.35, 1.85))
-        state["specialist_history"][name].append({"ticker": pending["ticker"], "expires_at": pending["expires_at"], "direction_correct": hit, "signed_edge": edge})
-        state["specialist_history"][name] = state["specialist_history"][name][-1000:]
+        history = state.setdefault("specialist_history", {}).setdefault(name, [])
+        history.append({"ticker": pending["ticker"], "expires_at": pending["expires_at"], "direction_correct": hit, "signed_edge": edge})
+        state["specialist_history"][name] = history[-1000:]
 
     state["pending"] = None
     state["status"]["last_graded_ticker"] = pending["ticker"]
