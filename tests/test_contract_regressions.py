@@ -64,6 +64,26 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertNotIn(' contracts ', event['message'])
         self.assertNotIn(' @ ', event['message'])
 
+    def test_authoritative_history_matches_open_and_closed_positions(self):
+        self.open()
+        opened = engine.paper_history(self.db)
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(opened[0]['status'], 'OPEN')
+        self.assertEqual(opened[0]['direction'], 'UP')
+        self.assertEqual(opened[0]['result'], 'OPEN')
+        self.assertAlmostEqual(
+            opened[0]['amount'],
+            engine.paper_summary(self.db)['open_position']['amount_down'],
+        )
+        self.assertNotIn('ticker', opened[0])
+
+        self.expire()
+        self.cycle('yes')
+        closed = engine.paper_history(self.db)[0]
+        self.assertEqual(closed['status'], 'CLOSED')
+        self.assertEqual(closed['result'], 'WIN')
+        self.assertAlmostEqual(closed['pnl'], engine.paper_summary(self.db)['realized_pnl'])
+
     def test_paused_blocks_entry_but_settles_existing(self):
         self.cycle(enabled=False)
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
