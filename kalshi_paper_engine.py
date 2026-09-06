@@ -157,7 +157,10 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         direction = "UP" if side == "YES" else "DOWN"
         return {
             "event": True,
-            "message": f"Opened PAPER {strategy} {direction} • Amount: ${total_cost:,.2f} • {ticker}",
+            "message": (
+                f"Opened PAPER {strategy} {direction} • Amount: ${total_cost:,.2f} • "
+                f"Kalshi entry: {entry * 100:.0f}%"
+            ),
         }
     finally:
         conn.close()
