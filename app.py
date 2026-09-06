@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.06-r57-one-journal-row-per-window"
+APP_VERSION = "2026.09.06-r58-paper-amount-down"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5451,7 +5451,12 @@ def live_dashboard():
         k5.metric("Contract Profit Factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))
         _open_contract = _kp.get("open_position")
         if _open_contract:
-            st.info(f"OPEN PAPER {_open_contract['strategy']} {_open_contract['side']} • {_open_contract['contracts']} contracts • {_open_contract['ticker']} • entry ${_open_contract['entry_price']:.2f}")
+            _paper_direction = "UP" if _open_contract["side"] == "YES" else "DOWN"
+            st.info(
+                f"OPEN PAPER {_open_contract['strategy']} {_paper_direction} • "
+                f"Amount down: ${_open_contract['amount_down']:,.2f} • "
+                f"{_open_contract['ticker']}"
+            )
         st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")
 
         # V5 profitability scorecard uses resolved paper/prediction outcomes and
