@@ -23,6 +23,7 @@ from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_summary, persistent_lock_side
+from learning_prices import closed_price_at
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
     learned_policy, learned_trade_gate, regime_specialist_weight,
@@ -58,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r53-kalshi-contract-paper"
+APP_VERSION = "2026.09.06-r54-settlement-regressions"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -782,7 +783,8 @@ def close_paper_position(price, reason="Exit rule"):
 
 def manage_auto_paper(decision, risk, price, hist):
     """Run one PAPER-only KXBTC15M contract cycle; never sends a live order."""
-    return manage_kalshi_paper_cycle(DB_PATH, STARTING_CASH, decision, risk, price)
+    return manage_kalshi_paper_cycle(DB_PATH, STARTING_CASH, decision, risk, price,
+                                    enabled=bool(get_auto_state()['enabled']))
 
 
 def execute_paper_trade(action, price, position_pct, hist, note=""):
@@ -2213,11 +2215,9 @@ def resolve_forecast_windows(hist):
         ) = row
 
         expiry_dt = pd.to_datetime(expires_at, unit="s", utc=True)
-        near = hist2.iloc[(hist2["_ts"] - expiry_dt).abs().argsort()[:1]]
-        if near.empty:
+        actual_end = closed_price_at(hist2, expiry_dt)
+        if actual_end is None:
             continue
-
-        actual_end = float(near.iloc[0]["close"])
         actual_direction = 1 if actual_end >= start_price else -1
         direction_correct = int(actual_direction == predicted_direction)
         abs_error = abs(actual_end - predicted_end)
@@ -2600,14 +2600,9 @@ def resolve_specialist_learning(hist):
             utc=True,
         )
 
-        near = hist2.iloc[
-            (hist2["_ts"] - expiry_dt).abs().argsort()[:1]
-        ]
-
-        if near.empty:
+        actual_end = closed_price_at(hist2, expiry_dt)
+        if actual_end is None:
             continue
-
-        actual_end = float(near.iloc[0]["close"])
         realized_return = actual_end / float(start_price) - 1.0
 
         # Primary specialist grading is market direction over the window.
@@ -3045,12 +3040,14 @@ def resolve_predictions(hist, current_price=None):
     if hist is not None and not hist.empty and "time" in hist.columns and "close" in hist.columns:
         hist2 = hist[["time", "close"]].copy()
         hist2["_ts"] = pd.to_datetime(hist2["time"], utc=True, errors="coerce")
-        hist2["_epoch"] = (hist2["_ts"].astype("int64") // 10**9).where(hist2["_ts"].notna())
+        # pandas 3 may store microseconds rather than nanoseconds. Do not
+        # assume the integer dtype's time unit when computing epoch seconds.
+        hist2["_epoch"] = hist2["_ts"].map(lambda ts: ts.timestamp() if pd.notna(ts) else np.nan)
         hist2["close"] = pd.to_numeric(hist2["close"], errors="coerce")
         for _, candle in hist2.dropna(subset=["_epoch", "close"]).iterrows():
             px = safe_float(candle["close"])
             if pd.notna(px) and px > 0:
-                candle_points.append((int(candle["_epoch"]), float(px)))
+                candle_points.append((int(candle["_epoch"]) + 60, float(px)))
 
     with db_conn() as conn:
         # created_ts is the reliable expiry gate for legacy rows. A prediction is
@@ -3126,7 +3123,7 @@ def resolve_predictions(hist, current_price=None):
                             open_ts = int(candle[0]) // 1000
                             close_px = safe_float(candle[4])
                             if pd.notna(close_px) and close_px > 0:
-                                candle_points.append((open_ts, float(close_px)))
+                                candle_points.append((open_ts + 60, float(close_px)))
                         except Exception:
                             continue
                 except Exception:
@@ -3144,10 +3141,10 @@ def resolve_predictions(hist, current_price=None):
         def _nearest_price(target_ts):
             if not candle_points:
                 return np.nan
-            nearest_ts, nearest_px = min(candle_points, key=lambda item: abs(item[0] - int(target_ts)))
-            # Never grade against a candle far away from the intended settlement.
-            if abs(nearest_ts - int(target_ts)) > 120:
+            eligible = [(ts, px) for ts, px in candle_points if 0 <= int(target_ts) - ts < 60]
+            if not eligible:
                 return np.nan
+            nearest_ts, nearest_px = max(eligible)
             return float(nearest_px)
 
         updated = 0
@@ -3184,9 +3181,13 @@ def resolve_predictions(hist, current_price=None):
             ret = (resolved_price / start_price - 1.0) * 100.0
             strike = safe_float(row["target_price"])
 
-            if action in {"SCALP UP", "LOCK UP"}:
+            if action == "SCALP UP":
+                correct = int(resolved_price > start_price)
+            elif action == "SCALP DOWN":
+                correct = int(resolved_price < start_price)
+            elif action == "LOCK UP":
                 correct = int(resolved_price >= strike) if pd.notna(strike) else int(resolved_price > start_price)
-            elif action in {"SCALP DOWN", "LOCK DOWN"}:
+            elif action == "LOCK DOWN":
                 correct = int(resolved_price < strike) if pd.notna(strike) else int(resolved_price < start_price)
             else:
                 correct = None
@@ -4122,8 +4123,9 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             return forecast;
         }}
 
-        function predictionTrace(rows) {{
-            const forecast = predictedCandles(rows);
+        function predictionTrace(rows, horizonMinutes = 15) {{
+            const horizon = [1, 5, 15].includes(Number(horizonMinutes)) ? Number(horizonMinutes) : 15;
+            const forecast = predictedCandles(rows).slice(0, horizon);
 
             return {{
                 type: "candlestick",
@@ -4132,7 +4134,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 high: forecast.map(r => r.high),
                 low: forecast.map(r => r.low),
                 close: forecast.map(r => r.close),
-                name: "Predicted 15m candles",
+                name: "Predicted " + horizon + "m candles",
                 increasing: {{
                     line: {{
                         color:"rgba(77,171,247,0.88)",
@@ -4273,7 +4275,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 chart,
                 [
                     candleTrace(rows),
-                    predictionTrace(rows),
+                    predictionTrace(rows, selectedPredictionHorizon),
                     predictionPathTrace(rows, selectedPredictionHorizon)
                 ],
                 {{
@@ -4294,7 +4296,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             chart,
             [
                 candleTrace(rows),
-                predictionTrace(rows),
+                predictionTrace(rows, selectedPredictionHorizon),
                 predictionPathTrace(rows, selectedPredictionHorizon)
             ],
             layout,
@@ -4440,7 +4442,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     chart,
                     [
                         candleTrace(rows),
-                        predictionTrace(rows),
+                        predictionTrace(rows, selectedPredictionHorizon),
                         predictionPathTrace(rows, selectedPredictionHorizon)
                     ],
                     {{
@@ -4685,6 +4687,7 @@ st.caption(
     "Persistent AGGR-style candle chart — this chart updates in place "
     "and is not rebuilt by the dashboard refresh."
 )
+st.caption("1m / 5m / 15m select portions of the same 15-minute forecast, not separately trained models. Forecasts are estimates, not guaranteed price paths.")
 
 # Grade completed windows and learn before drawing the next forecast.
 try:
@@ -5453,7 +5456,7 @@ def live_dashboard():
 
         status1, status2, status3, status4 = st.columns(4)
         status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
-        status2.metric("Position", display_position_side(auto_state["side"]))
+        status2.metric("Contract position", ("UP" if _open_contract['side'] == 'YES' else "DOWN") if _open_contract else "NONE")
         status3.metric("Kalshi call", decision["action"])
         status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
 
@@ -5473,6 +5476,8 @@ def live_dashboard():
         st.subheader("Paper Account")
         auto_state = get_auto_state()
 
+        st.subheader("Legacy BTC simulator — separate from Kalshi AUTO PAPER")
+        st.caption("The balances and manual controls below belong to the older BTC simulator, not the contract account above.")
         # Total bot P/L is current marked-to-market equity minus the original
         # $500 starting balance. It therefore includes both realized closed
         # trades and the live unrealized P/L of any currently open position.
@@ -5493,7 +5498,7 @@ def live_dashboard():
         perf1.metric("Starting Balance", fmt_money(account["starting_equity"]))
         perf2.metric("Current Equity", fmt_money(account["equity"]))
         perf3.metric(
-            "Bot P/L From Start",
+            "Legacy BTC P/L From Start",
             f"${account['pnl']:+,.2f}",
             f"{account['return_pct']:+.2f}% from $500 start",
         )
