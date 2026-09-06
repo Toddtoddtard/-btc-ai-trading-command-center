@@ -75,6 +75,9 @@ def ensure_v3(state):
         spec.setdefault("brier_ewma", 0.25)
         spec.setdefault("overconfident_misses", 0)
         spec.setdefault("regimes", {})
+        # Older saved states may predate a newly added specialist. Keep the
+        # parallel history mapping in sync during every state migration.
+        state.setdefault("specialist_history", {}).setdefault(name, [])
     return state
 
 
