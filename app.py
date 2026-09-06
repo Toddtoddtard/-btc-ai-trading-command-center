@@ -3040,7 +3040,9 @@ def resolve_predictions(hist, current_price=None):
     if hist is not None and not hist.empty and "time" in hist.columns and "close" in hist.columns:
         hist2 = hist[["time", "close"]].copy()
         hist2["_ts"] = pd.to_datetime(hist2["time"], utc=True, errors="coerce")
-        hist2["_epoch"] = (hist2["_ts"].astype("int64") // 10**9).where(hist2["_ts"].notna())
+        # pandas 3 may store microseconds rather than nanoseconds. Do not
+        # assume the integer dtype's time unit when computing epoch seconds.
+        hist2["_epoch"] = hist2["_ts"].map(lambda ts: ts.timestamp() if pd.notna(ts) else np.nan)
         hist2["close"] = pd.to_numeric(hist2["close"], errors="coerce")
         for _, candle in hist2.dropna(subset=["_epoch", "close"]).iterrows():
             px = safe_float(candle["close"])
