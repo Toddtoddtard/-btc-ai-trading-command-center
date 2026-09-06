@@ -1,0 +1,39 @@
+name: Apply external review phase 1
+
+on:
+  push:
+    paths:
+      - tools/apply_external_review_phase1.py
+      - .github/workflows/external-review-phase1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply review fixes
+        run: python tools/apply_external_review_phase1.py
+      - name: Validate Python
+        run: python -m py_compile app.py ai_core.py
+      - name: Run tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py ai_core.py
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Apply review fixes: raw grading and gate cleanup"
+            git push origin main
+          fi
