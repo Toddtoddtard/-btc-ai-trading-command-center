@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.06-r54-settlement-regressions"
+APP_VERSION = "2026.09.05-r53-kalshi-contract-paper"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -783,8 +783,7 @@ def close_paper_position(price, reason="Exit rule"):
 
 def manage_auto_paper(decision, risk, price, hist):
     """Run one PAPER-only KXBTC15M contract cycle; never sends a live order."""
-    return manage_kalshi_paper_cycle(DB_PATH, STARTING_CASH, decision, risk, price,
-                                    enabled=bool(get_auto_state()['enabled']))
+    return manage_kalshi_paper_cycle(DB_PATH, STARTING_CASH, decision, risk, price)
 
 
 def execute_paper_trade(action, price, position_pct, hist, note=""):
