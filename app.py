@@ -5454,7 +5454,7 @@ def live_dashboard():
             _paper_direction = "UP" if _open_contract["side"] == "YES" else "DOWN"
             st.info(
                 f"OPEN PAPER {_open_contract['strategy']} {_paper_direction} • "
-                f"Amount down: ${_open_contract['amount_down']:,.2f} • "
+                f"Amount: ${_open_contract['amount_down']:,.2f} • "
                 f"{_open_contract['ticker']}"
             )
         st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")
