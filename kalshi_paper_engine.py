@@ -154,7 +154,11 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
             _f(decision.get("target_price")), entry, contracts, fee, _quote(decision, side, ask=False),
         ))
         conn.commit()
-        return {"event": True, "message": f"Opened PAPER {strategy} {side} {contracts}x {ticker} @ {entry:.2f}"}
+        direction = "UP" if side == "YES" else "DOWN"
+        return {
+            "event": True,
+            "message": f"Opened PAPER {strategy} {direction} • Amount down: ${total_cost:,.2f} • {ticker}",
+        }
     finally:
         conn.close()
 
@@ -255,6 +259,12 @@ def paper_summary(db_path, starting_cash=500.0):
             )
         start = float(acct["starting_cash"])
         equity = start + realized + unrealized
+        open_position = dict(opened) if opened else None
+        if open_position:
+            open_position["amount_down"] = (
+                float(open_position["entry_price"]) * int(open_position["contracts"])
+                + float(open_position["entry_fee"])
+            )
         return {
             "cash": float(acct["cash"]),
             "starting_cash": start,
@@ -268,7 +278,7 @@ def paper_summary(db_path, starting_cash=500.0):
             "losses": len(losses),
             "win_rate": (len(wins)/len(pnls)) if pnls else None,
             "profit_factor": (sum(wins)/abs(sum(losses))) if losses else (math.inf if wins else None),
-            "open_position": dict(opened) if opened else None,
+            "open_position": open_position,
         }
     finally:
         conn.close()
