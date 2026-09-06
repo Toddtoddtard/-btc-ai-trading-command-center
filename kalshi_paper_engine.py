@@ -1,6 +1,23 @@
 import math
 import sqlite3
 import time
+import json
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+
+def fetch_settled_result(ticker):
+    """Only an official, final binary result can settle a paper contract."""
+    try:
+        url = 'https://external-api.kalshi.com/trade-api/v2/markets/' + quote(ticker, safe='')
+        with urlopen(Request(url, headers={'Accept': 'application/json'}), timeout=4) as response:
+            market = json.load(response).get('market', {})
+        if market.get('ticker') != ticker or market.get('status') not in {'settled', 'finalized'}:
+            return None
+        result = str(market.get('result', '')).lower()
+        return result if result in {'yes', 'no'} else None
+    except Exception:
+        return None
 
 GENERAL_TAKER_FEE_RATE = 0.07
 SCALP_TAKE_PROFIT_PCT = 0.15
@@ -82,7 +99,9 @@ def _quote(decision, side, ask=False):
     if no_bid is None and yes_ask is not None:
         no_bid = 1.0 - yes_ask
     value = (yes_ask if ask else yes_bid) if side == "YES" else (no_ask if ask else no_bid)
-    return min(0.99, max(0.01, value)) if value is not None else None
+    if value is None or not 0 <= value <= 1 or (ask and not 0 < value < 1):
+        return None
+    return value
 
 
 def open_position(db_path, starting_cash, decision, risk, spot_price):
@@ -95,8 +114,16 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     entry = _quote(decision, side, ask=True)
     if entry is None:
         return None
+    now = time.time()
+    expires_at = _f(decision.get('kalshi_close_ts'))
+    if expires_at is None:
+        remain = _f(decision.get('seconds_remaining'))
+        expires_at = now + remain if remain is not None else None
+    if expires_at is None or expires_at <= now:
+        return None
     conn = _connect(db_path, starting_cash)
     try:
+        conn.execute('BEGIN IMMEDIATE')
         if conn.execute("SELECT 1 FROM kalshi_paper_positions WHERE status='OPEN' LIMIT 1").fetchone():
             return None
         acct = conn.execute("SELECT cash FROM kalshi_paper_account WHERE id=1").fetchone()
@@ -104,7 +131,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         pct = min(0.25, max(0.0, _f(risk.get("position_pct"), 0.0)))
         budget = cash * pct
         contracts = int(budget // max(entry, 0.01))
-        while contracts > 0 and entry * contracts + kalshi_taker_fee(contracts, entry) > cash:
+        while contracts > 0 and entry * contracts + kalshi_taker_fee(contracts, entry) > min(cash, budget):
             contracts -= 1
         if contracts < 1:
             return None
@@ -124,7 +151,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
             ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
         """, (
             ticker, side, strategy, "OPEN", now, expires_at,
-            _f(decision.get("target_price")), entry, contracts, fee, entry,
+            _f(decision.get("target_price")), entry, contracts, fee, _quote(decision, side, ask=False),
         ))
         conn.commit()
         return {"event": True, "message": f"Opened PAPER {strategy} {side} {contracts}x {ticker} @ {entry:.2f}"}
@@ -133,6 +160,12 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
 
 
 def _close(conn, row, exit_price, reason, charge_exit_fee=True):
+    if not conn.in_transaction:
+        conn.execute('BEGIN IMMEDIATE')
+    row = conn.execute("SELECT * FROM kalshi_paper_positions WHERE id=? AND status='OPEN'", (int(row['id']),)).fetchone()
+    if row is None:
+        conn.rollback()
+        return {'event': False, 'message': 'Paper position already closed'}
     exit_price = min(1.0, max(0.0, float(exit_price)))
     contracts = int(row["contracts"])
     exit_fee = kalshi_taker_fee(contracts, exit_price) if charge_exit_fee else 0.0
@@ -165,7 +198,7 @@ def persistent_lock_side(db_path, ticker, starting_cash=500.0):
         conn.close()
 
 
-def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price):
+def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price, enabled=True, settlement_reader=None):
     conn = _connect(db_path, starting_cash)
     try:
         row = conn.execute("SELECT * FROM kalshi_paper_positions WHERE status='OPEN' ORDER BY id DESC LIMIT 1").fetchone()
@@ -179,10 +212,11 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
             now = time.time()
             expired = row["expires_at"] is not None and now >= float(row["expires_at"])
             if expired:
-                target = _f(row["target_price"])
-                won_yes = target is not None and float(spot_price) >= target
-                payoff = 1.0 if ((side == "YES" and won_yes) or (side == "NO" and not won_yes)) else 0.0
-                return _close(conn, row, payoff, "SETTLEMENT", charge_exit_fee=False)
+                result = (settlement_reader or fetch_settled_result)(str(row['ticker']))
+                if result not in {'yes', 'no'}:
+                    return {'event': False, 'message': 'Awaiting official Kalshi settlement: ' + str(row['ticker'])}
+                payoff = float(side.lower() == result)
+                return _close(conn, row, payoff, 'OFFICIAL_SETTLEMENT:' + result, charge_exit_fee=False)
             if row["strategy"] == "SCALP" and mark is not None:
                 entry = float(row["entry_price"])
                 rel = (mark - entry) / max(entry, 0.01)
@@ -196,6 +230,8 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
             return {"event": False, "message": f"Holding PAPER {row['strategy']} {row['side']} {row['ticker']}"}
     finally:
         conn.close()
+    if not enabled:
+        return {'event': False, 'message': 'AUTO PAPER paused; existing positions remain managed'}
     opened = open_position(db_path, starting_cash, decision, risk, spot_price)
     return opened or {"event": False, "message": "No Kalshi paper-contract action"}
 
