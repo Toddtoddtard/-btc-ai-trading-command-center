@@ -327,15 +327,25 @@ def forecast_path_core(rows, target=None, state=None):
         gap = inputs["target"] - last
         max_influence = max(avg_range * 2.0, last * 0.0015)
         projected_move += float(np.clip(gap * cfg["target_influence"], -max_influence, max_influence))
+    # The raw model move is the ONLY value used for grading, calibration,
+    # backtests and champion/challenger evaluation.  Presentation helpers below
+    # may make a near-flat path visible, but can never alter the scored target.
+    raw_projected_move = float(projected_move)
+    raw_predicted_end = float(last + raw_projected_move)
+    raw_predicted_direction = 1 if raw_projected_move > 0 else -1 if raw_projected_move < 0 else 0
+
+    # Chart-only presentation path.  A minimum visible move and small wave make
+    # the forecast readable on screen without contaminating model evidence.
+    display_move = raw_projected_move
     min_visible = max(avg_range * 0.35, last * 0.00015)
-    if abs(projected_move) < min_visible:
-        projected_move = np.sign(projected_move or directional or 1.0) * min_visible
+    if abs(display_move) < min_visible:
+        display_move = np.sign(display_move or directional or 1.0) * min_visible
     forecast = []
     prev_close = last
     for i in range(1,16):
         progress = i/15.0
         eased = progress*progress*(3.0-2.0*progress)
-        center = last + projected_move*eased
+        center = last + display_move*eased
         wave = np.sin(i*1.35)*avg_range*0.16 + np.cos(i*0.72)*avg_range*0.08
         close = float(center + wave)
         open_ = float(prev_close)
@@ -343,4 +353,11 @@ def forecast_path_core(rows, target=None, state=None):
         wick = max(avg_range*(0.18+0.08*progress), body*0.35)
         forecast.append({"step":i,"open":open_,"high":max(open_,close)+wick,"low":min(open_,close)-wick,"close":close})
         prev_close = close
-    return {"inputs":inputs,"forecast":forecast,"predicted_end":float(forecast[-1]["close"]),"predicted_direction":1 if forecast[-1]["close"] >= last else -1}
+    return {
+        "inputs": inputs,
+        "forecast": forecast,
+        "predicted_end": raw_predicted_end,
+        "predicted_direction": raw_predicted_direction,
+        "raw_projected_move": raw_projected_move,
+        "display_predicted_end": float(forecast[-1]["close"]),
+    }

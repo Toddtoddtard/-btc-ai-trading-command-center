@@ -22,6 +22,7 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
+from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_summary, persistent_lock_side
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
     learned_policy, learned_trade_gate, regime_specialist_weight,
@@ -57,7 +58,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r52-signal-status-colors"
+APP_VERSION = "2026.09.05-r53-kalshi-contract-paper"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -780,100 +781,8 @@ def close_paper_position(price, reason="Exit rule"):
 
 
 def manage_auto_paper(decision, risk, price, hist):
-    """One automatic paper-trading cycle.
-
-    Opens only approved BUY/SELL signals. An open position is exited by
-    take-profit, stop-loss, 15-minute horizon, or a strong reversal.
-    """
-    state = get_auto_state()
-    if not bool(state["enabled"]):
-        return {"event": False, "message": state.get("last_message", "Auto paper trading is off.")}
-
-    now_ts = int(time.time())
-    side = state["side"]
-
-    if side in {"LONG", "SHORT"}:
-        entry = safe_float(state["entry_price"])
-        stop = safe_float(state["stop_loss"])
-        target = safe_float(state["take_profit"])
-        entry_ts = int(state["entry_ts"] or now_ts)
-        elapsed = now_ts - entry_ts
-
-        exit_reason = None
-
-        if decision["action"] in {"LOCK UP", "LOCK DOWN"}:
-            if (
-                pd.notna(decision.get("seconds_remaining"))
-                and decision["seconds_remaining"] <= 0
-            ):
-                exit_reason = "Kalshi market expiration"
-        else:
-            if side == "LONG":
-                if price <= stop:
-                    exit_reason = "stop-loss"
-                elif price >= target:
-                    exit_reason = "take-profit"
-                elif (
-                    decision["action"] == "SCALP DOWN"
-                    and decision["confidence"] >= 0.68
-                    and decision["consensus"] >= 0.35
-                ):
-                    exit_reason = "strong master reversal"
-            else:
-                if price >= stop:
-                    exit_reason = "stop-loss"
-                elif price <= target:
-                    exit_reason = "take-profit"
-                elif (
-                    decision["action"] == "SCALP UP"
-                    and decision["confidence"] >= 0.68
-                    and decision["consensus"] >= 0.35
-                ):
-                    exit_reason = "strong master reversal"
-
-            if (
-                exit_reason is None
-                and pd.notna(decision.get("seconds_remaining"))
-                and decision["seconds_remaining"] <= 0
-            ):
-                exit_reason = "Kalshi market expiration"
-            elif (
-                exit_reason is None
-                and elapsed >= PREDICTION_HORIZON_MIN * 60
-            ):
-                exit_reason = f"{PREDICTION_HORIZON_MIN}-minute horizon"
-
-        if exit_reason:
-            result = close_paper_position(price, exit_reason)
-            return {"event": result["ok"], "message": result["message"]}
-
-        unrealized = ((price / entry) - 1.0) * 100 if side == "LONG" else ((entry / price) - 1.0) * 100
-        msg = (
-            f"AUTO {side} open • {elapsed//60:02d}:{elapsed%60:02d} elapsed • "
-            f"unrealized {unrealized:+.3f}% • stop ${stop:,.2f} • target ${target:,.2f}"
-        )
-        return {"event": False, "message": msg}
-
-    # 60-second cooldown prevents an immediate re-entry after an exit.
-    last_exit_ts = int(state.get("last_exit_ts") or 0)
-    if now_ts - last_exit_ts < 60:
-        return {"event": False, "message": f"Auto paper cooldown: {60 - (now_ts-last_exit_ts)}s."}
-
-    if risk["approved"] and decision["action"] in {"SCALP UP", "SCALP DOWN"}:
-        internal_action = "BUY" if decision["action"] == "SCALP UP" else "SELL"
-        result = open_paper_position(
-            internal_action,
-            price,
-            risk["position_pct"],
-            hist,
-            note=(
-                f"AUTO master={decision['score']:+.3f}, "
-                f"confidence={decision['confidence']:.3f}, consensus={decision['consensus']:.3f}"
-            ),
-        )
-        return {"event": result["ok"], "message": result["message"]}
-
-    return {"event": False, "message": f"Waiting: {risk['reason']}."}
+    """Run one PAPER-only KXBTC15M contract cycle; never sends a live order."""
+    return manage_kalshi_paper_cycle(DB_PATH, STARTING_CASH, decision, risk, price)
 
 
 def execute_paper_trade(action, price, position_pct, hist, note=""):
@@ -1814,19 +1723,12 @@ def master_decision(results, hist, kalshi=None):
         up_market_conflict = pd.notna(up_prob) and up_prob < 0.20
         down_market_conflict = pd.notna(down_prob) and down_prob < 0.20
 
-        # Persistent lock state for the current Kalshi contract.
-        lock_ticker = st.session_state.get("kalshi_lock_ticker", "")
-        lock_side = st.session_state.get("kalshi_lock_side")
+        # Persistent LOCK state comes from the SQLite Kalshi paper position,
+        # so refreshes/new tabs cannot erase a live paper settlement call.
         current_ticker = kctx.get("ticker", "")
-
-        if lock_ticker and (
-            lock_ticker != current_ticker
-            or (pd.notna(remaining) and remaining <= 0)
-        ):
-            st.session_state.pop("kalshi_lock_ticker", None)
-            st.session_state.pop("kalshi_lock_side", None)
-            lock_ticker = ""
-            lock_side = None
+        _db_lock_side = persistent_lock_side(DB_PATH, current_ticker, STARTING_CASH)
+        lock_side = "UP" if _db_lock_side == "YES" else "DOWN" if _db_lock_side == "NO" else None
+        lock_ticker = current_ticker if lock_side else ""
 
         scalp_up_candidate = (
             strong_move_up
@@ -1869,14 +1771,10 @@ def master_decision(results, hist, kalshi=None):
             locked_side = None
 
         elif lock_up:
-            st.session_state["kalshi_lock_ticker"] = current_ticker
-            st.session_state["kalshi_lock_side"] = "UP"
             action = "LOCK UP"
             locked_side = "UP"
 
         elif lock_down:
-            st.session_state["kalshi_lock_ticker"] = current_ticker
-            st.session_state["kalshi_lock_side"] = "DOWN"
             action = "LOCK DOWN"
             locked_side = "DOWN"
 
@@ -1995,6 +1893,11 @@ def master_decision(results, hist, kalshi=None):
         "risk_level": risk_level,
         "reason": " • ".join(reason_parts),
         "kalshi_ticker": kctx.get("ticker", ""),
+        "kalshi_close_ts": (pd.Timestamp(kctx.get("close_time")).timestamp() if kctx.get("close_time") else np.nan),
+        "yes_bid_dollars": safe_float((kctx.get("market") or {}).get("yes_bid_dollars")),
+        "yes_ask_dollars": safe_float((kctx.get("market") or {}).get("yes_ask_dollars")),
+        "no_bid_dollars": safe_float((kctx.get("market") or {}).get("no_bid_dollars")),
+        "no_ask_dollars": safe_float((kctx.get("market") or {}).get("no_ask_dollars")),
         "seconds_remaining": remaining,
         "up_probability": up_prob,
         "down_probability": down_prob,
@@ -2014,15 +1917,12 @@ def risk_evaluate(decision, account, hist, futures):
     confidence = decision["confidence"]
     consensus = decision["consensus"]
 
-    if decision["action"] in {"HOLD", "LOCK UP", "LOCK DOWN"}:
-        reason = "LOCK: hold current Kalshi call to expiration" if decision["action"].startswith("LOCK") else "HOLD signal"
-        return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": reason}
-    if source_health < 0.60:
-        return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": "Market-data health below reliability floor"}
-    if confidence < learned_conf_floor:
-        return {"approved": False, "position_pct": 0.0, "risk_score": 0.9, "reason": f"Confidence below learned floor ({learned_conf_floor:.0%})"}
-    if consensus < 0.30:
-        return {"approved": False, "position_pct": 0.0, "risk_score": 0.8, "reason": "Specialist consensus too low"}
+    if decision["action"] in {"HOLD", "WAIT"}:
+        return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": "No trade signal"}
+
+    # Confidence, consensus and source-health are authoritative upstream gates.
+    # Do not silently apply a second, conflicting threshold here.  This layer
+    # only sizes an already-approved PAPER action and controls exposure.
 
     volatility_penalty = min(0.55, max(0.0, (atr_pct - 0.002) * 100))
     base = 0.04 + (confidence - 0.60) * 0.22 + consensus * 0.04
@@ -2030,7 +1930,7 @@ def risk_evaluate(decision, account, hist, futures):
     risk_score = clamp(0.6 - confidence * 0.35 - consensus * 0.15 + volatility_penalty, 0, 1)
 
     state = get_auto_state()
-    if state["side"] != "NONE":
+    if state["side"] != "NONE" and not str(decision.get("action", "")).startswith("LOCK"):
         return {
             "approved": False,
             "position_pct": 0.0,
@@ -2038,7 +1938,7 @@ def risk_evaluate(decision, account, hist, futures):
             "reason": f"Paper {state['side']} already open",
         }
 
-    return {"approved": True, "position_pct": position_pct, "risk_score": risk_score, "reason": "Paper-trade risk checks passed"}
+    return {"approved": True, "position_pct": position_pct, "risk_score": risk_score, "reason": "Authoritative decision gate passed; paper exposure sized"}
 
 
 # ============================================================
@@ -5519,6 +5419,20 @@ def live_dashboard():
 
     with tab_paper:
         st.subheader("Automatic Paper Trading")
+
+        _kp = paper_summary(DB_PATH, STARTING_CASH)
+        st.caption("PRIMARY P/L EVIDENCE — simulated KXBTC15M contracts filled at ask, exited at bid/settlement; general Kalshi taker-fee model applied.")
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")
+        k2.metric("Total P/L", f"${_kp['total_pnl']:+,.2f}")
+        k3.metric("Realized P/L", f"${_kp['realized_pnl']:+,.2f}")
+        k4.metric("Open P/L", f"${_kp['unrealized_pnl']:+,.2f}")
+        _pf = _kp.get('profit_factor')
+        k5.metric("Contract Profit Factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))
+        _open_contract = _kp.get("open_position")
+        if _open_contract:
+            st.info(f"OPEN PAPER {_open_contract['strategy']} {_open_contract['side']} • {_open_contract['contracts']} contracts • {_open_contract['ticker']} • entry ${_open_contract['entry_price']:.2f}")
+        st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")
 
         # V5 profitability scorecard uses resolved paper/prediction outcomes and
         # subtracts simulated fees/slippage before calculating expectancy.
