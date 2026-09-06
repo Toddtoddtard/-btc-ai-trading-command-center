@@ -20,8 +20,17 @@ def fetch_settled_result(ticker):
         return None
 
 GENERAL_TAKER_FEE_RATE = 0.07
-SCALP_TAKE_PROFIT_PCT = 0.15
+# SCALP positions are short-duration trades: realize a net 25% gain (the
+# midpoint of the 20-30% target band) instead of riding them to settlement.
+SCALP_TAKE_PROFIT_PCT = 0.25
 SCALP_STOP_LOSS_PCT = 0.10
+
+# LOCK positions are settlement theses. They ignore normal signal noise and may
+# exit early only when both the master view and high-confidence Whale AI show a
+# strong reversal.
+LOCK_WHALE_REVERSAL_SCORE = 0.75
+LOCK_WHALE_REVERSAL_CONFIDENCE = 0.80
+LOCK_MASTER_REVERSAL_SCORE = 0.20
 
 
 def _f(value, default=None):
@@ -87,6 +96,23 @@ def _side_from_action(action):
     if a in {"SCALP DOWN", "LOCK DOWN"}:
         return "NO"
     return None
+
+
+def _strong_whale_reversal(decision, side):
+    whale_score = _f(decision.get("whale_score"), 0.0)
+    whale_confidence = _f(decision.get("whale_confidence"), 0.0)
+    master_score = _f(decision.get("score"), 0.0)
+    if whale_confidence < LOCK_WHALE_REVERSAL_CONFIDENCE:
+        return False
+    if side == "YES":
+        return (
+            whale_score <= -LOCK_WHALE_REVERSAL_SCORE
+            and master_score <= -LOCK_MASTER_REVERSAL_SCORE
+        )
+    return (
+        whale_score >= LOCK_WHALE_REVERSAL_SCORE
+        and master_score >= LOCK_MASTER_REVERSAL_SCORE
+    )
 
 
 def _quote(decision, side, ask=False):
@@ -224,15 +250,26 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                     return {'event': False, 'message': 'Awaiting official Kalshi settlement: ' + str(row['ticker'])}
                 payoff = float(side.lower() == result)
                 return _close(conn, row, payoff, 'OFFICIAL_SETTLEMENT:' + result, charge_exit_fee=False)
+            if row["strategy"] == "LOCK" and mark is not None:
+                if _strong_whale_reversal(decision, side):
+                    return _close(conn, row, mark, "WHALE_REVERSAL")
             if row["strategy"] == "SCALP" and mark is not None:
-                entry = float(row["entry_price"])
-                rel = (mark - entry) / max(entry, 0.01)
+                contracts = int(row["contracts"])
+                entry_cost = (
+                    float(row["entry_price"]) * contracts
+                    + float(row["entry_fee"])
+                )
+                exit_value = (
+                    mark * contracts
+                    - kalshi_taker_fee(contracts, mark)
+                )
+                net_return = (exit_value - entry_cost) / max(entry_cost, 0.01)
                 action_side = _side_from_action(decision.get("action"))
                 if action_side and action_side != side:
                     return _close(conn, row, mark, "OPPOSITE_SIGNAL")
-                if rel >= SCALP_TAKE_PROFIT_PCT:
-                    return _close(conn, row, mark, "TAKE_PROFIT")
-                if rel <= -SCALP_STOP_LOSS_PCT:
+                if net_return >= SCALP_TAKE_PROFIT_PCT:
+                    return _close(conn, row, mark, "TAKE_PROFIT_25_PCT")
+                if net_return <= -SCALP_STOP_LOSS_PCT:
                     return _close(conn, row, mark, "STOP_LOSS")
             return {"event": False, "message": f"Holding PAPER {row['strategy']} {row['side']} {row['ticker']}"}
     finally:
