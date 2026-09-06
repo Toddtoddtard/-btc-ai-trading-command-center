@@ -5458,21 +5458,22 @@ def live_dashboard():
 
         _open_contract = _kp.get("open_position")
         if _open_contract:
-            _paper_direction = "UP" if _open_contract["side"] == "YES" else "DOWN"
+            display_position_side = "UP" if _open_contract["side"] == "YES" else "DOWN"
             st.info(
-                f"OPEN PAPER {_open_contract['strategy']} {_paper_direction} • "
+                f"OPEN PAPER {_open_contract['strategy']} {display_position_side} • "
                 f"Amount: ${_open_contract['amount_down']:,.2f} • "
                 f"Kalshi entry: {_open_contract['entry_price'] * 100:.0f}%"
             )
 
         auto_state = get_auto_state()
+        _status_side = (
+            "UP" if _open_contract and _open_contract["side"] == "YES"
+            else "DOWN" if _open_contract
+            else "NONE"
+        )
         status1, status2, status3, status4 = st.columns(4)
         status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
-        status2.metric(
-            "Contract position",
-            ("UP" if _open_contract["side"] == "YES" else "DOWN")
-            if _open_contract else "NONE",
-        )
+        status2.metric("Contract position", _status_side)
         status3.metric("Kalshi call", decision["action"])
         status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
 
