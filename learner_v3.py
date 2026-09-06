@@ -10,6 +10,7 @@ import pandas as pd
 
 import learner as legacy
 from ai_core import forecast_path_core
+from learning_prices import closed_price_at
 
 
 def safe_float(value, default=0.0):
@@ -280,10 +281,10 @@ def enhanced_grade(state, df):
         return False
 
     expiry = pd.to_datetime(pending_copy["expires_at"], unit="s", utc=True)
-    nearest = df.iloc[(df.time - expiry).abs().argsort()[:1]]
-    if nearest.empty:
+    actual = closed_price_at(df, expiry)
+    if actual is None:
         return False
-    actual = safe_float(nearest.iloc[0].close, safe_float(pending_copy.get("start_price"), 0.0))
+    actual = safe_float(actual, safe_float(pending_copy.get("start_price"), 0.0))
     start = safe_float(pending_copy.get("start_price"), actual)
     predicted_end = safe_float(pending_copy.get("predicted_end"), start)
     actual_direction = 1 if actual >= start else -1
