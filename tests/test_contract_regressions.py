@@ -58,7 +58,7 @@ class ContractRegressionTests(unittest.TestCase):
         summary = engine.paper_summary(self.db)
         self.assertGreaterEqual(summary['cash'], 450)
         self.assertAlmostEqual(summary['open_position']['amount_down'], 500-summary['cash'])
-        self.assertIn('Amount down: $', event['message'])
+        self.assertIn('Amount: $', event['message'])
         self.assertNotIn(' contracts ', event['message'])
         self.assertNotIn(' @ ', event['message'])
 
