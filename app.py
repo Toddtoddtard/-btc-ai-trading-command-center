@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r53-kalshi-contract-paper"
+APP_VERSION = "2026.09.06-r57-one-journal-row-per-window"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -2997,10 +2997,28 @@ def add_specialist_learning_trends(df):
 
 
 def maybe_record_prediction(decision, price, min_seconds=60):
+    """Record one primary prediction per Kalshi 15-minute contract window.
+
+    Dashboard refreshes may recalculate the call many times, but overlapping
+    snapshots are correlated evidence and must not be counted as independent
+    learning samples. min_seconds remains accepted for older callers.
+    """
+    del min_seconds
     now_ts = int(time.time())
+    close_ts = safe_float(decision.get("kalshi_close_ts"))
+    if pd.notna(close_ts) and float(close_ts) > now_ts:
+        target_ts = int(close_ts)
+    else:
+        horizon_seconds = int(PREDICTION_HORIZON_MIN * 60)
+        target_ts = ((now_ts // horizon_seconds) + 1) * horizon_seconds
+
     with db_conn() as conn:
-        row = conn.execute("SELECT created_ts FROM predictions ORDER BY id DESC LIMIT 1").fetchone()
-        if row and now_ts - int(row["created_ts"]) < min_seconds:
+        # target_ts identifies the contract window. Existing rows are preserved,
+        # but no refresh or changed call can create another row for this window.
+        if conn.execute(
+            "SELECT 1 FROM predictions WHERE target_ts=? LIMIT 1",
+            (target_ts,),
+        ).fetchone():
             return False
         conn.execute(
             """INSERT INTO predictions
@@ -3009,7 +3027,7 @@ def maybe_record_prediction(decision, price, min_seconds=60):
             (
                 now_ts,
                 utc_now().isoformat(),
-                now_ts + PREDICTION_HORIZON_MIN * 60,
+                target_ts,
                 price,
                 decision["action"],
                 decision["score"],
