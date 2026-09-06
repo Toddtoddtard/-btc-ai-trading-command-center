@@ -97,7 +97,11 @@ class ContractRegressionTests(unittest.TestCase):
         self.decision['yes_bid_dollars'] = .70
         closed = self.cycle()
         self.assertTrue(closed['event'])
-        self.assertIn('TAKE_PROFIT_25_PCT', closed['message'])
+        with engine._connect(self.db) as conn:
+            reason = conn.execute(
+                'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
+            ).fetchone()['exit_reason']
+        self.assertEqual(reason, 'TAKE_PROFIT_25_PCT')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_ignores_normal_opposite_signal(self):
@@ -122,7 +126,11 @@ class ContractRegressionTests(unittest.TestCase):
         )
         result = self.cycle()
         self.assertTrue(result['event'])
-        self.assertIn('WHALE_REVERSAL', result['message'])
+        with engine._connect(self.db) as conn:
+            reason = conn.execute(
+                'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
+            ).fetchone()['exit_reason']
+        self.assertEqual(reason, 'WHALE_REVERSAL')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_paused_blocks_entry_but_settles_existing(self):
