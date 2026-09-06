@@ -5455,7 +5455,7 @@ def live_dashboard():
             st.info(
                 f"OPEN PAPER {_open_contract['strategy']} {_paper_direction} • "
                 f"Amount: ${_open_contract['amount_down']:,.2f} • "
-                f"{_open_contract['ticker']}"
+                f"Kalshi entry: {_open_contract['entry_price'] * 100:.0f}%"
             )
         st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")
 
