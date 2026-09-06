@@ -1,8 +1,9 @@
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
-from learner_v31 import challenger_qualifies
+from learner_v31 import _historical_expiry_frame, challenger_qualifies
 from reliability_v31 import (
     calibrate_confidence,
     exact_expiry_row,
@@ -25,10 +26,30 @@ class ReliabilityTests(unittest.TestCase):
         df = pd.DataFrame({"time": [now], "close": [100.0]})
         self.assertIsNone(exact_expiry_row(df, (now + pd.Timedelta(minutes=5)).timestamp(), 75))
 
-    def test_exact_expiry_accepts_nearby(self):
+    def test_exact_expiry_uses_candle_that_closed_at_expiry(self):
         expiry = pd.Timestamp("2026-09-04T12:15:00Z")
-        df = pd.DataFrame({"time": [expiry + pd.Timedelta(seconds=40)], "close": [100.0]})
-        self.assertIsNotNone(exact_expiry_row(df, expiry.timestamp(), 75))
+        df = pd.DataFrame({
+            "time": [expiry - pd.Timedelta(minutes=1), expiry],
+            "close": [100.0, 999.0],
+        })
+        row = exact_expiry_row(df, expiry.timestamp(), 75)
+        self.assertEqual(float(row["close"]), 100.0)
+
+    def test_exact_expiry_rejects_future_candle(self):
+        expiry = pd.Timestamp("2026-09-04T12:15:00Z")
+        df = pd.DataFrame({"time": [expiry + pd.Timedelta(seconds=40)], "close": [999.0]})
+        self.assertIsNone(exact_expiry_row(df, expiry.timestamp(), 75))
+
+    def test_stale_expiry_fetches_the_candle_ending_at_expiry(self):
+        expiry = pd.Timestamp("2026-09-04T12:15:00Z")
+        open_ms = int((expiry - pd.Timedelta(minutes=1)).timestamp() * 1000)
+        kline = [open_ms, "99", "102", "98", "101", "1", open_ms + 59999, "1", 1, "1", "1", "0"]
+        with patch("learner_v31.legacy.get", return_value=[kline]) as mocked:
+            frame = _historical_expiry_frame(expiry.timestamp())
+        self.assertEqual(float(exact_expiry_row(frame, expiry.timestamp(), 75)["close"]), 101.0)
+        params = mocked.call_args.args[1]
+        self.assertEqual(params["startTime"], open_ms)
+        self.assertEqual(params["endTime"], int(expiry.timestamp() * 1000) - 1)
 
     def test_regime_weight_shrinks_small_sample(self):
         state = {"adaptive_weight": 1.2, "regimes": {"RANGE": {"samples": 2, "adaptive_weight": 0.5}}}

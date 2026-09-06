@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 import learner as legacy
 import learner_v3 as v3
@@ -73,18 +74,52 @@ def _tag_latest_specialist_history_with_regime(state, pending):
             row.setdefault("regime", regime)
 
 
+def _historical_expiry_frame(expiry_ts):
+    """Fetch the exact one-minute candle that CLOSED at a stale expiry."""
+    expiry = int(float(expiry_ts))
+    raw = legacy.get(
+        legacy.SPOT + "/api/v3/klines",
+        {
+            "symbol": "BTCUSDT",
+            "interval": "1m",
+            "startTime": (expiry - 60) * 1000,
+            "endTime": expiry * 1000 - 1,
+            "limit": 1,
+        },
+    )
+    if not raw:
+        return None
+    cols = ["ot", "open", "high", "low", "close", "volume", "ct", "qv", "trades", "tb", "tq", "x"]
+    frame = pd.DataFrame(raw, columns=cols)
+    for key in ["open", "high", "low", "close", "volume"]:
+        frame[key] = pd.to_numeric(frame[key], errors="coerce")
+    frame["time"] = pd.to_datetime(frame["ot"], unit="ms", utc=True, errors="coerce")
+    return frame.dropna(subset=["time", "close"])
+
+
 def strict_grade(state, df):
     pending = copy.deepcopy(state.get("pending"))
     if not pending:
         return False
     if time.time() < safe_float(pending.get("expires_at"), float("inf")):
         return False
-    row = exact_expiry_row(df, pending.get("expires_at"), tolerance_seconds=75)
+
+    grade_df = df
+    row = exact_expiry_row(grade_df, pending.get("expires_at"), tolerance_seconds=75)
     if row is None:
-        state.setdefault("status", {})["last_grade_skipped_reason"] = "No candle within 75s of exact expiry"
+        try:
+            recovered = _historical_expiry_frame(pending.get("expires_at"))
+        except Exception as exc:
+            recovered = None
+            state.setdefault("status", {})["last_grade_recovery_error"] = str(exc)
+        if recovered is not None and not recovered.empty:
+            grade_df = recovered
+            row = exact_expiry_row(grade_df, pending.get("expires_at"), tolerance_seconds=75)
+    if row is None:
+        state.setdefault("status", {})["last_grade_skipped_reason"] = "Exact closed expiry candle unavailable"
         return False
 
-    graded = v3.enhanced_grade(state, df)
+    graded = v3.enhanced_grade(state, grade_df)
     if not graded:
         return False
 
@@ -96,6 +131,7 @@ def strict_grade(state, df):
         last["master_base_score"] = safe_float(pending.get("master_base_score"), 0.0)
         last["snapshot_available"] = bool(pending.get("snapshot"))
     state.setdefault("status", {}).pop("last_grade_skipped_reason", None)
+    state.setdefault("status", {}).pop("last_grade_recovery_error", None)
     return True
 
 
