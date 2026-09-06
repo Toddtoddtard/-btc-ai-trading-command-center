@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from learner_v3 import ensure_v3
 from learner_v31 import _historical_expiry_frame, challenger_qualifies
 from reliability_v31 import (
     calibrate_confidence,
@@ -50,6 +51,12 @@ class ReliabilityTests(unittest.TestCase):
         params = mocked.call_args.args[1]
         self.assertEqual(params["startTime"], open_ms)
         self.assertEqual(params["endTime"], int(expiry.timestamp() * 1000) - 1)
+
+    def test_old_state_gets_history_for_every_current_specialist(self):
+        state = {"forecast": {}, "specialists": {}, "specialist_history": {}}
+        ensure_v3(state)
+        self.assertIn("Political Event Watch AI", state["specialist_history"])
+        self.assertEqual(state["specialist_history"]["Political Event Watch AI"], [])
 
     def test_regime_weight_shrinks_small_sample(self):
         state = {"adaptive_weight": 1.2, "regimes": {"RANGE": {"samples": 2, "adaptive_weight": 0.5}}}
