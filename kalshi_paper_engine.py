@@ -285,3 +285,48 @@ def paper_summary(db_path, starting_cash=500.0):
         }
     finally:
         conn.close()
+
+def paper_history(db_path, starting_cash=500.0, limit=100):
+    """Return the automatic Kalshi trade ledger from its authoritative table."""
+    conn = _connect(db_path, starting_cash)
+    try:
+        rows = conn.execute(
+            """SELECT * FROM kalshi_paper_positions
+               ORDER BY opened_at DESC, id DESC LIMIT ?""",
+            (max(1, min(1000, int(limit))),),
+        ).fetchall()
+        history = []
+        for row in rows:
+            item = dict(row)
+            contracts = int(item["contracts"])
+            entry = float(item["entry_price"])
+            amount = entry * contracts + float(item["entry_fee"])
+            is_open = str(item["status"]).upper() == "OPEN"
+            if is_open:
+                mark = _f(item.get("last_mark"), entry)
+                pnl = mark * contracts - kalshi_taker_fee(contracts, mark) - amount
+                result = "OPEN"
+                current_or_exit = mark
+            else:
+                pnl = _f(item.get("pnl"), 0.0)
+                result = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "EVEN")
+                current_or_exit = _f(item.get("exit_price"))
+
+            history.append({
+                "status": "OPEN" if is_open else "CLOSED",
+                "direction": "UP" if item["side"] == "YES" else "DOWN",
+                "strategy": item["strategy"],
+                "amount": amount,
+                "kalshi_entry_pct": entry * 100.0,
+                "current_or_exit_pct": (
+                    current_or_exit * 100.0 if current_or_exit is not None else None
+                ),
+                "result": result,
+                "pnl": pnl,
+                "opened_at": item["opened_at"],
+                "closed_at": item.get("closed_at"),
+                "expires_at": item.get("expires_at"),
+            })
+        return history
+    finally:
+        conn.close()
