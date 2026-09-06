@@ -17,7 +17,9 @@ class ContractRegressionTests(unittest.TestCase):
         self.risk = dict(approved=True, position_pct=.1)
 
     def open(self):
-        self.assertTrue(engine.open_position(self.db, 500, self.decision, self.risk, 100))
+        result = engine.open_position(self.db, 500, self.decision, self.risk, 100)
+        self.assertTrue(result)
+        return result
 
     def expire(self):
         with engine._connect(self.db) as conn:
@@ -52,8 +54,13 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(engine.paper_summary(self.db)['losses'], 1)
 
     def test_allocation_includes_fees(self):
-        self.open()
-        self.assertGreaterEqual(engine.paper_summary(self.db)['cash'], 450)
+        event = self.open()
+        summary = engine.paper_summary(self.db)
+        self.assertGreaterEqual(summary['cash'], 450)
+        self.assertAlmostEqual(summary['open_position']['amount_down'], 500-summary['cash'])
+        self.assertIn('Amount down: $', event['message'])
+        self.assertNotIn(' contracts ', event['message'])
+        self.assertNotIn(' @ ', event['message'])
 
     def test_paused_blocks_entry_but_settles_existing(self):
         self.cycle(enabled=False)
