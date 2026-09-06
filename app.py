@@ -1907,6 +1907,12 @@ def master_decision(results, hist, kalshi=None):
         "policy": policy,
         "source_health": source_health,
         "regime": regime_name,
+        "whale_score": safe_float(
+            (results.get("Whale AI") or {}).get("score"), 0.0
+        ),
+        "whale_confidence": safe_float(
+            (results.get("Whale AI") or {}).get("confidence"), 0.0
+        ),
     }
 
 
