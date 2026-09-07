@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.07-r63-unified-paper-ledger"
+APP_VERSION = "2026.09.07-r64-max-entry-75"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5517,6 +5517,10 @@ def live_dashboard():
             f"${_next_amount:,.2f}" if risk["approved"] and not _open_contract else "$0.00",
         )
         st.caption(risk["reason"])
+        st.caption(
+            "Entry rule: automatic SCALP and LOCK trades are rejected above "
+            "a 75% Kalshi contract price."
+        )
 
         st.subheader("Automatic Kalshi Paper Trade Log")
         _contract_history = paper_history(DB_PATH, STARTING_CASH, limit=100)

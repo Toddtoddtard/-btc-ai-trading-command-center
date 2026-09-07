@@ -168,6 +168,26 @@ class ContractRegressionTests(unittest.TestCase):
         self.cycle('yes', enabled=False)
         self.assertEqual(engine.paper_summary(self.db)['samples'], 1)
 
+    def test_automatic_entries_stop_above_seventy_five_percent(self):
+        self.decision['yes_ask_dollars'] = .85
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('85%', skipped['message'])
+        self.assertIn('75% maximum', skipped['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+        self.assertIsNone(
+            engine.open_position(self.db, 500, self.decision, self.risk, 100)
+        )
+
+        # Exactly 75% remains eligible; only prices above the ceiling are denied.
+        self.decision['yes_ask_dollars'] = .75
+        opened = self.cycle()
+        self.assertTrue(opened['event'])
+        self.assertEqual(
+            engine.paper_summary(self.db)['open_position']['entry_price'],
+            .75,
+        )
+
     def test_expired_or_invalid_quote_cannot_open(self):
         self.decision['kalshi_close_ts'] = 1
         self.assertIsNone(engine.open_position(self.db, 500, self.decision, self.risk, 100))

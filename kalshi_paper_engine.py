@@ -20,6 +20,8 @@ def fetch_settled_result(ticker):
         return None
 
 GENERAL_TAKER_FEE_RATE = 0.07
+MAX_ENTRY_PRICE = 0.75
+
 # SCALP positions are short-duration trades: realize a net 25% gain (the
 # midpoint of the 20-30% target band) instead of riding them to settlement.
 SCALP_TAKE_PROFIT_PCT = 0.25
@@ -138,7 +140,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if not ticker:
         return None
     entry = _quote(decision, side, ask=True)
-    if entry is None:
+    if entry is None or entry > MAX_ENTRY_PRICE:
         return None
     now = time.time()
     expires_at = _f(decision.get('kalshi_close_ts'))
@@ -276,6 +278,16 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
         conn.close()
     if not enabled:
         return {'event': False, 'message': 'AUTO PAPER paused; existing positions remain managed'}
+    entry_side = _side_from_action(decision.get("action"))
+    entry_price = _quote(decision, entry_side, ask=True) if entry_side else None
+    if entry_price is not None and entry_price > MAX_ENTRY_PRICE:
+        return {
+            "event": False,
+            "message": (
+                f"Skipped PAPER entry: Kalshi price {entry_price * 100:.0f}% "
+                f"is above the {MAX_ENTRY_PRICE * 100:.0f}% maximum."
+            ),
+        }
     opened = open_position(db_path, starting_cash, decision, risk, spot_price)
     return opened or {"event": False, "message": "No Kalshi paper-contract action"}
 
