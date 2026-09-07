@@ -22,7 +22,6 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
-from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_summary, persistent_lock_side
 from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side
 from learning_prices import closed_price_at
 from reliability_v31 import (
@@ -60,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.05-r53-kalshi-contract-paper"
+APP_VERSION = "2026.09.07-r63-unified-paper-ledger"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5446,20 +5445,6 @@ def live_dashboard():
 
     with tab_paper:
         st.subheader("Automatic Paper Trading")
-
-        _kp = paper_summary(DB_PATH, STARTING_CASH)
-        st.caption("PRIMARY P/L EVIDENCE — simulated KXBTC15M contracts filled at ask, exited at bid/settlement; general Kalshi taker-fee model applied.")
-        k1, k2, k3, k4, k5 = st.columns(5)
-        k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")
-        k2.metric("Total P/L", f"${_kp['total_pnl']:+,.2f}")
-        k3.metric("Realized P/L", f"${_kp['realized_pnl']:+,.2f}")
-        k4.metric("Open P/L", f"${_kp['unrealized_pnl']:+,.2f}")
-        _pf = _kp.get('profit_factor')
-        k5.metric("Contract Profit Factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))
-        _open_contract = _kp.get("open_position")
-        if _open_contract:
-            st.info(f"OPEN PAPER {_open_contract['strategy']} {_open_contract['side']} • {_open_contract['contracts']} contracts • {_open_contract['ticker']} • entry ${_open_contract['entry_price']:.2f}")
-        st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")
 
         _kp = paper_summary(DB_PATH, STARTING_CASH)
         st.caption(

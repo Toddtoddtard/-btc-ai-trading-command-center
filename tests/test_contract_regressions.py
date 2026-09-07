@@ -1,6 +1,7 @@
 import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 import kalshi_paper_engine as engine
 
@@ -132,6 +133,32 @@ class ContractRegressionTests(unittest.TestCase):
             ).fetchone()['exit_reason']
         self.assertEqual(reason, 'WHALE_REVERSAL')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_paper_tab_has_one_authoritative_summary(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / 'app.py').read_text()
+        paper_tab = source.split('    with tab_paper:', 1)[1].split(
+            '    with tab_journal:', 1
+        )[0]
+        canonical_import = (
+            'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
+            'paper_history, paper_summary, persistent_lock_side'
+        )
+        legacy_import = (
+            'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
+            'paper_summary, persistent_lock_side'
+        )
+        self.assertEqual(paper_tab.count('k1.metric("Contract Equity"'), 1)
+        self.assertEqual(paper_tab.count('Automatic Kalshi Paper Trade Log'), 1)
+        self.assertNotIn("['contracts']} contracts", paper_tab)
+        self.assertNotIn("['ticker']} • entry", paper_tab)
+        self.assertEqual(source.count(canonical_import), 1)
+        self.assertNotIn(legacy_import + '\n', source)
+
+        installer = (
+            root / 'tools' / 'apply_kalshi_contract_paper_v1.py'
+        ).read_text()
+        self.assertNotIn('APP_VERSION = "', installer)
 
     def test_paused_blocks_entry_but_settles_existing(self):
         self.cycle(enabled=False)
