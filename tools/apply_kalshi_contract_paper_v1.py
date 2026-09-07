@@ -55,15 +55,15 @@ paper_anchor = '    with tab_paper:\n        st.subheader("Automatic Paper Tradi
 legacy_paper_ui = '''        _kp = paper_summary(DB_PATH, STARTING_CASH)
         st.caption("PRIMARY P/L EVIDENCE — simulated KXBTC15M contracts filled at ask, exited at bid/settlement; general Kalshi taker-fee model applied.")
         k1, k2, k3, k4, k5 = st.columns(5)
-        k1.metric("Contract Equity", f"$\{_kp['equity']:,.2f}", f"\{_kp['return_pct']:+.2f}%")
-        k2.metric("Total P/L", f"$\{_kp['total_pnl']:+,.2f}")
-        k3.metric("Realized P/L", f"$\{_kp['realized_pnl']:+,.2f}")
-        k4.metric("Open P/L", f"$\{_kp['unrealized_pnl']:+,.2f}")
+        k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")
+        k2.metric("Total P/L", f"${_kp['total_pnl']:+,.2f}")
+        k3.metric("Realized P/L", f"${_kp['realized_pnl']:+,.2f}")
+        k4.metric("Open P/L", f"${_kp['unrealized_pnl']:+,.2f}")
         _pf = _kp.get('profit_factor')
-        k5.metric("Contract Profit Factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"\{_pf:.2f}"))
+        k5.metric("Contract Profit Factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))
         _open_contract = _kp.get("open_position")
         if _open_contract:
-            st.info(f"OPEN PAPER \{_open_contract['strategy']} \{_open_contract['side']} • \{_open_contract['contracts']} contracts • \{_open_contract['ticker']} • entry $\{_open_contract['entry_price']:.2f}")
+            st.info(f"OPEN PAPER {_open_contract['strategy']} {_open_contract['side']} • {_open_contract['contracts']} contracts • {_open_contract['ticker']} • entry ${_open_contract['entry_price']:.2f}")
         st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")
 
 '''
