@@ -8,9 +8,14 @@ runpy.run_path("tools/apply_external_review_phase1.py", run_name="__main__")
 p = Path("app.py")
 s = p.read_text()
 
-imp = "from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_summary, persistent_lock_side\n"
+imp = "from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side\n"
+legacy_imp = "from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_summary, persistent_lock_side\n"
 anchor = "from bot_intelligence_dashboard import render_bot_intelligence_dashboard\n"
-if imp not in s:
+if imp in s:
+    s = s.replace(legacy_imp, "", 1)
+elif legacy_imp in s:
+    s = s.replace(legacy_imp, imp, 1)
+else:
     if anchor not in s:
         raise SystemExit("Kalshi paper import anchor not found")
     s = s.replace(anchor, anchor + imp, 1)
@@ -43,16 +48,31 @@ if wrapper not in s:
         raise SystemExit(f"manage_auto_paper replacement failed ({n})")
     s = s2
 
-# Make the correct-instrument P/L the first and explicitly primary paper scorecard.
+# Keep the automatic paper tab on one authoritative Kalshi-ledger surface.
+# Older installer runs inserted this legacy scorecard above the preferred one;
+# remove it if encountered and never reinsert it on future main pushes.
 paper_anchor = '    with tab_paper:\n        st.subheader("Automatic Paper Trading")\n'
-paper_ui = '''    with tab_paper:\n        st.subheader("Automatic Paper Trading")\n\n        _kp = paper_summary(DB_PATH, STARTING_CASH)\n        st.caption("PRIMARY P/L EVIDENCE — simulated KXBTC15M contracts filled at ask, exited at bid/settlement; general Kalshi taker-fee model applied.")\n        k1, k2, k3, k4, k5 = st.columns(5)\n        k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")\n        k2.metric("Total P/L", f"${_kp['total_pnl']:+,.2f}")\n        k3.metric("Realized P/L", f"${_kp['realized_pnl']:+,.2f}")\n        k4.metric("Open P/L", f"${_kp['unrealized_pnl']:+,.2f}")\n        _pf = _kp.get('profit_factor')\n        k5.metric("Contract Profit Factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"))\n        _open_contract = _kp.get("open_position")\n        if _open_contract:\n            st.info(f"OPEN PAPER {_open_contract['strategy']} {_open_contract['side']} • {_open_contract['contracts']} contracts • {_open_contract['ticker']} • entry ${_open_contract['entry_price']:.2f}")\n        st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")\n'''
-if "PRIMARY P/L EVIDENCE — simulated KXBTC15M contracts" not in s:
-    if paper_anchor not in s:
-        raise SystemExit("Paper tab anchor not found")
-    s = s.replace(paper_anchor, paper_ui, 1)
+legacy_paper_ui = '''        _kp = paper_summary(DB_PATH, STARTING_CASH)
+        st.caption("PRIMARY P/L EVIDENCE — simulated KXBTC15M contracts filled at ask, exited at bid/settlement; general Kalshi taker-fee model applied.")
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Contract Equity", f"$\{_kp['equity']:,.2f}", f"\{_kp['return_pct']:+.2f}%")
+        k2.metric("Total P/L", f"$\{_kp['total_pnl']:+,.2f}")
+        k3.metric("Realized P/L", f"$\{_kp['realized_pnl']:+,.2f}")
+        k4.metric("Open P/L", f"$\{_kp['unrealized_pnl']:+,.2f}")
+        _pf = _kp.get('profit_factor')
+        k5.metric("Contract Profit Factor", "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"\{_pf:.2f}"))
+        _open_contract = _kp.get("open_position")
+        if _open_contract:
+            st.info(f"OPEN PAPER \{_open_contract['strategy']} \{_open_contract['side']} • \{_open_contract['contracts']} contracts • \{_open_contract['ticker']} • entry $\{_open_contract['entry_price']:.2f}")
+        st.caption("Prediction-quality statistics below remain useful for calibration, but they are not the profitability evidence chain.")
 
-# Bump version without depending on the exact prior release string.
-s = re.sub(r'APP_VERSION = "[^"]+"', 'APP_VERSION = "2026.09.05-r53-kalshi-contract-paper"', s, count=1)
+'''
+if legacy_paper_ui in s:
+    s = s.replace(legacy_paper_ui, "", 1)
+if paper_anchor not in s or "Automatic Kalshi Paper Trade Log" not in s:
+    raise SystemExit("Canonical automatic paper ledger UI not found")
+if s.count('k1.metric("Contract Equity"') != 1:
+    raise SystemExit("Automatic paper summary must appear exactly once")
 
 p.write_text(s)
 
@@ -61,8 +81,8 @@ for token in (
     "manage_kalshi_paper_cycle",
     "persistent_lock_side",
     "yes_ask_dollars",
-    "PRIMARY P/L EVIDENCE",
-    "r53-kalshi-contract-paper",
+    "paper_history",
+    "Automatic Kalshi Paper Trade Log",
 ):
     if token not in s:
         raise SystemExit(f"Missing integration token: {token}")
