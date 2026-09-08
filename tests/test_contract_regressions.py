@@ -218,6 +218,18 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('components.html(_live_countdown_html, height=72', source)
         self.assertIn('setInterval(renderInlineCountdown, 250)', source)
         self.assertIn(
+            'Math.min(TOTAL,Math.max(0,(closeMs-Date.now())/1000))',
+            source,
+        )
+        self.assertIn(
+            'Math.min(15 * 60, Math.max(0, Math.floor((closeMs - Date.now()) / 1000)))',
+            source,
+        )
+        self.assertIn(
+            'int(min(15 * 60, max(0, live_close_ts - time.time())))',
+            source,
+        )
+        self.assertIn(
             'select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=1',
             source,
         )
