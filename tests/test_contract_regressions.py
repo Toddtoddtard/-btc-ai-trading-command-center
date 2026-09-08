@@ -211,6 +211,14 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('ticker = ticker_job.result()', source)
         self.assertIn('raw_hist, kline_ms = kline_job.result()', source)
         self.assertIn('agg, agg_ms = agg_job.result()', source)
+        self.assertIn('latest_trade_price = (', source)
+        self.assertIn('price = latest_trade_price', source)
+        self.assertIn('live_close_ts = kalshi_close_timestamp(kctx)', source)
+        self.assertIn('live_close_ts - time.time()', source)
+        self.assertIn(
+            'select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=1',
+            source,
+        )
 
         installer = (
             root / 'tools' / 'apply_kalshi_contract_paper_v1.py'
