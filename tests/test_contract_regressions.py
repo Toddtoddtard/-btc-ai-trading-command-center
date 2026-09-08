@@ -15,7 +15,7 @@ class ContractRegressionTests(unittest.TestCase):
                              kalshi_close_ts=time.time()+900, target_price=100,
                              yes_ask_dollars=.50, yes_bid_dollars=.48,
                              no_ask_dollars=.52, no_bid_dollars=.50,
-                             confidence=.80)
+                             confidence=.95)
         self.risk = dict(approved=True, position_pct=.1)
 
     def open(self):
@@ -153,6 +153,45 @@ class ContractRegressionTests(unittest.TestCase):
                 'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
             ).fetchone()['exit_reason']
         self.assertEqual(reason, 'LOCK_BID_95_PCT')
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_lock_requires_ninety_five_percent_confidence(self):
+        self.decision['confidence'] = .949
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('below the 95% minimum', skipped['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+        self.assertIsNone(
+            engine.open_position(self.db, 500, self.decision, self.risk, 100)
+        )
+
+        self.decision['confidence'] = .95
+        opened = self.cycle()
+        self.assertTrue(opened['event'])
+        self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')
+
+    def test_only_one_lock_entry_is_allowed_per_market(self):
+        self.open()
+        self.decision['yes_bid_dollars'] = .95
+        self.assertTrue(self.cycle()['event'])
+        self.decision['yes_bid_dollars'] = .48
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('1 LOCK already entered', skipped['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_at_most_ten_scalps_are_allowed_per_market(self):
+        self.decision.update(action='SCALP UP', confidence=.80)
+        for _ in range(10):
+            self.decision.update(yes_ask_dollars=.50, yes_bid_dollars=.48)
+            self.assertTrue(self.cycle()['event'])
+            self.decision['yes_bid_dollars'] = .65
+            self.assertTrue(self.cycle()['event'])
+
+        self.decision.update(yes_ask_dollars=.50, yes_bid_dollars=.48)
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('10 SCALPs already entered', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_decision_lock_is_independent_immutable_and_expires(self):

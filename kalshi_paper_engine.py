@@ -21,6 +21,9 @@ def fetch_settled_result(ticker):
 
 GENERAL_TAKER_FEE_RATE = 0.07
 MAX_ENTRY_PRICE = 0.75
+LOCK_MIN_CONFIDENCE = 0.95
+MAX_SCALPS_PER_MARKET = 10
+MAX_LOCKS_PER_MARKET = 1
 
 # SCALP positions require a forecast of at least 15 contract-price points and
 # realize profit once that full move is available (for example, 50% to 65%).
@@ -130,6 +133,22 @@ def _projected_scalp_exit(decision):
     return projected if projected is not None and 0.0 <= projected <= 1.0 else None
 
 
+def _decision_confidence(decision):
+    """Return confidence as a 0..1 probability, accepting legacy percentages."""
+    confidence = _f(decision.get("confidence"), 0.0)
+    if confidence > 1.0:
+        confidence /= 100.0
+    return min(1.0, max(0.0, confidence))
+
+
+def _strategy_entry_count(conn, ticker, strategy):
+    return int(conn.execute(
+        """SELECT COUNT(*) AS count FROM kalshi_paper_positions
+           WHERE ticker=? AND strategy=?""",
+        (str(ticker), str(strategy)),
+    ).fetchone()["count"])
+
+
 def open_position(db_path, starting_cash, decision, risk, spot_price):
     side = _side_from_action(decision.get("action"))
     if side is None or not bool(risk.get("approved")):
@@ -137,10 +156,12 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     ticker = str(decision.get("kalshi_ticker") or "")
     if not ticker:
         return None
+    strategy = "LOCK" if str(decision.get("action", "")).upper().startswith("LOCK") else "SCALP"
+    if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
+        return None
     entry = _quote(decision, side, ask=True)
     if entry is None or entry > MAX_ENTRY_PRICE:
         return None
-    strategy = "LOCK" if str(decision.get("action", "")).upper().startswith("LOCK") else "SCALP"
     if strategy == "SCALP":
         projected_exit = _projected_scalp_exit(decision)
         if projected_exit is None or projected_exit - entry < SCALP_MIN_MOVE_POINTS - 1e-12:
@@ -156,6 +177,11 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     try:
         conn.execute('BEGIN IMMEDIATE')
         if conn.execute("SELECT 1 FROM kalshi_paper_positions WHERE status='OPEN' LIMIT 1").fetchone():
+            return None
+        prior_entries = _strategy_entry_count(conn, ticker, strategy)
+        if strategy == "SCALP" and prior_entries >= MAX_SCALPS_PER_MARKET:
+            return None
+        if strategy == "LOCK" and prior_entries >= MAX_LOCKS_PER_MARKET:
             return None
         acct = conn.execute("SELECT cash FROM kalshi_paper_account WHERE id=1").fetchone()
         cash = float(acct["cash"])
@@ -354,6 +380,28 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                 f"is above the {MAX_ENTRY_PRICE * 100:.0f}% maximum."
             ),
         }
+    if entry_side:
+        strategy = "LOCK" if str(decision.get("action", "")).upper().startswith("LOCK") else "SCALP"
+        if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
+            return {
+                "event": False,
+                "message": (
+                    f"Skipped PAPER LOCK: confidence {_decision_confidence(decision) * 100:.0f}% "
+                    f"is below the {LOCK_MIN_CONFIDENCE * 100:.0f}% minimum."
+                ),
+            }
+        count_conn = _connect(db_path, starting_cash)
+        try:
+            prior_entries = _strategy_entry_count(count_conn, decision.get("kalshi_ticker"), strategy)
+        finally:
+            count_conn.close()
+        limit = MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET
+        if prior_entries >= limit:
+            noun = "LOCK" if strategy == "LOCK" else "SCALPs"
+            return {
+                "event": False,
+                "message": f"Skipped PAPER {strategy}: {limit} {noun} already entered for this 15-minute market.",
+            }
     if entry_side and str(decision.get("action", "")).upper().startswith("SCALP"):
         projected_exit = _projected_scalp_exit(decision)
         if projected_exit is None or entry_price is None or projected_exit - entry_price < SCALP_MIN_MOVE_POINTS - 1e-12:
