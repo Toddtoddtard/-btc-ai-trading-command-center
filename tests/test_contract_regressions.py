@@ -117,22 +117,40 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertFalse(result['event'])
         self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
 
-    def test_lock_exits_only_on_strong_confirmed_whale_reversal(self):
+    def test_lock_holds_through_strong_confirmed_whale_reversal(self):
         self.open()
         self.decision.update(
+            action='LOCK DOWN',
             score=-.50,
             whale_score=-.90,
             whale_confidence=.95,
             yes_bid_dollars=.45,
         )
         result = self.cycle()
-        self.assertTrue(result['event'])
-        with engine._connect(self.db) as conn:
-            reason = conn.execute(
-                'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
-            ).fetchone()['exit_reason']
-        self.assertEqual(reason, 'WHALE_REVERSAL')
+        self.assertFalse(result['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_decision_lock_is_independent_immutable_and_expires(self):
+        ticker = self.decision['kalshi_ticker']
+        expiry = time.time() + 900
+        self.assertEqual(
+            engine.register_decision_lock(self.db, ticker, 'UP', expiry),
+            'YES',
+        )
+        # A later opposite call for the same window cannot replace the first.
+        self.assertEqual(
+            engine.register_decision_lock(self.db, ticker, 'DOWN', expiry),
+            'YES',
+        )
+        self.assertEqual(engine.persistent_lock_side(self.db, ticker), 'YES')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
+        with engine._connect(self.db) as conn:
+            conn.execute(
+                'UPDATE kalshi_decision_locks SET expires_at=1 WHERE ticker=?',
+                (ticker,),
+            )
+        self.assertIsNone(engine.persistent_lock_side(self.db, ticker))
 
     def test_paper_tab_has_one_authoritative_summary(self):
         root = Path(__file__).resolve().parents[1]
@@ -142,11 +160,12 @@ class ContractRegressionTests(unittest.TestCase):
         )[0]
         canonical_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
-            'paper_history, paper_summary, persistent_lock_side'
+            'paper_history, paper_summary, persistent_lock_side, '
+            'register_decision_lock'
         )
         legacy_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
-            'paper_summary, persistent_lock_side'
+            'paper_history, paper_summary, persistent_lock_side'
         )
         self.assertEqual(paper_tab.count('k1.metric("Contract Equity"'), 1)
         self.assertEqual(paper_tab.count('Automatic Kalshi Paper Trade Log'), 1)
@@ -154,6 +173,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertNotIn("['ticker']} • entry", paper_tab)
         self.assertEqual(source.count(canonical_import), 1)
         self.assertNotIn(legacy_import + '\n', source)
+        self.assertIn('if _lock_was_already_persisted:', source)
+        self.assertIn('register_decision_lock(', source)
 
         installer = (
             root / 'tools' / 'apply_kalshi_contract_paper_v1.py'
