@@ -206,6 +206,11 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('paper position sells at a 95% bid', source)
         self.assertIn('[data-testid="stAlert"] [data-testid="stMarkdownContainer"] p', source)
         self.assertIn('a[aria-label="Link to heading"]', source)
+        self.assertIn('with ThreadPoolExecutor(max_workers=6', source)
+        self.assertEqual(source.count('pool.submit(fetch_'), 6)
+        self.assertIn('ticker = ticker_job.result()', source)
+        self.assertIn('raw_hist, kline_ms = kline_job.result()', source)
+        self.assertIn('agg, agg_ms = agg_job.result()', source)
 
         installer = (
             root / 'tools' / 'apply_kalshi_contract_paper_v1.py'

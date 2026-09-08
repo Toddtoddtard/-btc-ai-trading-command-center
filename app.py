@@ -3,6 +3,7 @@ import math
 import re
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode
@@ -59,7 +60,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r69-dark-alert-readability"
+APP_VERSION = "2026.09.08-r70-parallel-live-fetch"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -4864,28 +4865,39 @@ def live_dashboard():
     load_started = time.perf_counter()
     errors = []
 
-    try:
-        ticker = fetch_spot_ticker()
-    except Exception as exc:
-        ticker = {"price": np.nan, "change_24h": np.nan, "quote_volume_24h": np.nan, "feed_ms": np.nan, "source": "Unavailable"}
-        errors.append(f"Spot ticker: {exc}")
+    # All six reads are independent and already have their original cache TTLs.
+    # Starting them together removes network wait stacking without changing any
+    # returned value, freshness policy, decision rule, or rendering order.
+    with ThreadPoolExecutor(max_workers=6, thread_name_prefix="live-feed") as pool:
+        ticker_job = pool.submit(fetch_spot_ticker)
+        kline_job = pool.submit(fetch_klines, "1m", 500)
+        agg_job = pool.submit(fetch_agg_trades, 600)
+        futures_job = pool.submit(fetch_futures_snapshot)
+        kalshi_job = pool.submit(fetch_kalshi_bitcoin_markets)
+        hourly_kalshi_job = pool.submit(fetch_kalshi_hourly_bitcoin_markets)
 
-    try:
-        raw_hist, kline_ms = fetch_klines("1m", 500)
-        hist = enrich_history(raw_hist)
-    except Exception as exc:
-        hist, kline_ms = pd.DataFrame(), np.nan
-        errors.append(f"Klines: {exc}")
+        try:
+            ticker = ticker_job.result()
+        except Exception as exc:
+            ticker = {"price": np.nan, "change_24h": np.nan, "quote_volume_24h": np.nan, "feed_ms": np.nan, "source": "Unavailable"}
+            errors.append(f"Spot ticker: {exc}")
 
-    try:
-        agg, agg_ms = fetch_agg_trades(600)
-    except Exception as exc:
-        agg, agg_ms = pd.DataFrame(), np.nan
-        errors.append(f"Aggregate trades: {exc}")
+        try:
+            raw_hist, kline_ms = kline_job.result()
+            hist = enrich_history(raw_hist)
+        except Exception as exc:
+            hist, kline_ms = pd.DataFrame(), np.nan
+            errors.append(f"Klines: {exc}")
 
-    futures = fetch_futures_snapshot()
-    kalshi = fetch_kalshi_bitcoin_markets()
-    hourly_kalshi = fetch_kalshi_hourly_bitcoin_markets()
+        try:
+            agg, agg_ms = agg_job.result()
+        except Exception as exc:
+            agg, agg_ms = pd.DataFrame(), np.nan
+            errors.append(f"Aggregate trades: {exc}")
+
+        futures = futures_job.result()
+        kalshi = kalshi_job.result()
+        hourly_kalshi = hourly_kalshi_job.result()
 
     if hist.empty:
         st.error("Price history is unavailable, so the AI engine cannot run safely right now.")
