@@ -72,6 +72,7 @@ def _connect(db_path, starting_cash=500.0):
             opened_at REAL NOT NULL,
             expires_at REAL,
             target_price REAL,
+            spot_entry_price REAL,
             entry_price REAL NOT NULL,
             contracts INTEGER NOT NULL,
             entry_fee REAL NOT NULL,
@@ -83,6 +84,15 @@ def _connect(db_path, starting_cash=500.0):
             exit_reason TEXT
         )
     """)
+    # Existing Streamlit databases migrate in place; historical trades simply
+    # have no chart marker because their BTC spot-at-entry was not recorded.
+    position_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(kalshi_paper_positions)")
+    }
+    if "spot_entry_price" not in position_columns:
+        conn.execute(
+            "ALTER TABLE kalshi_paper_positions ADD COLUMN spot_entry_price REAL"
+        )
     conn.execute("""
         CREATE TABLE IF NOT EXISTS kalshi_decision_locks (
             ticker TEXT PRIMARY KEY,
@@ -203,11 +213,12 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         conn.execute("""
             INSERT INTO kalshi_paper_positions(
                 ticker,side,strategy,status,opened_at,expires_at,target_price,
-                entry_price,contracts,entry_fee,last_mark
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                spot_entry_price,entry_price,contracts,entry_fee,last_mark
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             ticker, side, strategy, "OPEN", now, expires_at,
-            _f(decision.get("target_price")), entry, contracts, fee, _quote(decision, side, ask=False),
+            _f(decision.get("target_price")), _f(spot_price), entry, contracts,
+            fee, _quote(decision, side, ask=False),
         ))
         conn.commit()
         direction = "UP" if side == "YES" else "DOWN"
@@ -502,5 +513,33 @@ def paper_history(db_path, starting_cash=500.0, limit=100):
                 "expires_at": item.get("expires_at"),
             })
         return history
+    finally:
+        conn.close()
+
+
+def paper_chart_entries(db_path, ticker, starting_cash=500.0, limit=11):
+    """Return plot-safe entry markers for one active 15-minute market."""
+    ticker = str(ticker or "").strip()
+    if not ticker:
+        return []
+    conn = _connect(db_path, starting_cash)
+    try:
+        rows = conn.execute(
+            """SELECT side,strategy,opened_at,entry_price,spot_entry_price
+               FROM kalshi_paper_positions
+               WHERE ticker=? AND spot_entry_price IS NOT NULL
+               ORDER BY opened_at ASC, id ASC LIMIT ?""",
+            (ticker, max(1, min(25, int(limit)))),
+        ).fetchall()
+        return [
+            {
+                "direction": "UP" if row["side"] == "YES" else "DOWN",
+                "strategy": str(row["strategy"]),
+                "opened_at": float(row["opened_at"]),
+                "kalshi_entry_pct": float(row["entry_price"]) * 100.0,
+                "spot_entry_price": float(row["spot_entry_price"]),
+            }
+            for row in rows
+        ]
     finally:
         conn.close()
