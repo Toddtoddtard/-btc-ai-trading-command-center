@@ -22,7 +22,7 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
-from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side
+from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side, register_decision_lock
 from learning_prices import closed_price_at
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.07-r64-max-entry-75"
+APP_VERSION = "2026.09.08-r65-immutable-window-lock"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -1623,6 +1623,15 @@ def master_decision(results, hist, kalshi=None):
     up_prob = kctx["up_probability"]
     down_prob = (1.0 - up_prob) if pd.notna(up_prob) else np.nan
 
+    # The decision lock is independent of paper execution. Once a side is
+    # registered for a still-open ticker, every refresh and every downstream
+    # gate must keep that exact side until the contract window expires.
+    current_ticker = kctx.get("ticker", "")
+    _db_lock_side = persistent_lock_side(DB_PATH, current_ticker, STARTING_CASH)
+    lock_side = "UP" if _db_lock_side == "YES" else "DOWN" if _db_lock_side == "NO" else None
+    lock_ticker = current_ticker if lock_side else ""
+    _lock_was_already_persisted = lock_side in {"UP", "DOWN"}
+
     if kctx["available"] and pd.notna(target):
         # Core settlement question: finish above or below the Kalshi target.
         projected_edge = projected_end - target
@@ -1724,13 +1733,6 @@ def master_decision(results, hist, kalshi=None):
         up_market_conflict = pd.notna(up_prob) and up_prob < 0.20
         down_market_conflict = pd.notna(down_prob) and down_prob < 0.20
 
-        # Persistent LOCK state comes from the SQLite Kalshi paper position,
-        # so refreshes/new tabs cannot erase a live paper settlement call.
-        current_ticker = kctx.get("ticker", "")
-        _db_lock_side = persistent_lock_side(DB_PATH, current_ticker, STARTING_CASH)
-        lock_side = "UP" if _db_lock_side == "YES" else "DOWN" if _db_lock_side == "NO" else None
-        lock_ticker = current_ticker if lock_side else ""
-
         scalp_up_candidate = (
             strong_move_up
             and not up_market_conflict
@@ -1821,28 +1823,46 @@ def master_decision(results, hist, kalshi=None):
     confidence = calibrate_confidence(
         confidence, consensus, policy, source_health=source_health, state=remote_learning
     )
-    if action not in {"HOLD", "WAIT"}:
+    if not _lock_was_already_persisted and action not in {"HOLD", "WAIT"}:
         allowed, gated_action = learned_trade_gate(
             action, confidence, base_score, consensus, policy, source_health=source_health
         )
         if not allowed:
-            if action.startswith("LOCK"):
-                st.session_state.pop("kalshi_lock_ticker", None)
-                st.session_state.pop("kalshi_lock_side", None)
             action = "HOLD"
             locked_side = None
             gate_note = f"{gated_action}; learned reliability gate blocked trade"
 
     # Learned precision layer is a final safety veto only. It must not duplicate
     # the council trade gate or permanently deadlock otherwise-valid calls.
-    if action not in {"HOLD", "WAIT"} and not bool(v5_council.get("precision_gate_passed")):
-        if action.startswith("LOCK"):
-            st.session_state.pop("kalshi_lock_ticker", None)
-            st.session_state.pop("kalshi_lock_side", None)
+    if (
+        not _lock_was_already_persisted
+        and action not in {"HOLD", "WAIT"}
+        and not bool(v5_council.get("precision_gate_passed"))
+    ):
         action = "HOLD"
         locked_side = None
         precision_reason = str(v5_council.get("precision_gate_reason", "WAIT — v5 precision gate"))
         gate_note = (gate_note + "; " if gate_note else "") + precision_reason
+
+    # Final one-way latch. Existing locks override all later signal/gate changes.
+    # A newly approved lock is atomically registered; INSERT OR IGNORE guarantees
+    # that simultaneous reruns can never replace the first side for this ticker.
+    if _lock_was_already_persisted:
+        action = f"LOCK {lock_side}"
+        locked_side = lock_side
+        gate_note = ""
+    elif action in {"LOCK UP", "LOCK DOWN"} and current_ticker:
+        _registered_side = register_decision_lock(
+            DB_PATH,
+            current_ticker,
+            "YES" if action == "LOCK UP" else "NO",
+            pd.Timestamp(kctx.get("close_time")).timestamp() if kctx.get("close_time") else np.nan,
+            STARTING_CASH,
+        )
+        if _registered_side in {"YES", "NO"}:
+            lock_side = "UP" if _registered_side == "YES" else "DOWN"
+            action = f"LOCK {lock_side}"
+            locked_side = lock_side
 
     risk_level = (
         "LOW"
