@@ -60,7 +60,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r71-live-timer-price-sync"
+APP_VERSION = "2026.09.08-r72-live-timer-price-sync"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5118,7 +5118,34 @@ def live_dashboard():
             k1.metric("Kalshi target", fmt_money(kctx["target"]))
             k2.metric("BTC now", fmt_money(price))
             k3.metric("Vs target", f"${kctx['distance']:+,.2f}")
-            k4.metric("Time left", f"{minutes:02d}:{seconds:02d}")
+            with k4:
+                countdown_close_ms = (
+                    int(live_close_ts * 1000)
+                    if pd.notna(live_close_ts) else 0
+                )
+                countdown_color = "#f5f9ff" if dark_mode else "#1f2937"
+                countdown_label_color = "#9aa9bc" if dark_mode else "#5f6b7a"
+                _live_countdown_html = f"""
+                <div style="font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+                  <div style="font-size:14px;color:{countdown_label_color};margin-bottom:4px;">Time left</div>
+                  <div id="live-contract-countdown" style="font-size:clamp(24px,2.1vw,34px);line-height:1.15;font-weight:600;color:{countdown_color};font-variant-numeric:tabular-nums;">{minutes:02d}:{seconds:02d}</div>
+                </div>
+                <script>
+                (() => {{
+                  const closeMs = {countdown_close_ms};
+                  const value = document.getElementById("live-contract-countdown");
+                  function renderInlineCountdown() {{
+                    const remaining = Math.max(0, Math.floor((closeMs - Date.now()) / 1000));
+                    const minutes = Math.floor(remaining / 60);
+                    const seconds = remaining % 60;
+                    value.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+                  }}
+                  renderInlineCountdown();
+                  setInterval(renderInlineCountdown, 250);
+                }})();
+                </script>
+                """
+                components.html(_live_countdown_html, height=72, scrolling=False)
             k5.metric(
                 "UP price",
                 (
