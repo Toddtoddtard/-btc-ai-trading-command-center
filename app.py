@@ -60,7 +60,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r70-parallel-live-fetch"
+APP_VERSION = "2026.09.08-r71-live-timer-price-sync"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -3904,7 +3904,7 @@ else:
 
 
 auto_refresh = st.sidebar.checkbox("Auto refresh", value=True)
-refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=3)
+refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=1)
 record_predictions = st.sidebar.checkbox("Auto-journal predictions", value=True)
 show_raw = st.sidebar.checkbox("Show diagnostics", value=False)
 
@@ -4905,8 +4905,18 @@ def live_dashboard():
             st.code("\n".join(errors))
         st.stop()
 
-    price = safe_float(ticker.get("price"), safe_float(hist["close"].iloc[-1]))
-    if pd.isna(price):
+    # The aggregate-trade feed carries the newest executed Binance spot trade.
+    # Prefer it over the rolling 24-hour ticker snapshot so the displayed BTC
+    # price, AI inputs and paper decisions share the freshest loaded value.
+    latest_trade_price = (
+        safe_float(agg["price"].iloc[-1])
+        if not agg.empty and "price" in agg.columns
+        else np.nan
+    )
+    price = latest_trade_price
+    if pd.isna(price) or price <= 0:
+        price = safe_float(ticker.get("price"), safe_float(hist["close"].iloc[-1]))
+    if pd.isna(price) or price <= 0:
         price = float(hist["close"].iloc[-1])
 
     results = run_specialists(hist, agg, futures, kalshi)
@@ -5090,9 +5100,17 @@ def live_dashboard():
         st.subheader("Kalshi BTC 15-minute target tracker")
 
         if kctx["available"]:
+            # Recompute from the exact active contract close at render time.
+            # The cached Kalshi response can be up to three seconds old, but
+            # the visible countdown must not inherit that cache age.
+            live_close_ts = kalshi_close_timestamp(kctx)
             rem = (
-                int(kctx["seconds_remaining"])
-                if pd.notna(kctx["seconds_remaining"]) else 0
+                int(max(0, live_close_ts - time.time()))
+                if pd.notna(live_close_ts)
+                else (
+                    int(kctx["seconds_remaining"])
+                    if pd.notna(kctx["seconds_remaining"]) else 0
+                )
             )
             minutes, seconds = divmod(max(0, rem), 60)
 
