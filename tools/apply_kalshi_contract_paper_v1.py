@@ -23,7 +23,11 @@ else:
 # Persist LOCK state in SQLite by reading the open paper contract, not browser session_state.
 old_lock = '''        # Persistent lock state for the current Kalshi contract.\n        lock_ticker = st.session_state.get("kalshi_lock_ticker", "")\n        lock_side = st.session_state.get("kalshi_lock_side")\n        current_ticker = kctx.get("ticker", "")\n\n        if lock_ticker and (\n            lock_ticker != current_ticker\n            or (pd.notna(remaining) and remaining <= 0)\n        ):\n            st.session_state.pop("kalshi_lock_ticker", None)\n            st.session_state.pop("kalshi_lock_side", None)\n            lock_ticker = ""\n            lock_side = None\n'''
 new_lock = '''        # Persistent LOCK state comes from the SQLite Kalshi paper position,\n        # so refreshes/new tabs cannot erase a live paper settlement call.\n        current_ticker = kctx.get("ticker", "")\n        _db_lock_side = persistent_lock_side(DB_PATH, current_ticker, STARTING_CASH)\n        lock_side = "UP" if _db_lock_side == "YES" else "DOWN" if _db_lock_side == "NO" else None\n        lock_ticker = current_ticker if lock_side else ""\n'''
-if new_lock not in s:
+deployment_safe_lock = (
+    "def _persistent_window_lock_side(ticker=None):" in s
+    and "_persistent_window_lock_side(current_ticker)" in s
+)
+if new_lock not in s and not deployment_safe_lock:
     if old_lock not in s:
         raise SystemExit("Persistent LOCK anchor not found")
     s = s.replace(old_lock, new_lock, 1)
