@@ -200,6 +200,10 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('if _lock_was_already_persisted:', source)
         self.assertIn('def _register_window_lock(', source)
         self.assertIn('_persistent_window_lock_side(current_ticker)', source)
+        self.assertNotIn('hold this call until Kalshi market expiration', source)
+        self.assertNotIn('to the end of the current Kalshi 15-minute market', source)
+        self.assertIn('paper position sells at a 95% executable bid', source)
+        self.assertIn('paper position sells at a 95% bid', source)
 
         installer = (
             root / 'tools' / 'apply_kalshi_contract_paper_v1.py'

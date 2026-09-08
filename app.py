@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r67-15pt-scalp-95-lock-exit"
+APP_VERSION = "2026.09.08-r68-live-rule-labels"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5129,8 +5129,8 @@ def live_dashboard():
                 st.error("SCALP DOWN → paper signal is to BUY DOWN.")
             elif decision["action"] in {"LOCK UP", "LOCK DOWN"}:
                 st.warning(
-                    f"LOCK {decision['locked_side']} → hold this call "
-                    "to the end of the current Kalshi 15-minute market."
+                    f"LOCK {decision['locked_side']} → direction stays fixed; "
+                    "the paper position sells at a 95% executable bid or settles at expiry."
                 )
             else:
                 st.info("HOLD → no Kalshi side has enough edge yet.")
@@ -5252,8 +5252,8 @@ def live_dashboard():
         if decision["action"] in {"LOCK UP", "LOCK DOWN"}:
             st.markdown(directional_badge_html(decision["action"]), unsafe_allow_html=True)
             st.warning(
-                f"LOCKED SIDE: {decision['locked_side']} — "
-                "hold call until Kalshi market expiration."
+                f"LOCKED SIDE: {decision['locked_side']} — direction cannot reverse; "
+                "paper position sells at a 95% bid or settles at expiry."
             )
         st.info(decision["reason"])
 
