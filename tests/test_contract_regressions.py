@@ -215,6 +215,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('price = latest_trade_price', source)
         self.assertIn('live_close_ts = kalshi_close_timestamp(kctx)', source)
         self.assertIn('live_close_ts - time.time()', source)
+        self.assertIn('components.html(_live_countdown_html, height=72', source)
+        self.assertIn('setInterval(renderInlineCountdown, 250)', source)
         self.assertIn(
             'select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=1',
             source,
