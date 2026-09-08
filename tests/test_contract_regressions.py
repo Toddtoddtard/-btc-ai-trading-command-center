@@ -160,12 +160,11 @@ class ContractRegressionTests(unittest.TestCase):
         )[0]
         canonical_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
-            'paper_history, paper_summary, persistent_lock_side, '
-            'register_decision_lock'
+            'paper_history, paper_summary, persistent_lock_side'
         )
         legacy_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
-            'paper_history, paper_summary, persistent_lock_side'
+            'paper_summary, persistent_lock_side'
         )
         self.assertEqual(paper_tab.count('k1.metric("Contract Equity"'), 1)
         self.assertEqual(paper_tab.count('Automatic Kalshi Paper Trade Log'), 1)
@@ -174,7 +173,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(source.count(canonical_import), 1)
         self.assertNotIn(legacy_import + '\n', source)
         self.assertIn('if _lock_was_already_persisted:', source)
-        self.assertIn('register_decision_lock(', source)
+        self.assertIn('def _register_window_lock(', source)
+        self.assertIn('_persistent_window_lock_side(current_ticker)', source)
 
         installer = (
             root / 'tools' / 'apply_kalshi_contract_paper_v1.py'
