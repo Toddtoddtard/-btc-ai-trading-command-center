@@ -27,12 +27,8 @@ MAX_ENTRY_PRICE = 0.75
 SCALP_TAKE_PROFIT_PCT = 0.25
 SCALP_STOP_LOSS_PCT = 0.10
 
-# LOCK positions are settlement theses. They ignore normal signal noise and may
-# exit early only when both the master view and high-confidence Whale AI show a
-# strong reversal.
-LOCK_WHALE_REVERSAL_SCORE = 0.75
-LOCK_WHALE_REVERSAL_CONFIDENCE = 0.80
-LOCK_MASTER_REVERSAL_SCORE = 0.20
+# LOCK positions are immutable settlement calls. Once established, their side
+# cannot be reversed, downgraded, or exited before official window settlement.
 
 
 def _f(value, default=None):
@@ -83,6 +79,14 @@ def _connect(db_path, starting_cash=500.0):
             exit_reason TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kalshi_decision_locks (
+            ticker TEXT PRIMARY KEY,
+            side TEXT NOT NULL CHECK(side IN ('YES', 'NO')),
+            locked_at REAL NOT NULL,
+            expires_at REAL NOT NULL
+        )
+    """)
     conn.execute(
         "INSERT OR IGNORE INTO kalshi_paper_account(id,cash,starting_cash,updated_at) VALUES(1,?,?,?)",
         (float(starting_cash), float(starting_cash), time.time()),
@@ -98,23 +102,6 @@ def _side_from_action(action):
     if a in {"SCALP DOWN", "LOCK DOWN"}:
         return "NO"
     return None
-
-
-def _strong_whale_reversal(decision, side):
-    whale_score = _f(decision.get("whale_score"), 0.0)
-    whale_confidence = _f(decision.get("whale_confidence"), 0.0)
-    master_score = _f(decision.get("score"), 0.0)
-    if whale_confidence < LOCK_WHALE_REVERSAL_CONFIDENCE:
-        return False
-    if side == "YES":
-        return (
-            whale_score <= -LOCK_WHALE_REVERSAL_SCORE
-            and master_score <= -LOCK_MASTER_REVERSAL_SCORE
-        )
-    return (
-        whale_score >= LOCK_WHALE_REVERSAL_SCORE
-        and master_score >= LOCK_MASTER_REVERSAL_SCORE
-    )
 
 
 def _quote(decision, side, ask=False):
@@ -219,16 +206,77 @@ def _close(conn, row, exit_price, reason, charge_exit_fee=True):
     return {"event": True, "message": f"Closed PAPER {row['strategy']} {row['side']} {row['ticker']} @ {exit_price:.2f} | P/L {pnl:+.2f}"}
 
 
-def persistent_lock_side(db_path, ticker, starting_cash=500.0):
-    if not ticker:
+def register_decision_lock(db_path, ticker, side, expires_at, starting_cash=500.0):
+    """Atomically establish one immutable direction for a Kalshi window."""
+    ticker = str(ticker or "").strip()
+    side = str(side or "").upper().strip()
+    side = "YES" if side in {"YES", "UP", "LOCK UP"} else "NO" if side in {"NO", "DOWN", "LOCK DOWN"} else ""
+    expiry = _f(expires_at)
+    now = time.time()
+    if not ticker or not side or expiry is None or expiry <= now:
         return None
+
     conn = _connect(db_path, starting_cash)
     try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM kalshi_decision_locks WHERE expires_at<=?", (now,))
+        conn.execute(
+            """INSERT OR IGNORE INTO kalshi_decision_locks(
+                   ticker,side,locked_at,expires_at
+               ) VALUES(?,?,?,?)""",
+            (ticker, side, now, expiry),
+        )
         row = conn.execute(
-            "SELECT side FROM kalshi_paper_positions WHERE status='OPEN' AND strategy='LOCK' AND ticker=? ORDER BY id DESC LIMIT 1",
-            (str(ticker),),
+            "SELECT side FROM kalshi_decision_locks WHERE ticker=? AND expires_at>?",
+            (ticker, now),
         ).fetchone()
+        conn.commit()
         return row["side"] if row else None
+    finally:
+        conn.close()
+
+
+def persistent_lock_side(db_path, ticker=None, starting_cash=500.0):
+    """Return the immutable side for this window, even without a paper entry."""
+    ticker = str(ticker or "").strip()
+    now = time.time()
+    conn = _connect(db_path, starting_cash)
+    try:
+        if ticker:
+            row = conn.execute(
+                """SELECT side FROM kalshi_decision_locks
+                   WHERE ticker=? AND expires_at>?
+                   ORDER BY locked_at DESC LIMIT 1""",
+                (ticker, now),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """SELECT side FROM kalshi_decision_locks
+                   WHERE expires_at>?
+                   ORDER BY locked_at DESC LIMIT 1""",
+                (now,),
+            ).fetchone()
+        if row:
+            return row["side"]
+
+        # Compatibility for LOCK paper positions opened before this table existed.
+        if ticker:
+            legacy = conn.execute(
+                """SELECT side FROM kalshi_paper_positions
+                   WHERE status='OPEN' AND strategy='LOCK' AND ticker=?
+                     AND (expires_at IS NULL OR expires_at>?)
+                   ORDER BY id DESC LIMIT 1""",
+                (ticker, now),
+            ).fetchone()
+        else:
+            legacy = conn.execute(
+                """SELECT side FROM kalshi_paper_positions
+                   WHERE status='OPEN' AND strategy='LOCK'
+                     AND (expires_at IS NULL OR expires_at>?)
+                   ORDER BY id DESC LIMIT 1""",
+                (now,),
+            ).fetchone()
+        return legacy["side"] if legacy else None
     finally:
         conn.close()
 
@@ -252,9 +300,8 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                     return {'event': False, 'message': 'Awaiting official Kalshi settlement: ' + str(row['ticker'])}
                 payoff = float(side.lower() == result)
                 return _close(conn, row, payoff, 'OFFICIAL_SETTLEMENT:' + result, charge_exit_fee=False)
-            if row["strategy"] == "LOCK" and mark is not None:
-                if _strong_whale_reversal(decision, side):
-                    return _close(conn, row, mark, "WHALE_REVERSAL")
+            # LOCK means hold this exact side through official settlement.
+            # Opposite master/whale signals remain learning inputs only.
             if row["strategy"] == "SCALP" and mark is not None:
                 contracts = int(row["contracts"])
                 entry_cost = (
