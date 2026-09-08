@@ -28,9 +28,6 @@ def require_owner_approval():
     st.title("🔒 Private Access")
     st.caption("This BTC AI Command Center is private. Access requires approval from the owner.")
 
-    name = st.text_input("Approved user name", key="access_name")
-    code = st.text_input("Access code", type="password", key="access_code")
-
     failures = int(st.session_state.get("access_failures", 0))
     locked_until = float(st.session_state.get("access_locked_until", 0.0))
     now = time.time()
@@ -39,7 +36,17 @@ def require_owner_approval():
         st.warning("Too many failed attempts. Try again shortly.")
         st.stop()
 
-    if st.button("Unlock", use_container_width=True):
+    # Streamlit forms submit when Enter is pressed in either field while also
+    # keeping the visible Unlock button available for mouse/touch users.
+    with st.form("private_access_form", clear_on_submit=False):
+        name = st.text_input("Approved user name", key="access_name")
+        code = st.text_input("Access code", type="password", key="access_code")
+        unlock_submitted = st.form_submit_button(
+            "Unlock",
+            use_container_width=True,
+        )
+
+    if unlock_submitted:
         submitted = _hash_code(code.strip()) if code else ""
         matched_user = None
         for approved_name, approved_hash in codes.items():
