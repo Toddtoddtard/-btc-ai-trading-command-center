@@ -23,7 +23,7 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
-from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_chart_entries, paper_history, paper_summary, persistent_lock_side
+from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side
 from learning_prices import closed_price_at
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
@@ -1709,6 +1709,27 @@ def master_decision(results, hist, kalshi=None):
             if pd.notna(up_prob) else 0.0
         )
 
+        # Translate the projected BTC move into a selected-side Kalshi fair
+        # value. Confidence measures model reliability; it is not a contract
+        # price and must never be used as the paper trade's projected exit.
+        if pd.notna(up_prob):
+            market_up = float(np.clip(up_prob, 0.01, 0.99))
+            projected_move_units = float(
+                np.clip(forecast_move / max(target_scale, 1.0), -3.0, 3.0)
+            )
+            projected_log_odds = (
+                np.log(market_up / (1.0 - market_up))
+                + 1.25 * projected_move_units
+            )
+            projected_up_value = float(1.0 / (1.0 + np.exp(-projected_log_odds)))
+            # Retain some weight on the executable market estimate so one
+            # model update cannot manufacture a large paper-trading edge.
+            projected_up_value = float(
+                np.clip(0.75 * projected_up_value + 0.25 * market_up, 0.01, 0.99)
+            )
+        else:
+            projected_up_value = np.nan
+
         score = clamp(
             0.48 * base_score
             + 0.30 * projected_target_score
@@ -1717,6 +1738,11 @@ def master_decision(results, hist, kalshi=None):
         )
 
         raw_side = "UP" if projected_end >= target else "DOWN"
+        scalp_projected_exit_price = (
+            projected_up_value
+            if raw_side == "UP"
+            else (1.0 - projected_up_value if pd.notna(projected_up_value) else np.nan)
+        )
 
         distance_strength = min(
             1.0,
@@ -1790,9 +1816,9 @@ def master_decision(results, hist, kalshi=None):
             and consensus >= 0.12
         )
 
-        # Kalshi is context/confirmation for BTC scalps, not the instrument being
-        # scalp-traded. Only an extreme opposing prediction-market signal blocks
-        # the call; a high same-direction probability is confirmation, not a veto.
+        # BTC data supplies the directional thesis, while the paper executor
+        # trades the selected Kalshi contract. An extreme opposing market signal
+        # therefore blocks the call before contract-price economics are checked.
         up_market_conflict = pd.notna(up_prob) and up_prob < 0.20
         down_market_conflict = pd.notna(down_prob) and down_prob < 0.20
 
@@ -1871,6 +1897,7 @@ def master_decision(results, hist, kalshi=None):
         locked_side = None
         up_prob = np.nan
         down_prob = np.nan
+        scalp_projected_exit_price = np.nan
 
         if base_score >= policy["edge_floor"] and confidence >= policy["trade_confidence_floor"]:
             action = "SCALP UP"
@@ -1983,6 +2010,7 @@ def master_decision(results, hist, kalshi=None):
         "seconds_remaining": remaining,
         "up_probability": up_prob,
         "down_probability": down_prob,
+        "scalp_projected_exit_price": scalp_projected_exit_price,
         "kalshi_available": kctx["available"],
         "policy": policy,
         "source_health": source_health,
@@ -2014,7 +2042,30 @@ def risk_evaluate(decision, account, hist, futures):
 
     volatility_penalty = min(0.55, max(0.0, (atr_pct - 0.002) * 100))
     base = 0.04 + (confidence - 0.60) * 0.22 + consensus * 0.04
-    position_pct = max(0.02, min(0.15, base * (1 - volatility_penalty)))
+    is_lock = str(decision.get("action", "")).upper().startswith("LOCK")
+    exposure_cap = 0.10 if is_lock else 0.05
+    position_pct = max(0.02, min(exposure_cap, base * (1 - volatility_penalty)))
+    sizing_note = ""
+
+    # Let actual executable contract results influence future exposure. The
+    # directional learner remains useful for signals, but BTC-direction hits do
+    # not prove profitability after Kalshi spread and fees.
+    try:
+        strategy = "LOCK" if is_lock else "SCALP"
+        recent_contracts = [
+            row for row in paper_history(DB_PATH, STARTING_CASH, limit=20)
+            if row.get("status") == "CLOSED" and row.get("strategy") == strategy
+        ]
+        if len(recent_contracts) >= 5:
+            recent_pnls = [float(row.get("pnl", 0.0)) for row in recent_contracts]
+            gross_wins = sum(p for p in recent_pnls if p > 0)
+            gross_losses = abs(sum(p for p in recent_pnls if p < 0))
+            execution_pf = gross_wins / gross_losses if gross_losses else 2.0
+            execution_multiplier = float(np.clip(execution_pf / 1.25, 0.35, 1.0))
+            position_pct = max(0.01, position_pct * execution_multiplier)
+            sizing_note = f"; execution P/F {execution_pf:.2f} adjusted size"
+    except Exception:
+        pass
     risk_score = clamp(0.6 - confidence * 0.35 - consensus * 0.15 + volatility_penalty, 0, 1)
 
     state = get_auto_state()
@@ -2026,7 +2077,12 @@ def risk_evaluate(decision, account, hist, futures):
             "reason": f"Paper {state['side']} already open",
         }
 
-    return {"approved": True, "position_pct": position_pct, "risk_score": risk_score, "reason": "Authoritative decision gate passed; paper exposure sized"}
+    return {
+        "approved": True,
+        "position_pct": position_pct,
+        "risk_score": risk_score,
+        "reason": "Authoritative decision gate passed; paper exposure sized" + sizing_note,
+    }
 
 
 # ============================================================
@@ -4000,7 +4056,7 @@ st.markdown(
 # PERSISTENT LIVE MARKET CHART
 # ============================================================
 
-def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None, paper_entries=None):
+def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None):
     """
     Browser-side Plotly chart.
 
@@ -4039,7 +4095,6 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             "ticker": initial_ticker or "",
             "dark": bool(dark_mode),
             "learning": learning_state or get_learning_state(),
-            "entries": paper_entries or [],
         }
     ).replace("</", "<\\/")
 
@@ -4287,32 +4342,6 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             }};
         }}
 
-        function paperEntryTrace() {{
-            const entries = (entryMarkers || []).filter(e =>
-                Number.isFinite(Number(e.opened_at)) &&
-                Number.isFinite(Number(e.spot_entry_price)) &&
-                Number.isFinite(Number(e.kalshi_entry_pct))
-            );
-            return {{
-                type: "scatter",
-                x: entries.map(e => new Date(Number(e.opened_at) * 1000).toISOString()),
-                y: entries.map(e => Number(e.spot_entry_price)),
-                mode: "markers",
-                marker: {{
-                    size: 7,
-                    symbol: "circle",
-                    color: entries.map(e => e.direction === "UP" ? "#20f0bd" : "#ff5d72"),
-                    line: {{color: paperBg, width: 1}}
-                }},
-                text: entries.map(e =>
-                    e.strategy + " " + e.direction + " • Kalshi entry " +
-                    Number(e.kalshi_entry_pct).toFixed(0) + "%"
-                ),
-                name: "Bot entries",
-                hovertemplate: "%{{text}}<br>BTC at call: $%{{y:,.2f}}<extra></extra>"
-            }};
-        }}
-
         function targetShape() {{
             if (!Number.isFinite(currentTarget)) return [];
             return [{{
@@ -4394,7 +4423,6 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }};
 
         let rows = initial.candles || [];
-        let entryMarkers = initial.entries || [];
         let selectedPredictionHorizon = 15;
 
         const horizonButtons = Array.from(
@@ -4418,8 +4446,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 [
                     candleTrace(rows),
                     predictionTrace(rows, selectedPredictionHorizon),
-                    predictionPathTrace(rows, selectedPredictionHorizon),
-                    paperEntryTrace()
+                    predictionPathTrace(rows, selectedPredictionHorizon)
                 ],
                 {{
                     ...layout,
@@ -4440,8 +4467,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             [
                 candleTrace(rows),
                 predictionTrace(rows, selectedPredictionHorizon),
-                predictionPathTrace(rows, selectedPredictionHorizon),
-                paperEntryTrace()
+                predictionPathTrace(rows, selectedPredictionHorizon)
             ],
             layout,
             config
@@ -4587,8 +4613,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     [
                         candleTrace(rows),
                         predictionTrace(rows, selectedPredictionHorizon),
-                        predictionPathTrace(rows, selectedPredictionHorizon),
-                        paperEntryTrace()
+                        predictionPathTrace(rows, selectedPredictionHorizon)
                     ],
                     {{
                         ...layout,
@@ -4613,7 +4638,6 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 kalshiWindowKey = windowKey;
                 currentTicker = "";
                 currentTarget = NaN;
-                entryMarkers = [];
                 await Plotly.relayout(chart, {{
                     shapes: [],
                     annotations: []
@@ -4864,23 +4888,12 @@ except Exception:
 
 _learning_state = get_learning_state()
 
-try:
-    _persistent_paper_entries = paper_chart_entries(
-        DB_PATH,
-        _persistent_ctx.get("ticker", ""),
-        STARTING_CASH,
-        limit=11,
-    )
-except Exception:
-    _persistent_paper_entries = []
-
 persistent_kalshi_market_chart(
     _persistent_hist,
     _persistent_ctx.get("target", np.nan),
     _persistent_ctx.get("ticker", ""),
     dark_mode=dark_mode,
     learning_state=_learning_state,
-    paper_entries=_persistent_paper_entries,
 )
 
 if _learning_state["samples"] > 0:
@@ -4991,10 +5004,6 @@ def live_dashboard():
     if auto_result.get("event"):
         account = get_account(price)
         risk = risk_evaluate(decision, account, hist, futures)
-        # A new entry needs one full rerun so the persistent chart receives the
-        # freshly stored marker. Closing events do not need to rebuild it.
-        if str(auto_result.get("message", "")).startswith("Opened PAPER"):
-            st.rerun(scope="app")
 
     if record_predictions:
         maybe_record_prediction(decision, price, min_seconds=60)
@@ -5300,22 +5309,12 @@ def live_dashboard():
 
     with tab_ai:
         st.subheader("Master Kalshi 15-minute Prediction AI")
-        _call_entries = paper_chart_entries(
-            DB_PATH,
-            decision.get("kalshi_ticker", ""),
-            STARTING_CASH,
-            limit=11,
-        )
         d1, d2, d3, d4, d5 = st.columns(5)
         with d1:
             st.markdown(
                 f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Call</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
                 unsafe_allow_html=True,
             )
-            if _call_entries:
-                st.caption(
-                    f"Entered at {_call_entries[-1]['kalshi_entry_pct']:.0f}%"
-                )
         d2.metric("Master score", f"{decision['score']:+.3f}")
         d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
         d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
@@ -5724,7 +5723,10 @@ def live_dashboard():
         st.caption(
             "Entry rule: automatic SCALP and LOCK trades are rejected above "
             "a 75% Kalshi contract price. SCALP requires a projected 15-point "
-            "contract gain; LOCK sells automatically at a 95% executable bid."
+            "contract gain and a spread no wider than 3 points, stops after a "
+            "5-point adverse contract move, and must receive a fresh signal "
+            "before same-side re-entry. LOCK sells automatically at a 95% "
+            "executable bid."
         )
 
         st.subheader("Automatic Kalshi Paper Trade Log")

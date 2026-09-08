@@ -24,11 +24,14 @@ MAX_ENTRY_PRICE = 0.75
 LOCK_MIN_CONFIDENCE = 0.95
 MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
+MAX_SCALP_LOSSES_PER_MARKET = 2
 
 # SCALP positions require a forecast of at least 15 contract-price points and
 # realize profit once that full move is available (for example, 50% to 65%).
 SCALP_MIN_MOVE_POINTS = 0.15
-SCALP_STOP_LOSS_PCT = 0.10
+SCALP_STOP_LOSS_POINTS = 0.05
+MAX_ENTRY_SPREAD_POINTS = 0.03
+OPPOSITE_SIGNAL_CONFIRM_SECONDS = 10.0
 
 # A LOCK keeps its original direction, but its paper position realizes the
 # near-certain payout early whenever its executable bid reaches 95%.
@@ -72,7 +75,6 @@ def _connect(db_path, starting_cash=500.0):
             opened_at REAL NOT NULL,
             expires_at REAL,
             target_price REAL,
-            spot_entry_price REAL,
             entry_price REAL NOT NULL,
             contracts INTEGER NOT NULL,
             entry_fee REAL NOT NULL,
@@ -81,18 +83,26 @@ def _connect(db_path, starting_cash=500.0):
             exit_price REAL,
             exit_fee REAL DEFAULT 0,
             pnl REAL,
-            exit_reason TEXT
+            exit_reason TEXT,
+            opposite_since REAL
         )
     """)
-    # Existing Streamlit databases migrate in place; historical trades simply
-    # have no chart marker because their BTC spot-at-entry was not recorded.
-    position_columns = {
-        row["name"] for row in conn.execute("PRAGMA table_info(kalshi_paper_positions)")
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(kalshi_paper_positions)")
     }
-    if "spot_entry_price" not in position_columns:
+    if "opposite_since" not in columns:
         conn.execute(
-            "ALTER TABLE kalshi_paper_positions ADD COLUMN spot_entry_price REAL"
+            "ALTER TABLE kalshi_paper_positions ADD COLUMN opposite_since REAL"
         )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kalshi_paper_rearm (
+            ticker TEXT NOT NULL,
+            side TEXT NOT NULL CHECK(side IN ('YES', 'NO')),
+            armed INTEGER NOT NULL DEFAULT 1,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(ticker, side)
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS kalshi_decision_locks (
             ticker TEXT PRIMARY KEY,
@@ -136,8 +146,6 @@ def _quote(decision, side, ask=False):
 def _projected_scalp_exit(decision):
     """Return the model's selected-side fair value used for SCALP qualification."""
     projected = _f(decision.get("scalp_projected_exit_price"))
-    if projected is None:
-        projected = _f(decision.get("confidence"))
     if projected is not None and projected > 1.0:
         projected /= 100.0
     return projected if projected is not None and 0.0 <= projected <= 1.0 else None
@@ -159,6 +167,46 @@ def _strategy_entry_count(conn, ticker, strategy):
     ).fetchone()["count"])
 
 
+def _strategy_loss_count(conn, ticker, strategy):
+    return int(conn.execute(
+        """SELECT COUNT(*) AS count FROM kalshi_paper_positions
+           WHERE ticker=? AND strategy=? AND status='CLOSED' AND pnl<0""",
+        (str(ticker), str(strategy)),
+    ).fetchone()["count"])
+
+
+def _scalp_is_armed(conn, ticker, side):
+    row = conn.execute(
+        "SELECT armed FROM kalshi_paper_rearm WHERE ticker=? AND side=?",
+        (str(ticker), str(side)),
+    ).fetchone()
+    return row is None or bool(row["armed"])
+
+
+def _set_scalp_armed(conn, ticker, side, armed):
+    conn.execute(
+        """INSERT INTO kalshi_paper_rearm(ticker,side,armed,updated_at)
+           VALUES(?,?,?,?)
+           ON CONFLICT(ticker,side) DO UPDATE SET
+               armed=excluded.armed, updated_at=excluded.updated_at""",
+        (str(ticker), str(side), int(bool(armed)), time.time()),
+    )
+
+
+def _refresh_scalp_rearm(conn, ticker, current_side):
+    """A closed scalp side rearms only after its signal disappears or flips."""
+    if not ticker:
+        return
+    if current_side is None:
+        conn.execute(
+            "UPDATE kalshi_paper_rearm SET armed=1,updated_at=? WHERE ticker=?",
+            (time.time(), str(ticker)),
+        )
+    else:
+        other = "NO" if current_side == "YES" else "YES"
+        _set_scalp_armed(conn, ticker, other, True)
+
+
 def open_position(db_path, starting_cash, decision, risk, spot_price):
     side = _side_from_action(decision.get("action"))
     if side is None or not bool(risk.get("approved")):
@@ -173,6 +221,9 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if entry is None or entry > MAX_ENTRY_PRICE:
         return None
     if strategy == "SCALP":
+        bid = _quote(decision, side, ask=False)
+        if bid is None or entry - bid > MAX_ENTRY_SPREAD_POINTS + 1e-12:
+            return None
         projected_exit = _projected_scalp_exit(decision)
         if projected_exit is None or projected_exit - entry < SCALP_MIN_MOVE_POINTS - 1e-12:
             return None
@@ -192,6 +243,13 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         if strategy == "SCALP" and prior_entries >= MAX_SCALPS_PER_MARKET:
             return None
         if strategy == "LOCK" and prior_entries >= MAX_LOCKS_PER_MARKET:
+            return None
+        if (
+            strategy == "SCALP"
+            and _strategy_loss_count(conn, ticker, strategy) >= MAX_SCALP_LOSSES_PER_MARKET
+        ):
+            return None
+        if strategy == "SCALP" and not _scalp_is_armed(conn, ticker, side):
             return None
         acct = conn.execute("SELECT cash FROM kalshi_paper_account WHERE id=1").fetchone()
         cash = float(acct["cash"])
@@ -213,12 +271,11 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         conn.execute("""
             INSERT INTO kalshi_paper_positions(
                 ticker,side,strategy,status,opened_at,expires_at,target_price,
-                spot_entry_price,entry_price,contracts,entry_fee,last_mark
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                entry_price,contracts,entry_fee,last_mark
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
         """, (
             ticker, side, strategy, "OPEN", now, expires_at,
-            _f(decision.get("target_price")), _f(spot_price), entry, contracts,
-            fee, _quote(decision, side, ask=False),
+            _f(decision.get("target_price")), entry, contracts, fee, _quote(decision, side, ask=False),
         ))
         conn.commit()
         direction = "UP" if side == "YES" else "DOWN"
@@ -254,6 +311,8 @@ def _close(conn, row, exit_price, reason, charge_exit_fee=True):
         SET status='CLOSED',closed_at=?,exit_price=?,exit_fee=?,pnl=?,exit_reason=?,last_mark=?
         WHERE id=?
     """, (now, exit_price, exit_fee, pnl, reason, exit_price, int(row["id"])))
+    if str(row["strategy"]).upper() == "SCALP":
+        _set_scalp_armed(conn, row["ticker"], row["side"], False)
     conn.commit()
     return {"event": True, "message": f"Closed PAPER {row['strategy']} {row['side']} {row['ticker']} @ {exit_price:.2f} | P/L {pnl:+.2f}"}
 
@@ -358,24 +417,29 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                 return _close(conn, row, mark, "LOCK_BID_95_PCT")
             # Opposite master/whale signals remain learning inputs for LOCK.
             if row["strategy"] == "SCALP" and mark is not None:
-                contracts = int(row["contracts"])
-                entry_cost = (
-                    float(row["entry_price"]) * contracts
-                    + float(row["entry_fee"])
-                )
-                exit_value = (
-                    mark * contracts
-                    - kalshi_taker_fee(contracts, mark)
-                )
-                net_return = (exit_value - entry_cost) / max(entry_cost, 0.01)
                 action_side = _side_from_action(decision.get("action"))
-                if action_side and action_side != side:
-                    return _close(conn, row, mark, "OPPOSITE_SIGNAL")
                 price_gain = mark - float(row["entry_price"])
                 if price_gain >= SCALP_MIN_MOVE_POINTS - 1e-12:
                     return _close(conn, row, mark, "TAKE_PROFIT_15_POINTS")
-                if net_return <= -SCALP_STOP_LOSS_PCT:
-                    return _close(conn, row, mark, "STOP_LOSS")
+                price_loss = float(row["entry_price"]) - mark
+                if price_loss >= SCALP_STOP_LOSS_POINTS - 1e-12:
+                    return _close(conn, row, mark, "STOP_LOSS_5_POINTS")
+                opposite_since = _f(row["opposite_since"])
+                if action_side and action_side != side:
+                    if opposite_since is None:
+                        conn.execute(
+                            "UPDATE kalshi_paper_positions SET opposite_since=? WHERE id=?",
+                            (now, int(row["id"])),
+                        )
+                        conn.commit()
+                    elif now - opposite_since >= OPPOSITE_SIGNAL_CONFIRM_SECONDS:
+                        return _close(conn, row, mark, "CONFIRMED_OPPOSITE_SIGNAL")
+                elif opposite_since is not None:
+                    conn.execute(
+                        "UPDATE kalshi_paper_positions SET opposite_since=NULL WHERE id=?",
+                        (int(row["id"]),),
+                    )
+                    conn.commit()
             return {"event": False, "message": f"Holding PAPER {row['strategy']} {row['side']} {row['ticker']}"}
     finally:
         conn.close()
@@ -383,6 +447,13 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
         return {'event': False, 'message': 'AUTO PAPER paused; existing positions remain managed'}
     entry_side = _side_from_action(decision.get("action"))
     entry_price = _quote(decision, entry_side, ask=True) if entry_side else None
+    ticker = str(decision.get("kalshi_ticker") or "")
+    rearm_conn = _connect(db_path, starting_cash)
+    try:
+        _refresh_scalp_rearm(rearm_conn, ticker, entry_side)
+        rearm_conn.commit()
+    finally:
+        rearm_conn.close()
     if entry_price is not None and entry_price > MAX_ENTRY_PRICE:
         return {
             "event": False,
@@ -404,6 +475,7 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
         count_conn = _connect(db_path, starting_cash)
         try:
             prior_entries = _strategy_entry_count(count_conn, decision.get("kalshi_ticker"), strategy)
+            prior_losses = _strategy_loss_count(count_conn, decision.get("kalshi_ticker"), strategy)
         finally:
             count_conn.close()
         limit = MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET
@@ -413,7 +485,33 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                 "event": False,
                 "message": f"Skipped PAPER {strategy}: {limit} {noun} already entered for this 15-minute market.",
             }
+        if strategy == "SCALP" and prior_losses >= MAX_SCALP_LOSSES_PER_MARKET:
+            return {
+                "event": False,
+                "message": (
+                    "Skipped PAPER SCALP: two losses already occurred in this "
+                    "15-minute market; market circuit breaker is active."
+                ),
+            }
     if entry_side and str(decision.get("action", "")).upper().startswith("SCALP"):
+        entry_bid = _quote(decision, entry_side, ask=False)
+        if (
+            entry_bid is None
+            or entry_price is None
+            or entry_price - entry_bid > MAX_ENTRY_SPREAD_POINTS + 1e-12
+        ):
+            spread_text = (
+                "unavailable"
+                if entry_bid is None or entry_price is None
+                else f"{(entry_price-entry_bid)*100:.0f} points"
+            )
+            return {
+                "event": False,
+                "message": (
+                    f"Skipped PAPER SCALP: executable spread {spread_text} exceeds "
+                    f"the {MAX_ENTRY_SPREAD_POINTS*100:.0f}-point maximum."
+                ),
+            }
         projected_exit = _projected_scalp_exit(decision)
         if projected_exit is None or entry_price is None or projected_exit - entry_price < SCALP_MIN_MOVE_POINTS - 1e-12:
             projected_text = "unavailable" if projected_exit is None else f"{projected_exit * 100:.0f}%"
@@ -424,6 +522,15 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                     f"the {SCALP_MIN_MOVE_POINTS * 100:.0f}-point minimum move."
                 ),
             }
+        armed_conn = _connect(db_path, starting_cash)
+        try:
+            if not _scalp_is_armed(armed_conn, ticker, entry_side):
+                return {
+                    "event": False,
+                    "message": "Skipped PAPER SCALP: waiting for a fresh signal before re-entry.",
+                }
+        finally:
+            armed_conn.close()
     opened = open_position(db_path, starting_cash, decision, risk, spot_price)
     return opened or {"event": False, "message": "No Kalshi paper-contract action"}
 
@@ -513,33 +620,5 @@ def paper_history(db_path, starting_cash=500.0, limit=100):
                 "expires_at": item.get("expires_at"),
             })
         return history
-    finally:
-        conn.close()
-
-
-def paper_chart_entries(db_path, ticker, starting_cash=500.0, limit=11):
-    """Return plot-safe entry markers for one active 15-minute market."""
-    ticker = str(ticker or "").strip()
-    if not ticker:
-        return []
-    conn = _connect(db_path, starting_cash)
-    try:
-        rows = conn.execute(
-            """SELECT side,strategy,opened_at,entry_price,spot_entry_price
-               FROM kalshi_paper_positions
-               WHERE ticker=? AND spot_entry_price IS NOT NULL
-               ORDER BY opened_at ASC, id ASC LIMIT ?""",
-            (ticker, max(1, min(25, int(limit)))),
-        ).fetchall()
-        return [
-            {
-                "direction": "UP" if row["side"] == "YES" else "DOWN",
-                "strategy": str(row["strategy"]),
-                "opened_at": float(row["opened_at"]),
-                "kalshi_entry_pct": float(row["entry_price"]) * 100.0,
-                "spot_entry_price": float(row["spot_entry_price"]),
-            }
-            for row in rows
-        ]
     finally:
         conn.close()

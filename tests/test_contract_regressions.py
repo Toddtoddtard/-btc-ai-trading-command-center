@@ -1,7 +1,6 @@
 import tempfile
 import time
 import unittest
-import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 import kalshi_paper_engine as engine
@@ -16,7 +15,7 @@ class ContractRegressionTests(unittest.TestCase):
                              kalshi_close_ts=time.time()+900, target_price=100,
                              yes_ask_dollars=.50, yes_bid_dollars=.48,
                              no_ask_dollars=.52, no_bid_dollars=.50,
-                             confidence=.95)
+                             confidence=.95, scalp_projected_exit_price=.80)
         self.risk = dict(approved=True, position_pct=.1)
 
     def open(self):
@@ -31,25 +30,6 @@ class ContractRegressionTests(unittest.TestCase):
     def cycle(self, result=None, spot=100, enabled=True):
         return engine.manage_kalshi_paper_cycle(self.db, 500, self.decision, self.risk,
                                                spot, enabled=enabled, settlement_reader=lambda _: result)
-
-    def test_existing_database_migrates_spot_entry_column(self):
-        legacy_db = self.tmp.name + '/legacy.db'
-        with sqlite3.connect(legacy_db) as conn:
-            conn.execute(
-                """CREATE TABLE kalshi_paper_positions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ticker TEXT, side TEXT, strategy TEXT, status TEXT,
-                    opened_at REAL, entry_price REAL, contracts INTEGER,
-                    entry_fee REAL
-                )"""
-            )
-        with engine._connect(legacy_db) as conn:
-            columns = {
-                row['name'] for row in conn.execute(
-                    'PRAGMA table_info(kalshi_paper_positions)'
-                )
-            }
-        self.assertIn('spot_entry_price', columns)
 
     def test_delayed_settlement_ignores_spot(self):
         self.open()
@@ -98,13 +78,6 @@ class ContractRegressionTests(unittest.TestCase):
             engine.paper_summary(self.db)['open_position']['amount_down'],
         )
         self.assertNotIn('ticker', opened[0])
-        marker = engine.paper_chart_entries(
-            self.db, self.decision['kalshi_ticker']
-        )[0]
-        self.assertEqual(marker['direction'], 'UP')
-        self.assertEqual(marker['strategy'], 'LOCK')
-        self.assertEqual(marker['kalshi_entry_pct'], 50.0)
-        self.assertEqual(marker['spot_entry_price'], 100.0)
 
         self.expire()
         self.cycle('yes')
@@ -114,14 +87,14 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertAlmostEqual(closed['pnl'], engine.paper_summary(self.db)['realized_pnl'])
 
     def test_scalp_requires_projected_fifteen_point_move(self):
-        self.decision.update(action='SCALP UP', confidence=.64)
+        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.64)
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
         self.assertIn('15-point minimum move', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
         # At a 50% entry, a 65% selected-side forecast qualifies exactly.
-        self.decision['confidence'] = .65
+        self.decision['scalp_projected_exit_price'] = .65
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['entry_price'], .50)
@@ -214,12 +187,98 @@ class ContractRegressionTests(unittest.TestCase):
             self.assertTrue(self.cycle()['event'])
             self.decision['yes_bid_dollars'] = .65
             self.assertTrue(self.cycle()['event'])
+            self.decision['action'] = 'HOLD'
+            self.assertFalse(self.cycle()['event'])
+            self.decision['action'] = 'SCALP UP'
 
         self.decision.update(yes_ask_dollars=.50, yes_bid_dollars=.48)
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
         self.assertIn('10 SCALPs already entered', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_normal_spread_does_not_trigger_immediate_stop_or_reentry_loop(self):
+        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.80)
+        self.assertTrue(self.cycle()['event'])
+
+        # A two-point bid/ask spread is transaction cost, not a five-point
+        # adverse contract move. The position must remain open.
+        held = self.cycle()
+        self.assertFalse(held['event'])
+        self.assertIn('Holding', held['message'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+
+        # A real five-point adverse move closes once, then the unchanged
+        # signal stays disarmed instead of churning ten identical entries.
+        self.decision['yes_bid_dollars'] = .45
+        self.assertTrue(self.cycle()['event'])
+        self.decision['yes_bid_dollars'] = .48
+        blocked = self.cycle()
+        self.assertFalse(blocked['event'])
+        self.assertIn('fresh signal', blocked['message'])
+        self.assertEqual(engine.paper_summary(self.db)['samples'], 1)
+
+        # HOLD rearms the side; a later return of the signal is a new scalp.
+        self.decision['action'] = 'HOLD'
+        self.assertFalse(self.cycle()['event'])
+        self.decision.update(action='SCALP UP', yes_bid_dollars=.48)
+        self.assertTrue(self.cycle()['event'])
+
+    def test_confidence_is_not_used_as_projected_contract_price(self):
+        self.decision.update(
+            action='SCALP UP',
+            confidence=.99,
+            scalp_projected_exit_price=None,
+        )
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('projected exit unavailable', skipped['message'])
+
+    def test_wide_spread_is_rejected(self):
+        self.decision.update(
+            action='SCALP UP',
+            yes_ask_dollars=.50,
+            yes_bid_dollars=.46,
+            scalp_projected_exit_price=.80,
+        )
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('spread 4 points', skipped['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_opposite_signal_must_persist_before_scalp_exit(self):
+        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.80)
+        self.assertTrue(self.cycle()['event'])
+        self.decision.update(action='SCALP DOWN', no_bid_dollars=.50)
+        first = self.cycle()
+        self.assertFalse(first['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+
+        with engine._connect(self.db) as conn:
+            conn.execute(
+                'UPDATE kalshi_paper_positions SET opposite_since=? WHERE status="OPEN"',
+                (time.time() - engine.OPPOSITE_SIGNAL_CONFIRM_SECONDS - 1,),
+            )
+        confirmed = self.cycle()
+        self.assertTrue(confirmed['event'])
+        self.assertIn('Closed PAPER SCALP', confirmed['message'])
+
+    def test_two_losses_stop_further_scalps_in_same_market(self):
+        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.80)
+        for _ in range(2):
+            self.decision.update(yes_ask_dollars=.50, yes_bid_dollars=.48)
+            self.assertTrue(self.cycle()['event'])
+            self.decision['yes_bid_dollars'] = .45
+            self.assertTrue(self.cycle()['event'])
+            self.decision['action'] = 'HOLD'
+            self.assertFalse(self.cycle()['event'])
+            self.decision['action'] = 'SCALP UP'
+
+        self.decision['yes_bid_dollars'] = .48
+        blocked = self.cycle()
+        self.assertFalse(blocked['event'])
+        self.assertIn('circuit breaker', blocked['message'])
+        self.assertEqual(engine.paper_summary(self.db)['samples'], 2)
 
     def test_decision_lock_is_independent_immutable_and_expires(self):
         ticker = self.decision['kalshi_ticker']
@@ -251,7 +310,7 @@ class ContractRegressionTests(unittest.TestCase):
         )[0]
         canonical_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
-            'paper_chart_entries, paper_history, paper_summary, persistent_lock_side'
+            'paper_history, paper_summary, persistent_lock_side'
         )
         legacy_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
@@ -283,9 +342,6 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('live_close_ts - time.time()', source)
         self.assertIn('components.html(_live_countdown_html, height=72', source)
         self.assertIn('setInterval(renderInlineCountdown, 250)', source)
-        self.assertIn('function paperEntryTrace()', source)
-        self.assertIn('paper_entries=_persistent_paper_entries', source)
-        self.assertIn("Entered at {_call_entries[-1]", source)
         self.assertIn(
             'Math.min(TOTAL,Math.max(0,(closeMs-Date.now())/1000))',
             source,
