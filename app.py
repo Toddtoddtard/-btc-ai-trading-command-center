@@ -60,7 +60,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r72-live-timer-price-sync"
+APP_VERSION = "2026.09.08-r73-clock-skew-guard"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -3679,7 +3679,7 @@ _kalshi_timer_html = r"""
   const fmt=(sec)=>{sec=Math.max(0,Math.floor(sec));const m=Math.floor(sec/60),s=sec%60;return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');};
   function render(){
     if(!closeMs){cd.textContent='--:--';fill.style.width='0%';elapsedEl.textContent='--:-- elapsed';return;}
-    const remain=Math.max(0,(closeMs-Date.now())/1000);
+    const remain=Math.min(TOTAL,Math.max(0,(closeMs-Date.now())/1000));
     const elapsed=Math.max(0,Math.min(TOTAL,TOTAL-remain));
     cd.textContent=fmt(remain);
     elapsedEl.textContent=fmt(elapsed)+' elapsed';
@@ -5105,7 +5105,7 @@ def live_dashboard():
             # the visible countdown must not inherit that cache age.
             live_close_ts = kalshi_close_timestamp(kctx)
             rem = (
-                int(max(0, live_close_ts - time.time()))
+                int(min(15 * 60, max(0, live_close_ts - time.time())))
                 if pd.notna(live_close_ts)
                 else (
                     int(kctx["seconds_remaining"])
@@ -5135,7 +5135,7 @@ def live_dashboard():
                   const closeMs = {countdown_close_ms};
                   const value = document.getElementById("live-contract-countdown");
                   function renderInlineCountdown() {{
-                    const remaining = Math.max(0, Math.floor((closeMs - Date.now()) / 1000));
+                    const remaining = Math.min(15 * 60, Math.max(0, Math.floor((closeMs - Date.now()) / 1000)));
                     const minutes = Math.floor(remaining / 60);
                     const seconds = remaining % 60;
                     value.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
