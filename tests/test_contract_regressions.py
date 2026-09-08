@@ -204,6 +204,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertNotIn('to the end of the current Kalshi 15-minute market', source)
         self.assertIn('paper position sells at a 95% executable bid', source)
         self.assertIn('paper position sells at a 95% bid', source)
+        self.assertIn('[data-testid="stAlert"] [data-testid="stMarkdownContainer"] p', source)
+        self.assertIn('a[aria-label="Link to heading"]', source)
 
         installer = (
             root / 'tools' / 'apply_kalshi_contract_paper_v1.py'

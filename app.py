@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r68-live-rule-labels"
+APP_VERSION = "2026.09.08-r69-dark-alert-readability"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -3835,6 +3835,16 @@ if dark_mode:
             border-radius:12px !important;
             color:#eaf2ff !important;
             box-shadow:0 8px 22px rgba(0,0,0,.14) !important;
+        }
+        [data-testid="stAlert"] [data-testid="stMarkdownContainer"],
+        [data-testid="stAlert"] [data-testid="stMarkdownContainer"] p,
+        [data-testid="stAlert"] [data-testid="stMarkdownContainer"] span,
+        [data-testid="stAlert"] > div {
+            color:#eaf2ff !important;
+            opacity:1 !important;
+        }
+        a[aria-label="Link to heading"] {
+            display:none !important;
         }
         .paper-banner {
             background:linear-gradient(90deg,rgba(0,230,179,.12),rgba(22,135,255,.08)) !important;
