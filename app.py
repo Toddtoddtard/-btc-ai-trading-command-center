@@ -23,7 +23,7 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
-from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side
+from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_chart_entries, paper_history, paper_summary, persistent_lock_side
 from learning_prices import closed_price_at
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
@@ -4056,7 +4056,7 @@ st.markdown(
 # PERSISTENT LIVE MARKET CHART
 # ============================================================
 
-def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None):
+def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None, paper_entries=None):
     """
     Browser-side Plotly chart.
 
@@ -4095,6 +4095,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             "ticker": initial_ticker or "",
             "dark": bool(dark_mode),
             "learning": learning_state or get_learning_state(),
+            "entries": paper_entries or [],
         }
     ).replace("</", "<\\/")
 
@@ -4342,6 +4343,32 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             }};
         }}
 
+        function paperEntryTrace() {{
+            const entries = (entryMarkers || []).filter(e =>
+                Number.isFinite(Number(e.opened_at)) &&
+                Number.isFinite(Number(e.spot_entry_price)) &&
+                Number.isFinite(Number(e.kalshi_entry_pct))
+            );
+            return {{
+                type: "scatter",
+                x: entries.map(e => new Date(Number(e.opened_at) * 1000).toISOString()),
+                y: entries.map(e => Number(e.spot_entry_price)),
+                mode: "markers",
+                marker: {{
+                    size: 7,
+                    symbol: "circle",
+                    color: entries.map(e => e.direction === "UP" ? "#20f0bd" : "#ff5d72"),
+                    line: {{color: paperBg, width: 1}}
+                }},
+                text: entries.map(e =>
+                    e.strategy + " " + e.direction + " • Kalshi entry " +
+                    Number(e.kalshi_entry_pct).toFixed(0) + "%"
+                ),
+                name: "Bot entries",
+                hovertemplate: "%{{text}}<br>BTC at call: $%{{y:,.2f}}<extra></extra>"
+            }};
+        }}
+
         function targetShape() {{
             if (!Number.isFinite(currentTarget)) return [];
             return [{{
@@ -4423,6 +4450,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }};
 
         let rows = initial.candles || [];
+        let entryMarkers = initial.entries || [];
         let selectedPredictionHorizon = 15;
 
         const horizonButtons = Array.from(
@@ -4446,7 +4474,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 [
                     candleTrace(rows),
                     predictionTrace(rows, selectedPredictionHorizon),
-                    predictionPathTrace(rows, selectedPredictionHorizon)
+                    predictionPathTrace(rows, selectedPredictionHorizon),
+                    paperEntryTrace()
                 ],
                 {{
                     ...layout,
@@ -4467,7 +4496,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             [
                 candleTrace(rows),
                 predictionTrace(rows, selectedPredictionHorizon),
-                predictionPathTrace(rows, selectedPredictionHorizon)
+                predictionPathTrace(rows, selectedPredictionHorizon),
+                paperEntryTrace()
             ],
             layout,
             config
@@ -4613,7 +4643,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     [
                         candleTrace(rows),
                         predictionTrace(rows, selectedPredictionHorizon),
-                        predictionPathTrace(rows, selectedPredictionHorizon)
+                        predictionPathTrace(rows, selectedPredictionHorizon),
+                        paperEntryTrace()
                     ],
                     {{
                         ...layout,
@@ -4638,6 +4669,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 kalshiWindowKey = windowKey;
                 currentTicker = "";
                 currentTarget = NaN;
+                entryMarkers = [];
                 await Plotly.relayout(chart, {{
                     shapes: [],
                     annotations: []
@@ -4888,12 +4920,23 @@ except Exception:
 
 _learning_state = get_learning_state()
 
+try:
+    _persistent_paper_entries = paper_chart_entries(
+        DB_PATH,
+        _persistent_ctx.get("ticker", ""),
+        STARTING_CASH,
+        limit=11,
+    )
+except Exception:
+    _persistent_paper_entries = []
+
 persistent_kalshi_market_chart(
     _persistent_hist,
     _persistent_ctx.get("target", np.nan),
     _persistent_ctx.get("ticker", ""),
     dark_mode=dark_mode,
     learning_state=_learning_state,
+    paper_entries=_persistent_paper_entries,
 )
 
 if _learning_state["samples"] > 0:
@@ -5004,6 +5047,10 @@ def live_dashboard():
     if auto_result.get("event"):
         account = get_account(price)
         risk = risk_evaluate(decision, account, hist, futures)
+        # A new entry needs one full rerun so the persistent chart receives the
+        # freshly stored marker. Closing events do not need to rebuild it.
+        if str(auto_result.get("message", "")).startswith("Opened PAPER"):
+            st.rerun(scope="app")
 
     if record_predictions:
         maybe_record_prediction(decision, price, min_seconds=60)
@@ -5309,12 +5356,22 @@ def live_dashboard():
 
     with tab_ai:
         st.subheader("Master Kalshi 15-minute Prediction AI")
+        _call_entries = paper_chart_entries(
+            DB_PATH,
+            decision.get("kalshi_ticker", ""),
+            STARTING_CASH,
+            limit=11,
+        )
         d1, d2, d3, d4, d5 = st.columns(5)
         with d1:
             st.markdown(
                 f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Call</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
                 unsafe_allow_html=True,
             )
+            if _call_entries:
+                st.caption(
+                    f"Entered at {_call_entries[-1]['kalshi_entry_pct']:.0f}%"
+                )
         d2.metric("Master score", f"{decision['score']:+.3f}")
         d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
         d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")

@@ -1,6 +1,7 @@
 import tempfile
 import time
 import unittest
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 import kalshi_paper_engine as engine
@@ -30,6 +31,26 @@ class ContractRegressionTests(unittest.TestCase):
     def cycle(self, result=None, spot=100, enabled=True):
         return engine.manage_kalshi_paper_cycle(self.db, 500, self.decision, self.risk,
                                                spot, enabled=enabled, settlement_reader=lambda _: result)
+
+    def test_existing_database_migrates_entry_marker_columns(self):
+        legacy_db = self.tmp.name + '/legacy.db'
+        with sqlite3.connect(legacy_db) as conn:
+            conn.execute(
+                """CREATE TABLE kalshi_paper_positions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT, side TEXT, strategy TEXT, status TEXT,
+                    opened_at REAL, entry_price REAL, contracts INTEGER,
+                    entry_fee REAL
+                )"""
+            )
+        with engine._connect(legacy_db) as conn:
+            columns = {
+                row['name'] for row in conn.execute(
+                    'PRAGMA table_info(kalshi_paper_positions)'
+                )
+            }
+        self.assertIn('spot_entry_price', columns)
+        self.assertIn('opposite_since', columns)
 
     def test_delayed_settlement_ignores_spot(self):
         self.open()
@@ -78,6 +99,13 @@ class ContractRegressionTests(unittest.TestCase):
             engine.paper_summary(self.db)['open_position']['amount_down'],
         )
         self.assertNotIn('ticker', opened[0])
+        marker = engine.paper_chart_entries(
+            self.db, self.decision['kalshi_ticker']
+        )[0]
+        self.assertEqual(marker['direction'], 'UP')
+        self.assertEqual(marker['strategy'], 'LOCK')
+        self.assertEqual(marker['kalshi_entry_pct'], 50.0)
+        self.assertEqual(marker['spot_entry_price'], 100.0)
 
         self.expire()
         self.cycle('yes')
@@ -310,7 +338,7 @@ class ContractRegressionTests(unittest.TestCase):
         )[0]
         canonical_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
-            'paper_history, paper_summary, persistent_lock_side'
+            'paper_chart_entries, paper_history, paper_summary, persistent_lock_side'
         )
         legacy_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
@@ -342,6 +370,9 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('live_close_ts - time.time()', source)
         self.assertIn('components.html(_live_countdown_html, height=72', source)
         self.assertIn('setInterval(renderInlineCountdown, 250)', source)
+        self.assertIn('function paperEntryTrace()', source)
+        self.assertIn('paper_entries=_persistent_paper_entries', source)
+        self.assertIn("Entered at {_call_entries[-1]", source)
         self.assertIn(
             'Math.min(TOTAL,Math.max(0,(closeMs-Date.now())/1000))',
             source,
