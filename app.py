@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r66-synced-immutable-lock"
+APP_VERSION = "2026.09.08-r67-15pt-scalp-95-lock-exit"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5599,7 +5599,8 @@ def live_dashboard():
         st.caption(risk["reason"])
         st.caption(
             "Entry rule: automatic SCALP and LOCK trades are rejected above "
-            "a 75% Kalshi contract price."
+            "a 75% Kalshi contract price. SCALP requires a projected 15-point "
+            "contract gain; LOCK sells automatically at a 95% executable bid."
         )
 
         st.subheader("Automatic Kalshi Paper Trade Log")

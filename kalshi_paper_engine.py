@@ -22,13 +22,14 @@ def fetch_settled_result(ticker):
 GENERAL_TAKER_FEE_RATE = 0.07
 MAX_ENTRY_PRICE = 0.75
 
-# SCALP positions are short-duration trades: realize a net 25% gain (the
-# midpoint of the 20-30% target band) instead of riding them to settlement.
-SCALP_TAKE_PROFIT_PCT = 0.25
+# SCALP positions require a forecast of at least 15 contract-price points and
+# realize profit once that full move is available (for example, 50% to 65%).
+SCALP_MIN_MOVE_POINTS = 0.15
 SCALP_STOP_LOSS_PCT = 0.10
 
-# LOCK positions are immutable settlement calls. Once established, their side
-# cannot be reversed, downgraded, or exited before official window settlement.
+# A LOCK keeps its original direction, but its paper position realizes the
+# near-certain payout early whenever its executable bid reaches 95%.
+LOCK_TAKE_PROFIT_PRICE = 0.95
 
 
 def _f(value, default=None):
@@ -119,6 +120,16 @@ def _quote(decision, side, ask=False):
     return value
 
 
+def _projected_scalp_exit(decision):
+    """Return the model's selected-side fair value used for SCALP qualification."""
+    projected = _f(decision.get("scalp_projected_exit_price"))
+    if projected is None:
+        projected = _f(decision.get("confidence"))
+    if projected is not None and projected > 1.0:
+        projected /= 100.0
+    return projected if projected is not None and 0.0 <= projected <= 1.0 else None
+
+
 def open_position(db_path, starting_cash, decision, risk, spot_price):
     side = _side_from_action(decision.get("action"))
     if side is None or not bool(risk.get("approved")):
@@ -129,6 +140,11 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     entry = _quote(decision, side, ask=True)
     if entry is None or entry > MAX_ENTRY_PRICE:
         return None
+    strategy = "LOCK" if str(decision.get("action", "")).upper().startswith("LOCK") else "SCALP"
+    if strategy == "SCALP":
+        projected_exit = _projected_scalp_exit(decision)
+        if projected_exit is None or projected_exit - entry < SCALP_MIN_MOVE_POINTS - 1e-12:
+            return None
     now = time.time()
     expires_at = _f(decision.get('kalshi_close_ts'))
     if expires_at is None:
@@ -157,7 +173,6 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         if expires_at is None:
             remain = _f(decision.get("seconds_remaining"))
             expires_at = now + remain if remain is not None else None
-        strategy = "LOCK" if str(decision.get("action", "")).upper().startswith("LOCK") else "SCALP"
         conn.execute("UPDATE kalshi_paper_account SET cash=?,updated_at=? WHERE id=1", (cash-total_cost, now))
         conn.execute("""
             INSERT INTO kalshi_paper_positions(
@@ -300,8 +315,11 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                     return {'event': False, 'message': 'Awaiting official Kalshi settlement: ' + str(row['ticker'])}
                 payoff = float(side.lower() == result)
                 return _close(conn, row, payoff, 'OFFICIAL_SETTLEMENT:' + result, charge_exit_fee=False)
-            # LOCK means hold this exact side through official settlement.
-            # Opposite master/whale signals remain learning inputs only.
+            # LOCK direction remains immutable, but bank the position once its
+            # executable bid reaches 95% instead of risking the final five cents.
+            if row["strategy"] == "LOCK" and mark is not None and mark >= LOCK_TAKE_PROFIT_PRICE:
+                return _close(conn, row, mark, "LOCK_BID_95_PCT")
+            # Opposite master/whale signals remain learning inputs for LOCK.
             if row["strategy"] == "SCALP" and mark is not None:
                 contracts = int(row["contracts"])
                 entry_cost = (
@@ -316,8 +334,9 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                 action_side = _side_from_action(decision.get("action"))
                 if action_side and action_side != side:
                     return _close(conn, row, mark, "OPPOSITE_SIGNAL")
-                if net_return >= SCALP_TAKE_PROFIT_PCT:
-                    return _close(conn, row, mark, "TAKE_PROFIT_25_PCT")
+                price_gain = mark - float(row["entry_price"])
+                if price_gain >= SCALP_MIN_MOVE_POINTS - 1e-12:
+                    return _close(conn, row, mark, "TAKE_PROFIT_15_POINTS")
                 if net_return <= -SCALP_STOP_LOSS_PCT:
                     return _close(conn, row, mark, "STOP_LOSS")
             return {"event": False, "message": f"Holding PAPER {row['strategy']} {row['side']} {row['ticker']}"}
@@ -335,6 +354,17 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                 f"is above the {MAX_ENTRY_PRICE * 100:.0f}% maximum."
             ),
         }
+    if entry_side and str(decision.get("action", "")).upper().startswith("SCALP"):
+        projected_exit = _projected_scalp_exit(decision)
+        if projected_exit is None or entry_price is None or projected_exit - entry_price < SCALP_MIN_MOVE_POINTS - 1e-12:
+            projected_text = "unavailable" if projected_exit is None else f"{projected_exit * 100:.0f}%"
+            return {
+                "event": False,
+                "message": (
+                    f"Skipped PAPER SCALP: projected exit {projected_text} does not provide "
+                    f"the {SCALP_MIN_MOVE_POINTS * 100:.0f}-point minimum move."
+                ),
+            }
     opened = open_position(db_path, starting_cash, decision, risk, spot_price)
     return opened or {"event": False, "message": "No Kalshi paper-contract action"}
 

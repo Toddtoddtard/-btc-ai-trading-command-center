@@ -14,7 +14,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.decision = dict(action='LOCK UP', kalshi_ticker='KXBTC15M-TEST',
                              kalshi_close_ts=time.time()+900, target_price=100,
                              yes_ask_dollars=.50, yes_bid_dollars=.48,
-                             no_ask_dollars=.52, no_bid_dollars=.50)
+                             no_ask_dollars=.52, no_bid_dollars=.50,
+                             confidence=.80)
         self.risk = dict(approved=True, position_pct=.1)
 
     def open(self):
@@ -85,24 +86,33 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(closed['result'], 'WIN')
         self.assertAlmostEqual(closed['pnl'], engine.paper_summary(self.db)['realized_pnl'])
 
-    def test_scalp_takes_net_profit_at_twenty_five_percent(self):
-        self.decision['action'] = 'SCALP UP'
-        self.open()
+    def test_scalp_requires_projected_fifteen_point_move(self):
+        self.decision.update(action='SCALP UP', confidence=.64)
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('15-point minimum move', skipped['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-        # A modest gain stays open because fees keep net profit below 25%.
-        self.decision['yes_bid_dollars'] = .60
+        # At a 50% entry, a 65% selected-side forecast qualifies exactly.
+        self.decision['confidence'] = .65
+        opened = self.cycle()
+        self.assertTrue(opened['event'])
+        self.assertEqual(engine.paper_summary(self.db)['open_position']['entry_price'], .50)
+
+    def test_scalp_takes_profit_after_fifteen_contract_points(self):
+        self.decision.update(action='SCALP UP', confidence=.80)
+        self.open()
+        self.decision['yes_bid_dollars'] = .64
         self.assertFalse(self.cycle()['event'])
         self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
-
-        # The scalp realizes profit once net return clears the 25% target.
-        self.decision['yes_bid_dollars'] = .70
+        self.decision['yes_bid_dollars'] = .65
         closed = self.cycle()
         self.assertTrue(closed['event'])
         with engine._connect(self.db) as conn:
             reason = conn.execute(
                 'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
             ).fetchone()['exit_reason']
-        self.assertEqual(reason, 'TAKE_PROFIT_25_PCT')
+        self.assertEqual(reason, 'TAKE_PROFIT_15_POINTS')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_ignores_normal_opposite_signal(self):
@@ -129,6 +139,21 @@ class ContractRegressionTests(unittest.TestCase):
         result = self.cycle()
         self.assertFalse(result['event'])
         self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_lock_sells_when_its_bid_reaches_ninety_five_percent(self):
+        self.open()
+        self.decision['yes_bid_dollars'] = .94
+        self.assertFalse(self.cycle()['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+        self.decision['yes_bid_dollars'] = .95
+        closed = self.cycle()
+        self.assertTrue(closed['event'])
+        with engine._connect(self.db) as conn:
+            reason = conn.execute(
+                'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
+            ).fetchone()['exit_reason']
+        self.assertEqual(reason, 'LOCK_BID_95_PCT')
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_decision_lock_is_independent_immutable_and_expires(self):
         ticker = self.decision['kalshi_ticker']
