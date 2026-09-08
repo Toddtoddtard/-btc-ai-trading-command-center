@@ -22,7 +22,7 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
-from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side, register_decision_lock
+from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side
 from learning_prices import closed_price_at
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
@@ -59,7 +59,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r65-immutable-window-lock"
+APP_VERSION = "2026.09.08-r66-synced-immutable-lock"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -1597,6 +1597,68 @@ def run_specialists(hist, agg, futures, kalshi):
 # ============================================================
 
 
+def _ensure_window_lock_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kalshi_decision_locks (
+            ticker TEXT PRIMARY KEY,
+            side TEXT NOT NULL CHECK(side IN ('YES', 'NO')),
+            locked_at REAL NOT NULL,
+            expires_at REAL NOT NULL
+        )
+    """)
+
+
+def _persistent_window_lock_side(ticker=None):
+    """Read the app-level immutable window latch, with legacy fallback."""
+    ticker = str(ticker or "").strip()
+    now = time.time()
+    with db_conn() as conn:
+        _ensure_window_lock_table(conn)
+        if ticker:
+            row = conn.execute(
+                """SELECT side FROM kalshi_decision_locks
+                   WHERE ticker=? AND expires_at>?
+                   ORDER BY locked_at DESC LIMIT 1""",
+                (ticker, now),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """SELECT side FROM kalshi_decision_locks
+                   WHERE expires_at>?
+                   ORDER BY locked_at DESC LIMIT 1""",
+                (now,),
+            ).fetchone()
+    if row:
+        return row["side"]
+    return persistent_lock_side(DB_PATH, ticker, STARTING_CASH)
+
+
+def _register_window_lock(ticker, side, expires_at):
+    """First valid LOCK wins; later writes cannot replace its direction."""
+    ticker = str(ticker or "").strip()
+    side = "YES" if str(side).upper() in {"YES", "UP", "LOCK UP"} else "NO"
+    expiry = safe_float(expires_at)
+    now = time.time()
+    if not ticker or pd.isna(expiry) or expiry <= now:
+        return None
+    with db_conn() as conn:
+        _ensure_window_lock_table(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM kalshi_decision_locks WHERE expires_at<=?", (now,))
+        conn.execute(
+            """INSERT OR IGNORE INTO kalshi_decision_locks(
+                   ticker,side,locked_at,expires_at
+               ) VALUES(?,?,?,?)""",
+            (ticker, side, now, expiry),
+        )
+        row = conn.execute(
+            "SELECT side FROM kalshi_decision_locks WHERE ticker=? AND expires_at>?",
+            (ticker, now),
+        ).fetchone()
+        conn.commit()
+    return row["side"] if row else None
+
+
 def master_decision(results, hist, kalshi=None):
     remote_learning = fetch_remote_learning_state() or {}
     regime_name = detect_regime(hist)
@@ -1627,7 +1689,7 @@ def master_decision(results, hist, kalshi=None):
     # registered for a still-open ticker, every refresh and every downstream
     # gate must keep that exact side until the contract window expires.
     current_ticker = kctx.get("ticker", "")
-    _db_lock_side = persistent_lock_side(DB_PATH, current_ticker, STARTING_CASH)
+    _db_lock_side = _persistent_window_lock_side(current_ticker)
     lock_side = "UP" if _db_lock_side == "YES" else "DOWN" if _db_lock_side == "NO" else None
     lock_ticker = current_ticker if lock_side else ""
     _lock_was_already_persisted = lock_side in {"UP", "DOWN"}
@@ -1852,12 +1914,10 @@ def master_decision(results, hist, kalshi=None):
         locked_side = lock_side
         gate_note = ""
     elif action in {"LOCK UP", "LOCK DOWN"} and current_ticker:
-        _registered_side = register_decision_lock(
-            DB_PATH,
+        _registered_side = _register_window_lock(
             current_ticker,
             "YES" if action == "LOCK UP" else "NO",
             pd.Timestamp(kctx.get("close_time")).timestamp() if kctx.get("close_time") else np.nan,
-            STARTING_CASH,
         )
         if _registered_side in {"YES", "NO"}:
             lock_side = "UP" if _registered_side == "YES" else "DOWN"
