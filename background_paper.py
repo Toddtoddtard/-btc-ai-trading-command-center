@@ -20,6 +20,7 @@ from kalshi_paper_engine import (
     LOCK_MIN_CONFIDENCE,
     LOCK_TAKE_PROFIT_PRICE,
     MAX_ENTRY_PRICE,
+    MIN_SCALP_MARKET_PROBABILITY,
     MAX_LOCKS_PER_MARKET,
     MAX_SCALP_LOSSES_PER_MARKET,
     MAX_SCALPS_PER_MARKET,
@@ -280,6 +281,19 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if strategy == "SCALP" and ask > MAX_ENTRY_PRICE:
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER SCALP: Kalshi price {ask*100:.0f}% is above the 75% maximum.", "BLOCKED", now)
         return paper
+    if strategy == "SCALP":
+        market_probability = (bid + ask) / 2.0
+        if market_probability < MIN_SCALP_MARKET_PROBABILITY:
+            message = (
+                f"Skipped PAPER SCALP: selected-side market probability "
+                f"{market_probability*100:.0f}% is below the "
+                f"{MIN_SCALP_MARKET_PROBABILITY*100:.0f}% lottery floor."
+            )
+            _record_signal_outcome(
+                paper, pending, ticker, side, strategy, confidence,
+                message, "BLOCKED", now,
+            )
+            return paper
     same_market = [t for t in paper.get("trades", []) if t.get("ticker") == ticker and t.get("strategy") == strategy]
     if len(same_market) >= (MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET):
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: per-market limit reached.", "BLOCKED", now)
