@@ -49,6 +49,21 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertIsNone(paper["open_position"])
         self.assertIn("above the 75%", paper["last_message"])
 
+    def test_blocked_signal_remains_visible_after_later_wait(self):
+        state = self.pending()
+        paper = bg.run_cycle(
+            state,
+            lambda _: self.market(yes_bid_dollars=.75, yes_ask_dollars=.76),
+            now=1000,
+        )
+        self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
+        self.assertIn("above the 75%", paper["last_signal_message"])
+        state["pending"]["would_wait"] = True
+        paper = bg.run_cycle(state, lambda _: self.market(), now=1001)
+        self.assertEqual(paper["last_message"], "No paper action: learner selected WAIT.")
+        self.assertIn("above the 75%", paper["last_signal_message"])
+        self.assertEqual(len(paper["signal_attempts"]), 1)
+
     def test_final_lock_may_enter_above_75(self):
         state = self.pending(master_confidence=.95)
         paper = bg.run_cycle(
@@ -59,6 +74,7 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertIsNotNone(paper["open_position"])
         self.assertEqual(paper["open_position"]["strategy"], "LOCK")
         self.assertEqual(paper["open_position"]["entry_price"], .85)
+        self.assertEqual(paper["last_signal"]["outcome"], "OPENED")
 
     def test_lock_rejects_fee_loss_at_95_exit(self):
         state = self.pending(master_confidence=.95)
