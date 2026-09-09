@@ -348,7 +348,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
         return None
     entry = _quote(decision, side, ask=True)
-    if entry is None or entry > MAX_ENTRY_PRICE:
+    if entry is None or (strategy == "SCALP" and entry > MAX_ENTRY_PRICE):
         return None
     if strategy == "SCALP":
         projected_exit = _projected_scalp_exit(decision)
@@ -590,16 +590,22 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
         rearm_conn.commit()
     finally:
         rearm_conn.close()
-    if entry_price is not None and entry_price > MAX_ENTRY_PRICE:
+    action = str(decision.get("action", "")).upper()
+    strategy = "LOCK" if action.startswith("LOCK") else "SCALP"
+    if (
+        entry_side
+        and strategy == "SCALP"
+        and entry_price is not None
+        and entry_price > MAX_ENTRY_PRICE
+    ):
         return {
             "event": False,
             "message": (
-                f"Skipped PAPER entry: Kalshi price {entry_price * 100:.0f}% "
+                f"Skipped PAPER SCALP: Kalshi price {entry_price * 100:.0f}% "
                 f"is above the {MAX_ENTRY_PRICE * 100:.0f}% maximum."
             ),
         }
     if entry_side:
-        strategy = "LOCK" if str(decision.get("action", "")).upper().startswith("LOCK") else "SCALP"
         if strategy == "SCALP":
             profitability_gate = scalp_profitability_gate(db_path, starting_cash)
             if not profitability_gate["approved"]:
