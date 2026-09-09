@@ -164,33 +164,37 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(closed['result'], 'WIN')
         self.assertAlmostEqual(closed['pnl'], engine.paper_summary(self.db)['realized_pnl'])
 
-    def test_scalp_requires_projected_fifteen_point_move(self):
-        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.64)
+    def test_scalp_requires_projected_twenty_percent_gross_return(self):
+        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.59)
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
-        self.assertIn('15-point minimum move', skipped['message'])
+        self.assertIn('20% gross-return target', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-        # At a 50% entry, a 65% selected-side forecast qualifies exactly.
-        self.decision['scalp_projected_exit_price'] = .65
+        # At a 50% entry, a 60% forecast is exactly a 20% gross return.
+        self.decision['scalp_projected_exit_price'] = .60
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['entry_price'], .50)
 
-    def test_scalp_takes_profit_after_fifteen_contract_points(self):
-        self.decision.update(action='SCALP UP', confidence=.80)
+    def test_scalp_takes_profit_at_twenty_percent_gross_return(self):
+        self.decision.update(
+            action='SCALP UP',
+            confidence=.80,
+            scalp_projected_exit_price=.60,
+        )
         self.open()
-        self.decision['yes_bid_dollars'] = .64
+        self.decision['yes_bid_dollars'] = .59
         self.assertFalse(self.cycle()['event'])
         self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
-        self.decision['yes_bid_dollars'] = .65
+        self.decision['yes_bid_dollars'] = .60
         closed = self.cycle()
         self.assertTrue(closed['event'])
         with engine._connect(self.db) as conn:
             reason = conn.execute(
                 'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
             ).fetchone()['exit_reason']
-        self.assertEqual(reason, 'TAKE_PROFIT_15_POINTS')
+        self.assertEqual(reason, 'TAKE_PROFIT_20_PCT_GROSS')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_ignores_normal_opposite_signal(self):
@@ -312,17 +316,16 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertFalse(skipped['event'])
         self.assertIn('projected exit unavailable', skipped['message'])
 
-    def test_wide_spread_is_rejected(self):
+    def test_wide_spread_does_not_block_entry(self):
         self.decision.update(
             action='SCALP UP',
             yes_ask_dollars=.50,
-            yes_bid_dollars=.46,
-            scalp_projected_exit_price=.80,
+            yes_bid_dollars=.40,
+            scalp_projected_exit_price=.60,
         )
-        skipped = self.cycle()
-        self.assertFalse(skipped['event'])
-        self.assertIn('spread 4 points', skipped['message'])
-        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+        opened = self.cycle()
+        self.assertTrue(opened['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
 
     def test_opposite_signal_must_persist_before_scalp_exit(self):
         self.decision.update(action='SCALP UP', scalp_projected_exit_price=.80)
@@ -464,8 +467,11 @@ class ContractRegressionTests(unittest.TestCase):
             engine.open_position(self.db, 500, self.decision, self.risk, 100)
         )
 
-        # Exactly 75% remains eligible; only prices above the ceiling are denied.
-        self.decision['yes_ask_dollars'] = .75
+        # Exactly 75% remains eligible; its 20% gross-return target is 90%.
+        self.decision.update(
+            yes_ask_dollars=.75,
+            scalp_projected_exit_price=.90,
+        )
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(
