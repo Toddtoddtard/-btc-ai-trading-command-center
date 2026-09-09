@@ -31,6 +31,7 @@ from kalshi_paper_engine import (
     SCALP_STOP_LOSS_POINTS,
     UNPROVEN_POSITION_CAP,
     kalshi_taker_fee,
+    lock_target_pnl,
 )
 
 STATE_INPUT = os.environ.get("LEARNING_STATE_OUTPUT", "/tmp/learning_state.json")
@@ -283,6 +284,15 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         return paper
     fee = kalshi_taker_fee(contracts, ask)
     amount = contracts * ask + fee
+    if strategy == "LOCK":
+        expected_pnl = lock_target_pnl(contracts, ask)
+        if expected_pnl <= 1e-12:
+            paper["last_message"] = (
+                f"Skipped PAPER LOCK at {ask*100:.0f}%: selling at the 95% "
+                f"bid target would return {expected_pnl:+.2f} after estimated "
+                "Kalshi fees."
+            )
+            return paper
     expires = _f(pending.get("expires_at"))
     position = {"ticker": ticker, "side": side, "direction": "UP" if side == "YES" else "DOWN", "strategy": strategy, "status": "OPEN", "opened_at": now, "expires_at": expires, "entry_price": ask, "spot_entry_price": _f(pending.get("start_price")), "contracts": contracts, "entry_fee": fee, "amount": amount, "last_mark": bid}
     paper["cash"] -= amount
