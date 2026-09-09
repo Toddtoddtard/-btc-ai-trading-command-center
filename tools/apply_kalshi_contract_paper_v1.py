@@ -10,8 +10,11 @@ s = p.read_text()
 
 imp = "from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_history, paper_summary, persistent_lock_side\n"
 legacy_imp = "from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_summary, persistent_lock_side\n"
+modern_imp = "    paper_performance_since_update,\n"
 anchor = "from bot_intelligence_dashboard import render_bot_intelligence_dashboard\n"
-if imp in s:
+if modern_imp in s:
+    pass
+elif imp in s:
     s = s.replace(legacy_imp, "", 1)
 elif legacy_imp in s:
     s = s.replace(legacy_imp, imp, 1)

@@ -116,7 +116,8 @@ new = '''    state = get_auto_state()
 
     return {"approved": True, "position_pct": position_pct, "risk_score": risk_score, "reason": "Authoritative decision gate passed; paper exposure sized"}
 '''
-text = replace_once(text, old, new, "H2 exposure-only risk layer")
+if '"Authoritative decision gate passed; paper exposure sized" + sizing_note' not in text:
+    text = replace_once(text, old, new, "H2 exposure-only risk layer")
 app.write_text(text)
 
 print("External review phase 1 applied: C3 raw grading + H2 duplicate gate cleanup")
