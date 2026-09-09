@@ -20,7 +20,6 @@ from kalshi_paper_engine import (
     LOCK_MIN_CONFIDENCE,
     LOCK_TAKE_PROFIT_PRICE,
     MAX_ENTRY_PRICE,
-    MAX_ENTRY_SPREAD_POINTS,
     MAX_LOCKS_PER_MARKET,
     MAX_SCALP_LOSSES_PER_MARKET,
     MAX_SCALPS_PER_MARKET,
@@ -28,7 +27,7 @@ from kalshi_paper_engine import (
     POST_FIX_MAX_DRAWDOWN_PCT,
     POST_FIX_PROFIT_FACTOR_FLOOR,
     POST_FIX_VALIDATION_TRADES,
-    SCALP_MIN_MOVE_POINTS,
+    SCALP_MIN_GROSS_RETURN,
     SCALP_STOP_LOSS_POINTS,
     UNPROVEN_POSITION_CAP,
     kalshi_taker_fee,
@@ -220,9 +219,10 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             if position["strategy"] == "LOCK" and bid >= LOCK_TAKE_PROFIT_PRICE:
                 _close(paper, position, bid, "LOCK_BID_95_PCT", now)
             elif position["strategy"] == "SCALP":
-                gain = bid - position["entry_price"]
-                if gain >= SCALP_MIN_MOVE_POINTS:
-                    _close(paper, position, bid, "TAKE_PROFIT_15_POINTS", now)
+                entry_price = position["entry_price"]
+                gain = bid - entry_price
+                if gain >= entry_price * SCALP_MIN_GROSS_RETURN:
+                    _close(paper, position, bid, "TAKE_PROFIT_20_PCT_GROSS", now)
                 elif gain <= -SCALP_STOP_LOSS_POINTS:
                     _close(paper, position, bid, "STOP_LOSS_5_POINTS", now)
                 else:
@@ -255,13 +255,15 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         if not gate["approved"]:
             paper["last_message"] = "Skipped PAPER SCALP: " + gate["reason"]
             return paper
-        if ask - bid > MAX_ENTRY_SPREAD_POINTS:
-            paper["last_message"] = f"Skipped PAPER SCALP: spread {(ask-bid)*100:.0f} points exceeds 3 points."
-            return paper
         projected = _projected_side_value(pending, market, side)
-        if projected is None or projected - ask < SCALP_MIN_MOVE_POINTS:
+        required_exit = ask * (1.0 + SCALP_MIN_GROSS_RETURN)
+        if projected is None or projected < required_exit:
             text = "unavailable" if projected is None else f"{projected*100:.0f}%"
-            paper["last_message"] = f"Skipped PAPER SCALP: projected exit {text} does not provide the 15-point minimum move."
+            paper["last_message"] = (
+                f"Skipped PAPER SCALP: projected exit {text} is below the "
+                f"{SCALP_MIN_GROSS_RETURN*100:.0f}% gross-return target "
+                f"({required_exit*100:.0f}%)."
+            )
             return paper
         losses = sum(1 for t in same_market if _f(t.get("pnl"), 0.0) < 0)
         if losses >= MAX_SCALP_LOSSES_PER_MARKET:
