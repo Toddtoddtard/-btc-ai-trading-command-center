@@ -37,11 +37,10 @@ POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
 POST_FIX_MAX_DRAWDOWN_PCT = 0.10
 UNPROVEN_POSITION_CAP = 0.02
 
-# SCALP positions require a forecast of at least 15 contract-price points and
-# realize profit once that full move is available (for example, 50% to 65%).
-SCALP_MIN_MOVE_POINTS = 0.15
+# SCALP positions require a forecast and realized move worth at least a 20%
+# gross return on entry cost (for example, 50% to 60%), before fees.
+SCALP_MIN_GROSS_RETURN = 0.20
 SCALP_STOP_LOSS_POINTS = 0.05
-MAX_ENTRY_SPREAD_POINTS = 0.03
 OPPOSITE_SIGNAL_CONFIRM_SECONDS = 10.0
 
 # A LOCK keeps its original direction, but its paper position realizes the
@@ -352,11 +351,9 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if entry is None or entry > MAX_ENTRY_PRICE:
         return None
     if strategy == "SCALP":
-        bid = _quote(decision, side, ask=False)
-        if bid is None or entry - bid > MAX_ENTRY_SPREAD_POINTS + 1e-12:
-            return None
         projected_exit = _projected_scalp_exit(decision)
-        if projected_exit is None or projected_exit - entry < SCALP_MIN_MOVE_POINTS - 1e-12:
+        required_exit = entry * (1.0 + SCALP_MIN_GROSS_RETURN)
+        if projected_exit is None or projected_exit < required_exit - 1e-12:
             return None
     now = time.time()
     expires_at = _f(decision.get('kalshi_close_ts'))
@@ -556,9 +553,10 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
             # Opposite master/whale signals remain learning inputs for LOCK.
             if row["strategy"] == "SCALP" and mark is not None:
                 action_side = _side_from_action(decision.get("action"))
-                price_gain = mark - float(row["entry_price"])
-                if price_gain >= SCALP_MIN_MOVE_POINTS - 1e-12:
-                    return _close(conn, row, mark, "TAKE_PROFIT_15_POINTS")
+                entry_price = float(row["entry_price"])
+                price_gain = mark - entry_price
+                if price_gain >= entry_price * SCALP_MIN_GROSS_RETURN - 1e-12:
+                    return _close(conn, row, mark, "TAKE_PROFIT_20_PCT_GROSS")
                 price_loss = float(row["entry_price"]) - mark
                 if price_loss >= SCALP_STOP_LOSS_POINTS - 1e-12:
                     return _close(conn, row, mark, "STOP_LOSS_5_POINTS")
@@ -642,32 +640,21 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                 ),
             }
     if entry_side and str(decision.get("action", "")).upper().startswith("SCALP"):
-        entry_bid = _quote(decision, entry_side, ask=False)
-        if (
-            entry_bid is None
-            or entry_price is None
-            or entry_price - entry_bid > MAX_ENTRY_SPREAD_POINTS + 1e-12
-        ):
-            spread_text = (
-                "unavailable"
-                if entry_bid is None or entry_price is None
-                else f"{(entry_price-entry_bid)*100:.0f} points"
-            )
-            return {
-                "event": False,
-                "message": (
-                    f"Skipped PAPER SCALP: executable spread {spread_text} exceeds "
-                    f"the {MAX_ENTRY_SPREAD_POINTS*100:.0f}-point maximum."
-                ),
-            }
         projected_exit = _projected_scalp_exit(decision)
-        if projected_exit is None or entry_price is None or projected_exit - entry_price < SCALP_MIN_MOVE_POINTS - 1e-12:
+        required_exit = (
+            entry_price * (1.0 + SCALP_MIN_GROSS_RETURN)
+            if entry_price is not None
+            else None
+        )
+        if projected_exit is None or required_exit is None or projected_exit < required_exit - 1e-12:
             projected_text = "unavailable" if projected_exit is None else f"{projected_exit * 100:.0f}%"
+            required_text = "unavailable" if required_exit is None else f"{required_exit * 100:.0f}%"
             return {
                 "event": False,
                 "message": (
-                    f"Skipped PAPER SCALP: projected exit {projected_text} does not provide "
-                    f"the {SCALP_MIN_MOVE_POINTS * 100:.0f}-point minimum move."
+                    f"Skipped PAPER SCALP: projected exit {projected_text} is below "
+                    f"the {SCALP_MIN_GROSS_RETURN * 100:.0f}% gross-return target "
+                    f"({required_text})."
                 ),
             }
         armed_conn = _connect(db_path, starting_cash)
