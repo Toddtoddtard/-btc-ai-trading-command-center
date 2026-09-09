@@ -216,6 +216,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             paper["gate"] = _gate(paper["metrics"])
             return paper
         if bid is not None:
+            position["last_mark"] = bid
             if position["strategy"] == "LOCK" and bid >= LOCK_TAKE_PROFIT_PRICE:
                 _close(paper, position, bid, "LOCK_BID_95_PCT", now)
             elif position["strategy"] == "SCALP":
