@@ -244,8 +244,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if ask is None or bid is None:
         paper["last_message"] = "Skipped PAPER entry: executable quote unavailable."
         return paper
-    if ask > MAX_ENTRY_PRICE:
-        paper["last_message"] = f"Skipped PAPER entry: Kalshi price {ask*100:.0f}% is above the 75% maximum."
+    if strategy == "SCALP" and ask > MAX_ENTRY_PRICE:
+        paper["last_message"] = f"Skipped PAPER SCALP: Kalshi price {ask*100:.0f}% is above the 75% maximum."
         return paper
     same_market = [t for t in paper.get("trades", []) if t.get("ticker") == ticker and t.get("strategy") == strategy]
     if len(same_market) >= (MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET):
