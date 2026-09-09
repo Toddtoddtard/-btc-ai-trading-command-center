@@ -43,11 +43,22 @@ class BackgroundPaperTests(unittest.TestCase):
         paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
         self.assertIsNone(paper["open_position"])
 
-    def test_entry_above_75_is_rejected(self):
+    def test_scalp_entry_above_75_is_rejected(self):
         state = self.pending()
         paper = bg.run_cycle(state, lambda _: self.market(yes_bid_dollars=.75, yes_ask_dollars=.76), now=1000)
         self.assertIsNone(paper["open_position"])
         self.assertIn("above the 75%", paper["last_message"])
+
+    def test_final_lock_may_enter_above_75(self):
+        state = self.pending(master_confidence=.95)
+        paper = bg.run_cycle(
+            state,
+            lambda _: self.market(yes_bid_dollars=.84, yes_ask_dollars=.85),
+            now=1000,
+        )
+        self.assertIsNotNone(paper["open_position"])
+        self.assertEqual(paper["open_position"]["strategy"], "LOCK")
+        self.assertEqual(paper["open_position"]["entry_price"], .85)
 
     def test_qualifying_scalp_opens_and_takes_profit(self):
         state = self.pending()
