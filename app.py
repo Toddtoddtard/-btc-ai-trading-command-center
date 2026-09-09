@@ -63,12 +63,13 @@ FUTURES_BASES = [
     "https://fapi.binance.com",
 ]
 KALSHI_BASES = [
+    "https://api.elections.kalshi.com/trade-api/v2",
     "https://external-api.kalshi.com/trade-api/v2",
 ]
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.09-r74-kalshi-profitability-validation"
+APP_VERSION = "2026.09.09-r75-kalshi-target-endpoint-fix"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -4590,26 +4591,36 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             return NaN;
         }}
 
+        const KALSHI_PUBLIC_BASES = [
+            "https://api.elections.kalshi.com/trade-api/v2",
+            "https://external-api.kalshi.com/trade-api/v2"
+        ];
+
+        async function fetchKalshiJson(path) {{
+            for (const base of KALSHI_PUBLIC_BASES) {{
+                try {{
+                    const resp = await fetch(base + path, {{cache:"no-store"}});
+                    if (!resp.ok) continue;
+                    return await resp.json();
+                }} catch (e) {{}}
+            }}
+            return null;
+        }}
+
         async function exactKalshiMarket(ticker) {{
             if (!ticker) return null;
-            try {{
-                const url = "https://external-api.kalshi.com/trade-api/v2/markets/" + encodeURIComponent(ticker);
-                const resp = await fetch(url, {{cache:"no-store"}});
-                if (!resp.ok) return null;
-                const payload = await resp.json();
-                return payload && payload.market ? payload.market : null;
-            }} catch (e) {{ return null; }}
+            const payload = await fetchKalshiJson(
+                "/markets/" + encodeURIComponent(ticker)
+            );
+            return payload && payload.market ? payload.market : null;
         }}
 
         async function fetchKalshiTarget() {{
-            const url =
-                "https://external-api.kalshi.com/trade-api/v2/markets" +
-                "?limit=100&status=open&series_ticker=KXBTC15M";
-
             try {{
-                const resp = await fetch(url, {{cache:"no-store"}});
-                if (!resp.ok) return null;
-                const payload = await resp.json();
+                const payload = await fetchKalshiJson(
+                    "/markets?limit=100&status=open&series_ticker=KXBTC15M"
+                );
+                if (!payload) return null;
                 const markets = Array.isArray(payload.markets) ? payload.markets : [];
                 const now = Date.now();
 
@@ -4700,7 +4711,12 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             }}
 
             const market = await fetchKalshiTarget();
-            if (!market) return;
+            if (!market) {{
+                if (!Number.isFinite(currentTarget)) {{
+                    status.textContent = "Kalshi target unavailable — retrying…";
+                }}
+                return;
+            }}
 
             const changed =
                 market.ticker !== currentTicker ||
