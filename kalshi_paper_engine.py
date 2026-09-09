@@ -21,6 +21,9 @@ def fetch_settled_result(ticker):
 
 GENERAL_TAKER_FEE_RATE = 0.07
 MAX_ENTRY_PRICE = 0.75
+# Match the master decision's extreme-opposing-odds veto. A selected side
+# priced below 20% is a lottery-style thesis, not an approved SCALP setup.
+MIN_SCALP_MARKET_PROBABILITY = 0.20
 LOCK_MIN_CONFIDENCE = 0.95
 MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
@@ -168,6 +171,15 @@ def _quote(decision, side, ask=False):
     if value is None or not 0 <= value <= 1 or (ask and not 0 < value < 1):
         return None
     return value
+
+
+def _selected_side_market_probability(decision, side):
+    """Return the executable selected-side midpoint used by the odds veto."""
+    bid = _quote(decision, side, ask=False)
+    ask = _quote(decision, side, ask=True)
+    if bid is None or ask is None:
+        return None
+    return (bid + ask) / 2.0
 
 
 def _projected_scalp_exit(decision):
@@ -363,6 +375,12 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if entry is None or (strategy == "SCALP" and entry > MAX_ENTRY_PRICE):
         return None
     if strategy == "SCALP":
+        market_probability = _selected_side_market_probability(decision, side)
+        if (
+            market_probability is None
+            or market_probability < MIN_SCALP_MARKET_PROBABILITY
+        ):
+            return None
         projected_exit = _projected_scalp_exit(decision)
         required_exit = entry * (1.0 + SCALP_MIN_GROSS_RETURN)
         if projected_exit is None or projected_exit < required_exit - 1e-12:
@@ -621,6 +639,24 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
         }
     if entry_side:
         if strategy == "SCALP":
+            market_probability = _selected_side_market_probability(decision, entry_side)
+            if (
+                market_probability is None
+                or market_probability < MIN_SCALP_MARKET_PROBABILITY
+            ):
+                probability_text = (
+                    "unavailable"
+                    if market_probability is None
+                    else f"{market_probability * 100:.0f}%"
+                )
+                return {
+                    "event": False,
+                    "message": (
+                        f"Skipped PAPER SCALP: selected-side market probability "
+                        f"{probability_text} is below the "
+                        f"{MIN_SCALP_MARKET_PROBABILITY * 100:.0f}% lottery floor."
+                    ),
+                }
             profitability_gate = scalp_profitability_gate(db_path, starting_cash)
             if not profitability_gate["approved"]:
                 return {
