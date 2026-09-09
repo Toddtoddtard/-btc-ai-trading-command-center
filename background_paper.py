@@ -68,8 +68,37 @@ def initial_state(now=None):
         "rearm": {},
         "last_cycle_at": _now_iso(now),
         "last_message": "24/7 paper engine initialized; waiting for an approved signal.",
+        "last_signal_at": None,
+        "last_signal_message": "No approved signal has reached execution yet.",
+        "signal_attempts": [],
         "worker_ok": True,
     }
+
+
+def _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, outcome, now):
+    """Persist the last actionable signal even when later WAIT cycles replace last_message."""
+    signal_id = f"{ticker}:{pending.get('opened_at', '')}"
+    attempt = {
+        "signal_id": signal_id,
+        "at": _now_iso(now),
+        "ticker": ticker,
+        "side": side,
+        "direction": "UP" if side == "YES" else "DOWN",
+        "strategy": strategy,
+        "confidence": confidence,
+        "outcome": outcome,
+        "message": message,
+    }
+    attempts = paper.setdefault("signal_attempts", [])
+    if attempts and attempts[-1].get("signal_id") == signal_id:
+        attempts[-1] = attempt
+    else:
+        attempts.append(attempt)
+        del attempts[:-100]
+    paper["last_signal_at"] = attempt["at"]
+    paper["last_signal_message"] = message
+    paper["last_signal"] = attempt
+    paper["last_message"] = message
 
 
 def _market(ticker, timeout=4):
@@ -187,6 +216,9 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         learning_state["background_paper"] = paper
     paper["last_cycle_at"] = _now_iso(now)
     paper["worker_ok"] = True
+    paper.setdefault("last_signal_at", None)
+    paper.setdefault("last_signal_message", "No approved signal has reached execution yet.")
+    paper.setdefault("signal_attempts", [])
     if not paper.get("enabled", True):
         paper["last_message"] = "24/7 paper engine paused."
         return paper
@@ -243,36 +275,37 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"
     bid, ask = _quotes(market, side)
     if ask is None or bid is None:
-        paper["last_message"] = "Skipped PAPER entry: executable quote unavailable."
+        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER entry: executable quote unavailable.", "BLOCKED", now)
         return paper
     if strategy == "SCALP" and ask > MAX_ENTRY_PRICE:
-        paper["last_message"] = f"Skipped PAPER SCALP: Kalshi price {ask*100:.0f}% is above the 75% maximum."
+        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER SCALP: Kalshi price {ask*100:.0f}% is above the 75% maximum.", "BLOCKED", now)
         return paper
     same_market = [t for t in paper.get("trades", []) if t.get("ticker") == ticker and t.get("strategy") == strategy]
     if len(same_market) >= (MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET):
-        paper["last_message"] = f"Skipped PAPER {strategy}: per-market limit reached."
+        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: per-market limit reached.", "BLOCKED", now)
         return paper
     if strategy == "SCALP":
         if not gate["approved"]:
-            paper["last_message"] = "Skipped PAPER SCALP: " + gate["reason"]
+            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER SCALP: " + gate["reason"], "BLOCKED", now)
             return paper
         projected = _projected_side_value(pending, market, side)
         required_exit = ask * (1.0 + SCALP_MIN_GROSS_RETURN)
         if projected is None or projected < required_exit:
             text = "unavailable" if projected is None else f"{projected*100:.0f}%"
-            paper["last_message"] = (
+            message = (
                 f"Skipped PAPER SCALP: projected exit {text} is below the "
                 f"{SCALP_MIN_GROSS_RETURN*100:.0f}% gross-return target "
                 f"({required_exit*100:.0f}%)."
             )
+            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, "BLOCKED", now)
             return paper
         losses = sum(1 for t in same_market if _f(t.get("pnl"), 0.0) < 0)
         if losses >= MAX_SCALP_LOSSES_PER_MARKET:
-            paper["last_message"] = "Skipped PAPER SCALP: two-loss market circuit breaker is active."
+            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER SCALP: two-loss market circuit breaker is active.", "BLOCKED", now)
             return paper
         key = ticker + ":" + side
         if paper.setdefault("rearm", {}).get(key) is False:
-            paper["last_message"] = "Skipped PAPER SCALP: waiting for a fresh signal before re-entry."
+            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER SCALP: waiting for a fresh signal before re-entry.", "BLOCKED", now)
             return paper
 
     budget = max(0.0, paper["cash"]) * UNPROVEN_POSITION_CAP
@@ -280,24 +313,26 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     while contracts and contracts * ask + kalshi_taker_fee(contracts, ask) > budget:
         contracts -= 1
     if contracts < 1:
-        paper["last_message"] = "Skipped PAPER entry: paper allocation is too small."
+        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER entry: paper allocation is too small.", "BLOCKED", now)
         return paper
     fee = kalshi_taker_fee(contracts, ask)
     amount = contracts * ask + fee
     if strategy == "LOCK":
         expected_pnl = lock_target_pnl(contracts, ask)
         if expected_pnl <= 1e-12:
-            paper["last_message"] = (
+            message = (
                 f"Skipped PAPER LOCK at {ask*100:.0f}%: selling at the 95% "
                 f"bid target would return {expected_pnl:+.2f} after estimated "
                 "Kalshi fees."
             )
+            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, "BLOCKED", now)
             return paper
     expires = _f(pending.get("expires_at"))
     position = {"ticker": ticker, "side": side, "direction": "UP" if side == "YES" else "DOWN", "strategy": strategy, "status": "OPEN", "opened_at": now, "expires_at": expires, "entry_price": ask, "spot_entry_price": _f(pending.get("start_price")), "contracts": contracts, "entry_fee": fee, "amount": amount, "last_mark": bid}
     paper["cash"] -= amount
     paper["open_position"] = position
-    paper["last_message"] = f"Opened PAPER {strategy} {position['direction']} • Amount: ${amount:.2f} • Kalshi entry: {ask*100:.0f}%"
+    message = f"Opened PAPER {strategy} {position['direction']} • Amount: ${amount:.2f} • Kalshi entry: {ask*100:.0f}%"
+    _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, "OPENED", now)
     return paper
 
 
