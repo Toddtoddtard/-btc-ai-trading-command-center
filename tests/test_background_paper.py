@@ -10,6 +10,7 @@ except ModuleNotFoundError:  # Allows this isolated test artifact to run locally
     stub.LOCK_MIN_CONFIDENCE = .95
     stub.LOCK_TAKE_PROFIT_PRICE = .95
     stub.MAX_ENTRY_PRICE = .75
+    stub.MIN_SCALP_MARKET_PROBABILITY = .20
     stub.MAX_LOCKS_PER_MARKET = 1
     stub.MAX_SCALP_LOSSES_PER_MARKET = 2
     stub.MAX_SCALPS_PER_MARKET = 10
@@ -85,6 +86,22 @@ class BackgroundPaperTests(unittest.TestCase):
         )
         self.assertIsNone(paper["open_position"])
         self.assertIn("after estimated Kalshi fees", paper["last_message"])
+
+    def test_lottery_style_low_probability_scalp_is_rejected(self):
+        state = self.pending()
+        paper = bg.run_cycle(
+            state,
+            lambda _: self.market(
+                yes_bid_dollars=0.0,
+                yes_ask_dollars=.001,
+                no_bid_dollars=.999,
+                no_ask_dollars=1.0,
+            ),
+            now=1000,
+        )
+        self.assertIsNone(paper["open_position"])
+        self.assertIn("below the 20% lottery floor", paper["last_message"])
+        self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
 
     def test_qualifying_scalp_opens_and_takes_profit(self):
         state = self.pending()
