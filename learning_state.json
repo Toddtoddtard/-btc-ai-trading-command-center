@@ -43,7 +43,7 @@
       "kalshi_accuracy": 0.7397260273972602,
       "samples": 219
     },
-    "generated_at": "2026-09-09T18:45:06.636094+00:00",
+    "generated_at": "2026-09-09T18:58:17.773903+00:00",
     "milestones": [
       25,
       50,
@@ -63,8 +63,8 @@
       "reason": "Kalshi safeguards satisfied",
       "status": "COLLECTING EVIDENCE"
     },
-    "last_cycle_at": "2026-09-09T18:45:06.805760+00:00",
-    "last_message": "Closed PAPER SCALP NO @ 0% | P/L $-0.78",
+    "last_cycle_at": "2026-09-09T18:58:17.963008+00:00",
+    "last_message": "No paper action: learner selected WAIT.",
     "last_signal": {
       "at": "2026-09-09T17:59:48.008367+00:00",
       "confidence": 0.6216108033667817,
@@ -184,7 +184,7 @@
   },
   "bot_intelligence_v4": {
     "evaluated_snapshots": 234,
-    "generated_at": "2026-09-09T18:45:05.910469+00:00",
+    "generated_at": "2026-09-09T18:58:17.109430+00:00",
     "minimum_samples_for_verdict": 12,
     "ranking": [
       {
@@ -209,19 +209,6 @@
         "name": "Derivatives AI",
         "samples": 234,
         "standalone_accuracy": 0.4,
-        "unique_save_rate": 0.004273504273504274,
-        "verdict": "REDUNDANT",
-        "without_bot_accuracy": 0.4188034188034188
-      },
-      {
-        "avg_abs_score": 0.07105642475071536,
-        "contribution_score": 0.006410256410256395,
-        "full_council_accuracy": 0.4230769230769231,
-        "harmful_flip_rate": 0.0,
-        "marginal_accuracy": 0.004273504273504258,
-        "name": "Historical Pattern AI",
-        "samples": 234,
-        "standalone_accuracy": 0.5,
         "unique_save_rate": 0.004273504273504274,
         "verdict": "REDUNDANT",
         "without_bot_accuracy": 0.4188034188034188
@@ -266,17 +253,17 @@
         "without_bot_accuracy": 0.4188034188034188
       },
       {
-        "avg_abs_score": 0.2793973070438819,
-        "contribution_score": 0.003846153846153829,
+        "avg_abs_score": 0.07105642475071536,
+        "contribution_score": 0.0,
         "full_council_accuracy": 0.4230769230769231,
-        "harmful_flip_rate": 0.017094017094017096,
-        "marginal_accuracy": 0.004273504273504258,
-        "name": "Trend AI",
+        "harmful_flip_rate": 0.0,
+        "marginal_accuracy": 0.0,
+        "name": "Historical Pattern AI",
         "samples": 234,
-        "standalone_accuracy": 0.5467289719626168,
-        "unique_save_rate": 0.021367521367521368,
-        "verdict": "USEFUL",
-        "without_bot_accuracy": 0.4188034188034188
+        "standalone_accuracy": 0.5,
+        "unique_save_rate": 0.0,
+        "verdict": "REDUNDANT",
+        "without_bot_accuracy": 0.4230769230769231
       },
       {
         "avg_abs_score": 0.0,
@@ -290,6 +277,19 @@
         "unique_save_rate": 0.0,
         "verdict": "REDUNDANT",
         "without_bot_accuracy": 0.4312796208530806
+      },
+      {
+        "avg_abs_score": 0.2793973070438819,
+        "contribution_score": -0.003205128205128206,
+        "full_council_accuracy": 0.4230769230769231,
+        "harmful_flip_rate": 0.021367521367521368,
+        "marginal_accuracy": 0.0,
+        "name": "Trend AI",
+        "samples": 234,
+        "standalone_accuracy": 0.5467289719626168,
+        "unique_save_rate": 0.021367521367521368,
+        "verdict": "USEFUL",
+        "without_bot_accuracy": 0.4230769230769231
       },
       {
         "avg_abs_score": 0.3176836688897131,
@@ -332,16 +332,16 @@
       },
       {
         "avg_abs_score": 0.39304576854011397,
-        "contribution_score": -0.030769230769230767,
+        "contribution_score": -0.024358974358974373,
         "full_council_accuracy": 0.4230769230769231,
         "harmful_flip_rate": 0.03418803418803419,
-        "marginal_accuracy": -0.01709401709401709,
+        "marginal_accuracy": -0.01282051282051283,
         "name": "Kalshi Context AI",
         "samples": 234,
         "standalone_accuracy": 0.5154185022026432,
-        "unique_save_rate": 0.017094017094017096,
+        "unique_save_rate": 0.021367521367521368,
         "verdict": "HURTING COUNCIL",
-        "without_bot_accuracy": 0.44017094017094016
+        "without_bot_accuracy": 0.4358974358974359
       },
       {
         "avg_abs_score": 0.41550221279532507,
@@ -374,16 +374,16 @@
   },
   "champion_challenger": {
     "best_challenger": {
-      "accuracy": 0.18181818181818182,
-      "median_error": 91.67238997024833,
+      "accuracy": 0.2727272727272727,
+      "median_error": 75.88787153505837,
       "samples": 11
     },
     "champion": {
-      "accuracy": 0.18181818181818182,
-      "median_error": 94.35691362565558,
+      "accuracy": 0.2727272727272727,
+      "median_error": 75.78251060430193,
       "samples": 11
     },
-    "evaluated_at": "2026-09-09T18:45:03.152032+00:00",
+    "evaluated_at": "2026-09-09T18:58:14.206956+00:00",
     "max_error_multiplier": 1.1,
     "minimum_margin": 0.05,
     "minimum_samples": 20,
@@ -4662,7 +4662,361 @@
     }
   ],
   "official_pending": [],
-  "pending": null,
+  "pending": {
+    "data_quality": {
+      "exact_expiry_required": true,
+      "spot_history_rows": 240
+    },
+    "expires_at": 1788980400.0,
+    "forecast_path": [
+      {
+        "close": 78466.27977646061,
+        "high": 78471.74284712727,
+        "low": 78454.66692933334,
+        "open": 78460.13,
+        "step": 1
+      },
+      {
+        "close": 78461.59536552333,
+        "high": 78471.90005779394,
+        "low": 78455.97508419,
+        "open": 78466.27977646061,
+        "step": 2
+      },
+      {
+        "close": 78453.26461672594,
+        "high": 78467.37285752333,
+        "low": 78447.48712472594,
+        "open": 78461.59536552333,
+        "step": 3
+      },
+      {
+        "close": 78451.11081528725,
+        "high": 78459.1993193926,
+        "low": 78445.17611262058,
+        "open": 78453.26461672594,
+        "step": 4
+      },
+      {
+        "close": 78455.5608832243,
+        "high": 78461.65279655764,
+        "low": 78445.01890195391,
+        "open": 78451.11081528725,
+        "step": 5
+      },
+      {
+        "close": 78457.58834165223,
+        "high": 78463.83746565222,
+        "low": 78449.3117592243,
+        "open": 78455.5608832243,
+        "step": 6
+      },
+      {
+        "close": 78452.82425305156,
+        "high": 78463.9946763189,
+        "low": 78446.41791838489,
+        "open": 78457.58834165223,
+        "step": 7
+      },
+      {
+        "close": 78447.8378999347,
+        "high": 78459.3877983849,
+        "low": 78441.27435460137,
+        "open": 78452.82425305156,
+        "step": 8
+      },
+      {
+        "close": 78449.09534125494,
+        "high": 78455.81609725494,
+        "low": 78441.11714393471,
+        "open": 78447.8378999347,
+        "step": 9
+      },
+      {
+        "close": 78452.27844054623,
+        "high": 78459.1564072129,
+        "low": 78442.21737458828,
+        "open": 78449.09534125494,
+        "step": 10
+      },
+      {
+        "close": 78448.9850083428,
+        "high": 78459.31361787957,
+        "low": 78441.94983100946,
+        "open": 78452.27844054623,
+        "step": 11
+      },
+      {
+        "close": 78440.41539773728,
+        "high": 78456.1773963428,
+        "low": 78433.22300973728,
+        "open": 78448.9850083428,
+        "step": 12
+      },
+      {
+        "close": 78436.43673002331,
+        "high": 78447.76499640394,
+        "low": 78429.08713135665,
+        "open": 78440.41539773728,
+        "step": 13
+      },
+      {
+        "close": 78441.06889738677,
+        "high": 78448.5757067201,
+        "low": 78428.92992068997,
+        "open": 78436.43673002331,
+        "step": 14
+      },
+      {
+        "close": 78446.66576821097,
+        "high": 78454.32978821096,
+        "low": 78433.40487738677,
+        "open": 78441.06889738677,
+        "step": 15
+      }
+    ],
+    "master_base_score": -0.08021032355694911,
+    "master_confidence": 0.5026550684991805,
+    "opened_at": 1788980294.0526185,
+    "predicted_direction": -1,
+    "predicted_end": 78442.475977429,
+    "regime": "LOW_VOL_RANGE",
+    "ret15": -0.0008493912208095145,
+    "ret3": -0.0003552134905699944,
+    "ret8": -0.0010487315784447615,
+    "snapshot": {
+      "master_base_score": -0.08021032355694911,
+      "master_confidence": 0.5026550684991805,
+      "regime": "LOW_VOL_RANGE",
+      "specialists": {
+        "Combination AI": {
+          "confidence": 0.5258559187094956,
+          "name": "Combination AI",
+          "reason": "Cross-specialist directional agreement 38%",
+          "score": -0.09553316397811587,
+          "signal": "NEUTRAL"
+        },
+        "Derivatives AI": {
+          "confidence": 0.48,
+          "name": "Derivatives AI",
+          "reason": "Funding 0.0000%; OI 0 BTC",
+          "score": 0.0,
+          "signal": "NEUTRAL"
+        },
+        "FVG / MACD AI": {
+          "confidence": 0.662919470126618,
+          "name": "FVG / MACD AI",
+          "reason": "bearish FVG resistance $78,508-$78,528; age 6m; MACD bearish histogram; histogram -1.79; FVG score -0.56; MACD score -0.16",
+          "score": -0.3810822294304543,
+          "signal": "BEARISH"
+        },
+        "Historical Pattern AI": {
+          "confidence": 0.5084170792455995,
+          "name": "Historical Pattern AI",
+          "reason": "Recent 3-minute move -0.036%",
+          "score": -0.059202248428332396,
+          "signal": "NEUTRAL"
+        },
+        "Kalshi Context AI": {
+          "confidence": 0.794542221185706,
+          "name": "Kalshi Context AI",
+          "reason": "Kalshi target $78,512.98; BTC -52.85 (-0.067%) vs target; UP market ~1.4%",
+          "score": -0.6552962941368875,
+          "signal": "BEARISH"
+        },
+        "Liquidity AI": {
+          "confidence": 0.48,
+          "name": "Liquidity AI",
+          "reason": "Futures top-book imbalance +0.0%",
+          "score": 0.0,
+          "signal": "NEUTRAL"
+        },
+        "Market Regime AI": {
+          "confidence": 0.662540550161151,
+          "name": "Market Regime AI",
+          "reason": "Trend regime from EMA separation",
+          "score": -0.3802928128357314,
+          "signal": "BEARISH"
+        },
+        "Momentum AI": {
+          "confidence": 0.5926981401046297,
+          "name": "Momentum AI",
+          "reason": "RSI 38.3; MACD spread -1.79",
+          "score": -0.23478779188464535,
+          "signal": "BEARISH"
+        },
+        "Pattern AI": {
+          "confidence": 0.7345714285763287,
+          "name": "Pattern AI",
+          "reason": "Candle body/engulfing structure",
+          "score": 0.5303571428673516,
+          "signal": "BULLISH"
+        },
+        "Political Event Watch AI": {
+          "confidence": 0.0,
+          "event_status": "SOURCE UNAVAILABLE",
+          "events": [],
+          "impact_score": 0.0,
+          "name": "Political Event Watch AI",
+          "reason": "SOURCE UNAVAILABLE: Political watch state unavailable: HTTP Error 404: Not Found",
+          "score": 0.0,
+          "signal": "NEUTRAL"
+        },
+        "Support/Resistance AI": {
+          "confidence": 0.744256651968974,
+          "name": "Support/Resistance AI",
+          "reason": "Support $78,418; resistance $78,813",
+          "score": 0.5505346916020293,
+          "signal": "BULLISH"
+        },
+        "Trend AI": {
+          "confidence": 0.6617217346030899,
+          "name": "Trend AI",
+          "reason": "EMA9 78477, EMA21 78507, EMA50 78566; spread strength -0.38",
+          "score": -0.3785869470897708,
+          "signal": "BEARISH"
+        },
+        "Volatility AI": {
+          "confidence": 0.6,
+          "name": "Volatility AI",
+          "reason": "ATR 0.041% of price; BB stretch -0.57",
+          "score": -0.25,
+          "signal": "BEARISH"
+        },
+        "Volume AI": {
+          "confidence": 0.6270577670540645,
+          "name": "Volume AI",
+          "reason": "Volume z-score -0.77",
+          "score": 0.3063703480293011,
+          "signal": "BULLISH"
+        },
+        "Whale AI": {
+          "confidence": 0.6237947344907713,
+          "name": "Whale AI",
+          "reason": "Aggressor flow -32.5%; large-trade flow +0.5%; large trades 2; evidence 62%",
+          "score": -0.2995723635224401,
+          "signal": "BEARISH"
+        }
+      },
+      "start_price": 78460.13,
+      "target": 78512.98,
+      "would_wait": true
+    },
+    "specialists": {
+      "Combination AI": {
+        "confidence": 0.5258559187094956,
+        "name": "Combination AI",
+        "reason": "Cross-specialist directional agreement 38%",
+        "score": -0.09553316397811587,
+        "signal": "NEUTRAL"
+      },
+      "Derivatives AI": {
+        "confidence": 0.48,
+        "name": "Derivatives AI",
+        "reason": "Funding 0.0000%; OI 0 BTC",
+        "score": 0.0,
+        "signal": "NEUTRAL"
+      },
+      "FVG / MACD AI": {
+        "confidence": 0.662919470126618,
+        "name": "FVG / MACD AI",
+        "reason": "bearish FVG resistance $78,508-$78,528; age 6m; MACD bearish histogram; histogram -1.79; FVG score -0.56; MACD score -0.16",
+        "score": -0.3810822294304543,
+        "signal": "BEARISH"
+      },
+      "Historical Pattern AI": {
+        "confidence": 0.5084170792455995,
+        "name": "Historical Pattern AI",
+        "reason": "Recent 3-minute move -0.036%",
+        "score": -0.059202248428332396,
+        "signal": "NEUTRAL"
+      },
+      "Kalshi Context AI": {
+        "confidence": 0.794542221185706,
+        "name": "Kalshi Context AI",
+        "reason": "Kalshi target $78,512.98; BTC -52.85 (-0.067%) vs target; UP market ~1.4%",
+        "score": -0.6552962941368875,
+        "signal": "BEARISH"
+      },
+      "Liquidity AI": {
+        "confidence": 0.48,
+        "name": "Liquidity AI",
+        "reason": "Futures top-book imbalance +0.0%",
+        "score": 0.0,
+        "signal": "NEUTRAL"
+      },
+      "Market Regime AI": {
+        "confidence": 0.662540550161151,
+        "name": "Market Regime AI",
+        "reason": "Trend regime from EMA separation",
+        "score": -0.3802928128357314,
+        "signal": "BEARISH"
+      },
+      "Momentum AI": {
+        "confidence": 0.5926981401046297,
+        "name": "Momentum AI",
+        "reason": "RSI 38.3; MACD spread -1.79",
+        "score": -0.23478779188464535,
+        "signal": "BEARISH"
+      },
+      "Pattern AI": {
+        "confidence": 0.7345714285763287,
+        "name": "Pattern AI",
+        "reason": "Candle body/engulfing structure",
+        "score": 0.5303571428673516,
+        "signal": "BULLISH"
+      },
+      "Political Event Watch AI": {
+        "confidence": 0.0,
+        "event_status": "SOURCE UNAVAILABLE",
+        "events": [],
+        "impact_score": 0.0,
+        "name": "Political Event Watch AI",
+        "reason": "SOURCE UNAVAILABLE: Political watch state unavailable: HTTP Error 404: Not Found",
+        "score": 0.0,
+        "signal": "NEUTRAL"
+      },
+      "Support/Resistance AI": {
+        "confidence": 0.744256651968974,
+        "name": "Support/Resistance AI",
+        "reason": "Support $78,418; resistance $78,813",
+        "score": 0.5505346916020293,
+        "signal": "BULLISH"
+      },
+      "Trend AI": {
+        "confidence": 0.6617217346030899,
+        "name": "Trend AI",
+        "reason": "EMA9 78477, EMA21 78507, EMA50 78566; spread strength -0.38",
+        "score": -0.3785869470897708,
+        "signal": "BEARISH"
+      },
+      "Volatility AI": {
+        "confidence": 0.6,
+        "name": "Volatility AI",
+        "reason": "ATR 0.041% of price; BB stretch -0.57",
+        "score": -0.25,
+        "signal": "BEARISH"
+      },
+      "Volume AI": {
+        "confidence": 0.6270577670540645,
+        "name": "Volume AI",
+        "reason": "Volume z-score -0.77",
+        "score": 0.3063703480293011,
+        "signal": "BULLISH"
+      },
+      "Whale AI": {
+        "confidence": 0.6237947344907713,
+        "name": "Whale AI",
+        "reason": "Aggressor flow -32.5%; large-trade flow +0.5%; large trades 2; evidence 62%",
+        "score": -0.2995723635224401,
+        "signal": "BEARISH"
+      }
+    },
+    "start_price": 78460.13,
+    "target": 78512.98,
+    "ticker": "KXBTC15M-26SEP091500-00",
+    "would_wait": true
+  },
   "prediction_snapshots": [
     {
       "expires_at": 1788543000.0,
@@ -33047,6 +33401,129 @@
         "would_wait": true
       },
       "ticker": "KXBTC15M-26SEP091430-30"
+    },
+    {
+      "expires_at": 1788980400.0,
+      "opened_at": 1788980294.0526185,
+      "snapshot": {
+        "master_base_score": -0.08021032355694911,
+        "master_confidence": 0.5026550684991805,
+        "regime": "LOW_VOL_RANGE",
+        "specialists": {
+          "Combination AI": {
+            "confidence": 0.5258559187094956,
+            "name": "Combination AI",
+            "reason": "Cross-specialist directional agreement 38%",
+            "score": -0.09553316397811587,
+            "signal": "NEUTRAL"
+          },
+          "Derivatives AI": {
+            "confidence": 0.48,
+            "name": "Derivatives AI",
+            "reason": "Funding 0.0000%; OI 0 BTC",
+            "score": 0.0,
+            "signal": "NEUTRAL"
+          },
+          "FVG / MACD AI": {
+            "confidence": 0.662919470126618,
+            "name": "FVG / MACD AI",
+            "reason": "bearish FVG resistance $78,508-$78,528; age 6m; MACD bearish histogram; histogram -1.79; FVG score -0.56; MACD score -0.16",
+            "score": -0.3810822294304543,
+            "signal": "BEARISH"
+          },
+          "Historical Pattern AI": {
+            "confidence": 0.5084170792455995,
+            "name": "Historical Pattern AI",
+            "reason": "Recent 3-minute move -0.036%",
+            "score": -0.059202248428332396,
+            "signal": "NEUTRAL"
+          },
+          "Kalshi Context AI": {
+            "confidence": 0.794542221185706,
+            "name": "Kalshi Context AI",
+            "reason": "Kalshi target $78,512.98; BTC -52.85 (-0.067%) vs target; UP market ~1.4%",
+            "score": -0.6552962941368875,
+            "signal": "BEARISH"
+          },
+          "Liquidity AI": {
+            "confidence": 0.48,
+            "name": "Liquidity AI",
+            "reason": "Futures top-book imbalance +0.0%",
+            "score": 0.0,
+            "signal": "NEUTRAL"
+          },
+          "Market Regime AI": {
+            "confidence": 0.662540550161151,
+            "name": "Market Regime AI",
+            "reason": "Trend regime from EMA separation",
+            "score": -0.3802928128357314,
+            "signal": "BEARISH"
+          },
+          "Momentum AI": {
+            "confidence": 0.5926981401046297,
+            "name": "Momentum AI",
+            "reason": "RSI 38.3; MACD spread -1.79",
+            "score": -0.23478779188464535,
+            "signal": "BEARISH"
+          },
+          "Pattern AI": {
+            "confidence": 0.7345714285763287,
+            "name": "Pattern AI",
+            "reason": "Candle body/engulfing structure",
+            "score": 0.5303571428673516,
+            "signal": "BULLISH"
+          },
+          "Political Event Watch AI": {
+            "confidence": 0.0,
+            "event_status": "SOURCE UNAVAILABLE",
+            "events": [],
+            "impact_score": 0.0,
+            "name": "Political Event Watch AI",
+            "reason": "SOURCE UNAVAILABLE: Political watch state unavailable: HTTP Error 404: Not Found",
+            "score": 0.0,
+            "signal": "NEUTRAL"
+          },
+          "Support/Resistance AI": {
+            "confidence": 0.744256651968974,
+            "name": "Support/Resistance AI",
+            "reason": "Support $78,418; resistance $78,813",
+            "score": 0.5505346916020293,
+            "signal": "BULLISH"
+          },
+          "Trend AI": {
+            "confidence": 0.6617217346030899,
+            "name": "Trend AI",
+            "reason": "EMA9 78477, EMA21 78507, EMA50 78566; spread strength -0.38",
+            "score": -0.3785869470897708,
+            "signal": "BEARISH"
+          },
+          "Volatility AI": {
+            "confidence": 0.6,
+            "name": "Volatility AI",
+            "reason": "ATR 0.041% of price; BB stretch -0.57",
+            "score": -0.25,
+            "signal": "BEARISH"
+          },
+          "Volume AI": {
+            "confidence": 0.6270577670540645,
+            "name": "Volume AI",
+            "reason": "Volume z-score -0.77",
+            "score": 0.3063703480293011,
+            "signal": "BULLISH"
+          },
+          "Whale AI": {
+            "confidence": 0.6237947344907713,
+            "name": "Whale AI",
+            "reason": "Aggressor flow -32.5%; large-trade flow +0.5%; large trades 2; evidence 62%",
+            "score": -0.2995723635224401,
+            "signal": "BEARISH"
+          }
+        },
+        "start_price": 78460.13,
+        "target": 78512.98,
+        "would_wait": true
+      },
+      "ticker": "KXBTC15M-26SEP091500-00"
     }
   ],
   "regimes": {
@@ -57381,7 +57858,7 @@
         "reliability_multiplier": 0.988439084674996
       }
     },
-    "generated_at": "2026-09-09T18:45:06.439526+00:00",
+    "generated_at": "2026-09-09T18:58:17.601986+00:00",
     "historical_specialist_v7_loaded": true,
     "method": "Bayesian posterior from graded live history plus optional five-year regime-specific walk-forward priors",
     "ranking": [
@@ -57952,39 +58429,39 @@
     "challenger_streak": 0,
     "champion_promoted": false,
     "current_regime": "LOW_VOL_RANGE",
-    "graded_this_run": true,
+    "graded_this_run": false,
     "historical_specialist_v7_loaded": true,
     "intelligence_version": 7,
     "last_graded_ticker": "KXBTC15M-26SEP091430-30",
     "learning_version": 31,
     "loaded_from_private_branch": true,
-    "official_results_resolved": 1,
+    "official_results_resolved": 0,
     "regime_tagged_specialist_history": true,
-    "registered_this_run": false,
+    "registered_this_run": true,
     "samples_after_run": 234,
-    "samples_before_run": 233,
+    "samples_before_run": 234,
     "shared_core": true,
     "specialist_knowledge_regime": "LOW_VOL_RANGE",
     "specialist_self_learning_v5": true,
     "strict_expiry_grading": true,
     "worker_ok": true
   },
-  "updated_at": "2026-09-09T18:45:03.152086+00:00",
+  "updated_at": "2026-09-09T18:58:14.207021+00:00",
   "validation": {
-    "direction_accuracy": 0.18181818181818182,
-    "evaluated_at": "2026-09-09T18:45:03.046996+00:00",
-    "mae": 108.89014588221008,
-    "median_abs_error": 94.35691362565558,
+    "direction_accuracy": 0.2727272727272727,
+    "evaluated_at": "2026-09-09T18:58:14.086319+00:00",
+    "mae": 95.11227907417924,
+    "median_abs_error": 75.78251060430193,
     "regimes": {
       "LOW_VOL_RANGE": {
-        "direction_accuracy": 0.2222222222222222,
-        "median_abs_error": 94.35691362565558,
-        "samples": 9
+        "direction_accuracy": 0.3,
+        "median_abs_error": 89.55654611343198,
+        "samples": 10
       },
       "RANGE": {
         "direction_accuracy": 0.0,
-        "median_abs_error": 166.35606818833185,
-        "samples": 2
+        "median_abs_error": 74.68428313582262,
+        "samples": 1
       }
     },
     "samples": 11
