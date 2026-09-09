@@ -18,6 +18,9 @@ on:
       - 'profitability_v5.py'
       - 'audit_scorecard_v7.py'
       - 'tests/test_audit_v6.py'
+      - 'background_paper.py'
+      - 'tests/test_background_paper.py'
+      - 'kalshi_paper_engine.py'
       - '.github/workflows/learn.yml'
   schedule:
     - cron: "*/5 * * * *"
@@ -45,9 +48,9 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py audit_scorecard_v7.py tests/test_audit_v6.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py audit_scorecard_v7.py background_paper.py tests/test_audit_v6.py tests/test_background_paper.py
       - name: Run audit v6 regression tests
-        run: python -m unittest tests.test_audit_v6 -v
+        run: python -m unittest tests.test_audit_v6 tests.test_background_paper -v
       - name: Load previous private learning state and historical priors
         shell: bash
         run: |
@@ -99,6 +102,10 @@ jobs:
         env:
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
         run: python audit_scorecard_v7.py
+      - name: Run persistent 24/7 Kalshi paper cycle
+        env:
+          LEARNING_STATE_OUTPUT: /tmp/learning_state.json
+        run: python background_paper.py
       - name: Validate generated learning state
         run: |
           python - <<'PY'
@@ -130,6 +137,8 @@ jobs:
           assert 'prediction_snapshots' in data
           assert 'wait_counterfactual' in data
           assert 'bot_intelligence_v4' in data
+          assert data.get('background_paper', {}).get('paper_only') is True
+          assert data.get('background_paper', {}).get('worker_ok') is True
           assert isinstance(data.get('bot_intelligence_v4', {}).get('ranking', []), list)
           assert 'specialist_knowledge_v5' in data
           assert isinstance(data.get('specialist_knowledge_v5', {}).get('bots', {}), dict)
