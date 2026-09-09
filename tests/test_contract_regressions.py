@@ -164,6 +164,23 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(closed['result'], 'WIN')
         self.assertAlmostEqual(closed['pnl'], engine.paper_summary(self.db)['realized_pnl'])
 
+    def test_scalp_rejects_lottery_style_selected_side(self):
+        self.decision.update(
+            action='SCALP UP',
+            yes_ask_dollars=.001,
+            yes_bid_dollars=0.0,
+            no_ask_dollars=1.0,
+            no_bid_dollars=.999,
+            scalp_projected_exit_price=.80,
+        )
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('below the 20% lottery floor', skipped['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+        self.assertIsNone(
+            engine.open_position(self.db, 500, self.decision, self.risk, 100)
+        )
+
     def test_scalp_requires_projected_twenty_percent_gross_return(self):
         self.decision.update(action='SCALP UP', scalp_projected_exit_price=.59)
         skipped = self.cycle()

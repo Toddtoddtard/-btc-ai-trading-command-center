@@ -35,7 +35,7 @@ concurrency:
 jobs:
   learn:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 8
     steps:
       - name: Checkout app code
         uses: actions/checkout@v4
@@ -105,7 +105,17 @@ jobs:
       - name: Run persistent 24/7 Kalshi paper cycle
         env:
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
-        run: python background_paper.py
+        shell: bash
+        run: |
+          # GitHub schedules no faster than every five minutes. Poll the active
+          # paper window four times inside each run so entries and exits are
+          # evaluated about once a minute without changing the learner rules.
+          for attempt in 1 2 3 4; do
+            python background_paper.py
+            if [ "$attempt" -lt 4 ]; then
+              sleep 55
+            fi
+          done
       - name: Validate generated learning state
         run: |
           python - <<'PY'
