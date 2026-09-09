@@ -579,3 +579,15 @@ class ContractRegressionTests(unittest.TestCase):
                        {'ticker':'T','status':'determined','result':'yes'}):
             with patch.object(engine, 'urlopen'), patch.object(engine.json, 'load', return_value={'market': market}):
                 self.assertIsNone(engine.fetch_settled_result('T'))
+
+
+    def test_chart_prefers_working_kalshi_public_endpoint(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+        working = "https://api.elections.kalshi.com/trade-api/v2"
+        blocked = "https://external-api.kalshi.com/trade-api/v2"
+        self.assertGreaterEqual(source.count(working), 2)
+        self.assertLess(source.index(working), source.index(blocked))
+        self.assertIn("const KALSHI_PUBLIC_BASES", source)
+        self.assertIn("async function fetchKalshiJson(path)", source)
+        self.assertIn("Kalshi target unavailable — retrying…", source)
+        self.assertIn("currentTarget = NaN;", source)
