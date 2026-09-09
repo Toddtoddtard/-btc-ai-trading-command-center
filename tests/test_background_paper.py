@@ -10,7 +10,6 @@ except ModuleNotFoundError:  # Allows this isolated test artifact to run locally
     stub.LOCK_MIN_CONFIDENCE = .95
     stub.LOCK_TAKE_PROFIT_PRICE = .95
     stub.MAX_ENTRY_PRICE = .75
-    stub.MAX_ENTRY_SPREAD_POINTS = .03
     stub.MAX_LOCKS_PER_MARKET = 1
     stub.MAX_SCALP_LOSSES_PER_MARKET = 2
     stub.MAX_SCALPS_PER_MARKET = 10
@@ -18,7 +17,7 @@ except ModuleNotFoundError:  # Allows this isolated test artifact to run locally
     stub.POST_FIX_MAX_DRAWDOWN_PCT = .10
     stub.POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
     stub.POST_FIX_VALIDATION_TRADES = 100
-    stub.SCALP_MIN_MOVE_POINTS = .15
+    stub.SCALP_MIN_GROSS_RETURN = .20
     stub.SCALP_STOP_LOSS_POINTS = .05
     stub.UNPROVEN_POSITION_CAP = .02
     stub.kalshi_taker_fee = lambda contracts, price: math.ceil(.07 * contracts * price * (1-price) * 100) / 100
@@ -59,11 +58,10 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(paper["metrics"]["samples"], 1)
         self.assertGreater(paper["metrics"]["total_pnl"], 0)
 
-    def test_wide_spread_is_rejected(self):
+    def test_wide_spread_does_not_block_entry(self):
         state = self.pending()
-        paper = bg.run_cycle(state, lambda _: self.market(yes_bid_dollars=.45, yes_ask_dollars=.50), now=1000)
-        self.assertIsNone(paper["open_position"])
-        self.assertIn("spread 5 points", paper["last_message"])
+        paper = bg.run_cycle(state, lambda _: self.market(yes_bid_dollars=.40, yes_ask_dollars=.50), now=1000)
+        self.assertIsNotNone(paper["open_position"])
 
 
 if __name__ == "__main__":
