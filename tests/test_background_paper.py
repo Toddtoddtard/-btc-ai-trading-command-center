@@ -60,6 +60,16 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(paper["open_position"]["strategy"], "LOCK")
         self.assertEqual(paper["open_position"]["entry_price"], .85)
 
+    def test_lock_rejects_fee_loss_at_95_exit(self):
+        state = self.pending(master_confidence=.95)
+        paper = bg.run_cycle(
+            state,
+            lambda _: self.market(yes_bid_dollars=.94, yes_ask_dollars=.95),
+            now=1000,
+        )
+        self.assertIsNone(paper["open_position"])
+        self.assertIn("after estimated Kalshi fees", paper["last_message"])
+
     def test_qualifying_scalp_opens_and_takes_profit(self):
         state = self.pending()
         paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
