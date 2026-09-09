@@ -5832,9 +5832,10 @@ def live_dashboard():
         )
         st.caption(risk["reason"])
         st.caption(
-            "Entry rule: automatic SCALP and LOCK trades are rejected above "
-            "a 75% Kalshi contract price. SCALP requires a projected 20% gross "
-            "return on entry cost, has no maximum-spread filter, stops after a "
+            "Entry rule: automatic SCALP trades are rejected above a 75% "
+            "Kalshi contract price; final LOCK calls may enter above 75%. "
+            "SCALP requires a projected 20% gross return on entry cost, has no "
+            "maximum-spread filter, stops after a "
             "5-point adverse contract move, and must receive a fresh signal "
             "before same-side re-entry. LOCK sells automatically at a 95% "
             "executable bid."
