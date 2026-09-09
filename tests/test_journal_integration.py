@@ -88,3 +88,57 @@ class JournalIntegrationTests(unittest.TestCase):
 
         rows = conn.execute("SELECT target_ts, action FROM predictions ORDER BY id").fetchall()
         self.assertEqual([(row["target_ts"], row["action"]) for row in rows], [(900, "SCALP UP"), (1800, "SCALP DOWN")])
+
+
+    def test_emergency_baseline_is_not_treated_as_learning(self):
+        tree = ast.parse(Path("app.py").read_text())
+        fn = next(
+            n for n in tree.body
+            if isinstance(n, ast.FunctionDef)
+            and n.name == "_remote_learning_is_usable"
+        )
+        env = {}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "<remote learning>", "exec"), env)
+        usable = env["_remote_learning_is_usable"]
+
+        self.assertFalse(usable({
+            "forecast": {"samples": 0},
+            "master_history": [],
+            "data_quality": {
+                "fallback_baseline": True,
+                "shared_learning_source": "conservative-baseline",
+            },
+        }))
+        self.assertTrue(usable({
+            "forecast": {"samples": 242},
+            "master_history": [],
+            "data_quality": {"shared_learning_source": "private-github"},
+        }))
+
+    def test_learning_summary_is_rebuilt_from_rolling_source_rows(self):
+        tree = ast.parse(Path("app.py").read_text())
+        fn = next(
+            n for n in tree.body
+            if isinstance(n, ast.FunctionDef)
+            and n.name == "_local_learning_performance"
+        )
+        env = {}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "<local learning>", "exec"), env)
+
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        conn.execute(
+            """CREATE TABLE forecast_windows(
+                resolved INTEGER, direction_correct INTEGER,
+                abs_error REAL, path_error REAL
+            )"""
+        )
+        conn.executemany(
+            "INSERT INTO forecast_windows VALUES(?,?,?,?)",
+            [(1, 1, 10.0, 8.0), (1, 0, 20.0, 12.0), (0, None, None, None)],
+        )
+        summary = env["_local_learning_performance"](conn)
+        self.assertEqual(summary["samples"], 2)
+        self.assertEqual(summary["direction_hits"], 1)
+        self.assertEqual(summary["avg_abs_error"], 15.0)
+        self.assertEqual(summary["avg_path_error"], 10.0)
