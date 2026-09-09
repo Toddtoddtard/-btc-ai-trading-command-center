@@ -456,8 +456,12 @@ class ContractRegressionTests(unittest.TestCase):
         self.cycle('yes', enabled=False)
         self.assertEqual(engine.paper_summary(self.db)['samples'], 1)
 
-    def test_automatic_entries_stop_above_seventy_five_percent(self):
-        self.decision['yes_ask_dollars'] = .85
+    def test_scalp_entries_stop_above_seventy_five_percent(self):
+        self.decision.update(
+            action='SCALP UP',
+            yes_ask_dollars=.85,
+            scalp_projected_exit_price=1.0,
+        )
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
         self.assertIn('85%', skipped['message'])
@@ -478,6 +482,19 @@ class ContractRegressionTests(unittest.TestCase):
             engine.paper_summary(self.db)['open_position']['entry_price'],
             .75,
         )
+
+    def test_final_lock_may_enter_above_seventy_five_percent(self):
+        self.decision.update(
+            action='LOCK UP',
+            confidence=.95,
+            yes_ask_dollars=.85,
+            yes_bid_dollars=.84,
+        )
+        opened = self.cycle()
+        self.assertTrue(opened['event'])
+        position = engine.paper_summary(self.db)['open_position']
+        self.assertEqual(position['strategy'], 'LOCK')
+        self.assertEqual(position['entry_price'], .85)
 
     def test_expired_or_invalid_quote_cannot_open(self):
         self.decision['kalshi_close_ts'] = 1
