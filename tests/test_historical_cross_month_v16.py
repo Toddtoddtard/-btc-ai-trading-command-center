@@ -1,7 +1,8 @@
 import unittest
 import pandas as pd
 
-from historical_specialist_backtest_v7 import first_fresh_index
+from historical_specialist_backtest_v7 import first_fresh_index, historical_council_score
+from specialist_knowledge_v5 import specialist_posterior
 
 
 class HistoricalCrossMonthV16Tests(unittest.TestCase):
@@ -12,6 +13,31 @@ class HistoricalCrossMonthV16Tests(unittest.TestCase):
         idx = first_fresh_index(df, pd.Timestamp("2026-02-01T00:00:00Z"))
         self.assertEqual(idx, 3)
         self.assertTrue((pd.to_datetime(df.iloc[idx:]["time"], utc=True) >= pd.Timestamp("2026-02-01T00:00:00Z")).all())
+
+
+    def test_historical_council_uses_eligible_specialists(self):
+        results = {
+            "Trend AI": {"score": 0.50, "confidence": 0.80},
+            "Momentum AI": {"score": 0.25, "confidence": 0.70},
+            "Whale AI": {"score": -1.0, "confidence": 0.99},
+        }
+        self.assertGreater(historical_council_score(results, "TREND_UP"), 0.0)
+
+    def test_version_nine_uses_holdout_as_learning_prior(self):
+        state = {
+            "historical_specialist_knowledge_v7": {
+                "version": 9,
+                "specialists": {"Trend AI": {"accuracy": 0.40, "directional_calls": 1000}},
+                "holdout": {
+                    "specialists": {
+                        "Trend AI": {"accuracy": 0.61, "directional_calls": 200, "regimes": {}}
+                    }
+                },
+            }
+        }
+        result = specialist_posterior(state, "Trend AI", "UNKNOWN")
+        self.assertEqual(result["historical_samples"], 200)
+        self.assertAlmostEqual(result["historical_accuracy"], 0.61)
 
 
 if __name__ == "__main__":

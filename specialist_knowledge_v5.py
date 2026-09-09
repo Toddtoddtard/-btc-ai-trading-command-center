@@ -33,7 +33,11 @@ def _history_rows(state, name):
 def _historical_prior(state, name, regime=None):
     state = state or {}
     report = state.get("historical_specialist_knowledge_v7", {}) or {}
-    item = ((report.get("specialists", {}) or {}).get(name, {}) or {})
+    specialists = report.get("specialists", {}) or {}
+    holdout = report.get("holdout", {}) or {}
+    if isinstance(holdout, dict) and isinstance(holdout.get("specialists"), dict):
+        specialists = holdout["specialists"]
+    item = ((specialists or {}).get(name, {}) or {})
     if regime and regime != "UNKNOWN":
         ri = (item.get("regimes", {}) or {}).get(regime, {}) or {}
         acc, samples = ri.get("accuracy"), int(_f(ri.get("directional_calls"), 0))

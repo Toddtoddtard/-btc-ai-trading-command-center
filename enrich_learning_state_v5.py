@@ -40,7 +40,7 @@ def load_historical_specialist_prior(state):
         report = json.loads(HISTORICAL_SPECIALIST_INPUT.read_text())
     except Exception:
         return False
-    if not isinstance(report, dict) or report.get("version") != 7 or report.get("walk_forward") is not True:
+    if not isinstance(report, dict) or report.get("version") not in {7, 9} or report.get("walk_forward") is not True:
         return False
     specialists = report.get("specialists")
     if not isinstance(specialists, dict) or not specialists:
@@ -66,13 +66,13 @@ def main():
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "regime": regime,
         "target_precision": 0.90,
-        "method": "Bayesian posterior from graded live history plus optional five-year regime-specific walk-forward priors",
+        "method": "Bayesian posterior from graded live history plus optional long-history regime-specific holdout priors",
         "historical_specialist_v7_loaded": historical_loaded,
         "bots": knowledge,
         "ranking": [x["name"] for x in ranked],
         "warning": "90% is a target, not a guaranteed or reported accuracy. Precision gate may abstain heavily.",
     }
-    state.setdefault("status", {})["intelligence_version"] = 7 if historical_loaded else 6
+    state.setdefault("status", {})["intelligence_version"] = 9 if historical_loaded else 6
     state["status"]["specialist_self_learning_v5"] = True
     state["status"]["specialist_knowledge_regime"] = regime
     state["status"]["historical_specialist_v7_loaded"] = historical_loaded

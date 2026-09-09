@@ -1,4 +1,4 @@
-name: BTC AI Five-Year Specialist Priors v7
+name: BTC AI Ten-Year Walk-Forward v9
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: btc-ai-historical-specialist-v7
+  group: btc-ai-historical-specialist-v9
   cancel-in-progress: false
 
 jobs:
@@ -31,9 +31,11 @@ jobs:
         run: pip install -r learner-requirements.txt
       - name: Compile evaluator
         run: python -m py_compile historical_specialist_backtest_v7.py ai_core.py reliability_v31.py
-      - name: Run five-year specialist walk-forward
+      - name: Run up-to-ten-year specialist walk-forward
         env:
           HISTORICAL_SPECIALIST_OUTPUT: /tmp/historical_specialist_knowledge_v7.json
+          HISTORICAL_YEARS: "10"
+          HISTORICAL_HOLDOUT_YEARS: "2"
         run: python historical_specialist_backtest_v7.py
       - name: Validate report
         run: |
@@ -41,16 +43,25 @@ jobs:
           import json
           p='/tmp/historical_specialist_knowledge_v7.json'
           d=json.load(open(p))
-          assert d.get('version') == 7
+          assert d.get('version') == 9
+          assert d.get('period_requested_years') == 10
+          assert d.get('actual_coverage_years', 0) >= 8.0
           assert d.get('walk_forward') is True
           assert d.get('evaluated_windows', 0) >= 10000
           bots=d.get('specialists', {})
-          required={'Trend AI','Momentum AI','Volume AI','Pattern AI','Support/Resistance AI','Volatility AI','Market Regime AI','Historical Pattern AI'}
+          required={'Trend AI','Momentum AI','Volume AI','Pattern AI','Support/Resistance AI','Volatility AI','Market Regime AI','Historical Pattern AI','FVG / MACD AI'}
           assert required.issubset(bots)
           for name in required:
               assert bots[name].get('samples', 0) > 1000
               assert isinstance(bots[name].get('regimes', {}), dict)
-          print('validated', d['evaluated_windows'], 'historical specialist windows')
+          council=d.get('overall_council', {})
+          holdout=d.get('holdout', {})
+          assert council.get('directional_calls', 0) > 1000
+          assert holdout.get('evaluated_windows', 0) > 10000
+          assert holdout.get('overall_council', {}).get('directional_calls', 0) > 1000
+          assert required.issubset(holdout.get('specialists', {}))
+          assert d.get('production_parameters_changed') is False
+          print('validated', d['evaluated_windows'], 'historical windows; holdout', holdout['evaluated_windows'])
           PY
       - name: Publish report to learning-state branch
         shell: bash
@@ -71,5 +82,5 @@ jobs:
             echo 'No historical specialist report change.'
             exit 0
           fi
-          git commit -m 'Update five-year specialist priors v7'
+          git commit -m 'Update ten-year walk-forward priors v9'
           git push origin learning-state --force-with-lease
