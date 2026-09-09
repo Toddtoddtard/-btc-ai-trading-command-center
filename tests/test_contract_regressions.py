@@ -52,6 +52,56 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('spot_entry_price', columns)
         self.assertIn('opposite_since', columns)
 
+    def test_unproven_post_fix_trades_are_capped_at_two_percent(self):
+        self.open()
+        opened = engine.paper_summary(self.db)['open_position']
+        self.assertLessEqual(opened['amount_down'], 500 * .02 + .01)
+
+    def test_post_fix_scorecard_uses_authoritative_kalshi_ledger(self):
+        self.open()
+        self.expire()
+        self.cycle('yes')
+        scorecard = engine.paper_performance_since_update(
+            self.db, opened_since=0
+        )
+        self.assertEqual(scorecard['samples'], 1)
+        self.assertEqual(scorecard['markets'], 1)
+        self.assertGreater(scorecard['total_pnl'], 0)
+        self.assertGreater(scorecard['fees'], 0)
+        self.assertEqual(scorecard['validation_sample_target'], 100)
+
+    def test_profitability_gate_waits_for_meaningful_sample(self):
+        gate = engine.scalp_profitability_gate(self.db)
+        self.assertTrue(gate['approved'])
+        self.assertEqual(gate['status'], 'COLLECTING EVIDENCE')
+
+    def test_profitability_gate_pauses_losing_scalps_after_fifty(self):
+        with engine._connect(self.db) as conn:
+            now = time.time()
+            for index in range(50):
+                conn.execute(
+                    """INSERT INTO kalshi_paper_positions(
+                           ticker,side,strategy,status,opened_at,entry_price,
+                           contracts,entry_fee,closed_at,exit_price,exit_fee,pnl
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        f'KXBTC15M-GATE-{index}', 'YES', 'SCALP', 'CLOSED',
+                        now + index, .50, 1, .01, now + index + 1,
+                        .45, .01, -0.07,
+                    ),
+                )
+        gate = engine.scalp_profitability_gate(self.db)
+        self.assertFalse(gate['approved'])
+        self.assertEqual(gate['status'], 'SCALPS PAUSED')
+        self.assertIn('profit factor', gate['reason'])
+        self.decision['action'] = 'SCALP UP'
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('profitability gate is active', skipped['message'])
+        self.assertIsNone(
+            engine.open_position(self.db, 500, self.decision, self.risk, 100)
+        )
+
     def test_delayed_settlement_ignores_spot(self):
         self.open()
         self.expire()
@@ -336,10 +386,6 @@ class ContractRegressionTests(unittest.TestCase):
         paper_tab = source.split('    with tab_paper:', 1)[1].split(
             '    with tab_journal:', 1
         )[0]
-        canonical_import = (
-            'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
-            'paper_chart_entries, paper_history, paper_summary, persistent_lock_side'
-        )
         legacy_import = (
             'from kalshi_paper_engine import manage_kalshi_paper_cycle, '
             'paper_summary, persistent_lock_side'
@@ -348,7 +394,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(paper_tab.count('Automatic Kalshi Paper Trade Log'), 1)
         self.assertNotIn("['contracts']} contracts", paper_tab)
         self.assertNotIn("['ticker']} • entry", paper_tab)
-        self.assertEqual(source.count(canonical_import), 1)
+        self.assertEqual(source.count('paper_performance_since_update,'), 1)
+        self.assertEqual(source.count('scalp_profitability_gate,'), 1)
         self.assertNotIn(legacy_import + '\n', source)
         self.assertIn('if _lock_was_already_persisted:', source)
         self.assertIn('def _register_window_lock(', source)
@@ -373,6 +420,9 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('function paperEntryTrace()', source)
         self.assertIn('paper_entries=_persistent_paper_entries', source)
         self.assertIn("Entered at {_call_entries[-1]", source)
+        self.assertIn('Since Loss-Loop Fix — Kalshi Execution Scorecard', source)
+        self.assertIn('Kalshi Execution Validation', source)
+        self.assertIn('Every specialist remains active', source)
         self.assertIn(
             'Math.min(TOTAL,Math.max(0,(closeMs-Date.now())/1000))',
             source,

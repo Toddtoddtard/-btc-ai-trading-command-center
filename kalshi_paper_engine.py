@@ -26,6 +26,17 @@ MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
 MAX_SCALP_LOSSES_PER_MARKET = 2
 
+# Versioned forward-performance baseline.  Trades opened before this instant
+# remain in the lifetime ledger, but cannot distort the scorecard or safety
+# gate for the loss-loop safeguards shipped in commit 40ebf83.
+POST_FIX_START_TS = 1788909457.0  # 2026-09-08 23:17:37 UTC
+POST_FIX_LABEL = "Loss-loop safeguards v1"
+POST_FIX_GATE_TRADES = 50
+POST_FIX_VALIDATION_TRADES = 100
+POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
+POST_FIX_MAX_DRAWDOWN_PCT = 0.10
+UNPROVEN_POSITION_CAP = 0.02
+
 # SCALP positions require a forecast of at least 15 contract-price points and
 # realize profit once that full move is available (for example, 50% to 65%).
 SCALP_MIN_MOVE_POINTS = 0.15
@@ -212,6 +223,117 @@ def _refresh_scalp_rearm(conn, ticker, current_side):
         _set_scalp_armed(conn, ticker, other, True)
 
 
+def _performance_from_rows(rows, starting_cash):
+    """Summarize exact Kalshi paper fills in chronological order."""
+    pnls = [float(row["pnl"]) for row in rows]
+    wins = [pnl for pnl in pnls if pnl > 0]
+    losses = [pnl for pnl in pnls if pnl < 0]
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    profit_factor = (
+        gross_profit / gross_loss
+        if gross_loss
+        else (math.inf if gross_profit else None)
+    )
+    equity = float(starting_cash)
+    peak = equity
+    max_drawdown_pct = 0.0
+    for pnl in pnls:
+        equity += pnl
+        peak = max(peak, equity)
+        if peak > 0:
+            max_drawdown_pct = max(max_drawdown_pct, (peak - equity) / peak)
+    samples = len(pnls)
+    return {
+        "label": POST_FIX_LABEL,
+        "start_ts": POST_FIX_START_TS,
+        "samples": samples,
+        "markets": len({str(row["ticker"]) for row in rows}),
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": len(wins) / samples if samples else None,
+        "gross_profit": gross_profit,
+        "gross_loss": gross_loss,
+        "profit_factor": profit_factor,
+        "total_pnl": sum(pnls),
+        "expectancy": sum(pnls) / samples if samples else None,
+        "fees": sum(
+            float(row["entry_fee"] or 0.0) + float(row["exit_fee"] or 0.0)
+            for row in rows
+        ),
+        "max_drawdown_pct": max_drawdown_pct,
+        "gate_sample_target": POST_FIX_GATE_TRADES,
+        "validation_sample_target": POST_FIX_VALIDATION_TRADES,
+    }
+
+
+def paper_performance_since_update(
+    db_path, starting_cash=500.0, strategy=None, opened_since=POST_FIX_START_TS
+):
+    """Return a version-isolated Kalshi execution scorecard.
+
+    This uses the authoritative contract ledger, including executable entry and
+    exit prices, recorded fees, and official settlement outcomes.
+    """
+    conn = _connect(db_path, starting_cash)
+    try:
+        params = [float(opened_since)]
+        where = (
+            "status='CLOSED' AND pnl IS NOT NULL AND opened_at>=?"
+        )
+        if strategy:
+            where += " AND strategy=?"
+            params.append(str(strategy).upper())
+        rows = conn.execute(
+            f"""SELECT ticker,pnl,entry_fee,exit_fee
+                FROM kalshi_paper_positions
+                WHERE {where}
+                ORDER BY closed_at ASC,id ASC""",
+            params,
+        ).fetchall()
+        result = _performance_from_rows(rows, starting_cash)
+        result["strategy"] = str(strategy).upper() if strategy else "ALL"
+        return result
+    finally:
+        conn.close()
+
+
+def scalp_profitability_gate(db_path, starting_cash=500.0):
+    """Pause new SCALPs only after a meaningful post-fix Kalshi sample."""
+    performance = paper_performance_since_update(
+        db_path, starting_cash, strategy="SCALP"
+    )
+    samples = performance["samples"]
+    reasons = []
+    if samples >= POST_FIX_GATE_TRADES:
+        pf = performance["profit_factor"]
+        if pf is None or pf < POST_FIX_PROFIT_FACTOR_FLOOR:
+            reasons.append(
+                f"profit factor below {POST_FIX_PROFIT_FACTOR_FLOOR:.2f}"
+            )
+        if performance["expectancy"] is None or performance["expectancy"] <= 0:
+            reasons.append("expectancy is not positive")
+        if performance["max_drawdown_pct"] > POST_FIX_MAX_DRAWDOWN_PCT:
+            reasons.append(
+                f"drawdown above {POST_FIX_MAX_DRAWDOWN_PCT * 100:.0f}%"
+            )
+    approved = samples < POST_FIX_GATE_TRADES or not reasons
+    if samples < POST_FIX_GATE_TRADES:
+        status = "COLLECTING EVIDENCE"
+    elif reasons:
+        status = "SCALPS PAUSED"
+    elif samples < POST_FIX_VALIDATION_TRADES:
+        status = "PROVISIONAL PASS"
+    else:
+        status = "VALIDATED PASS"
+    return {
+        "approved": approved,
+        "status": status,
+        "reason": "; ".join(reasons) if reasons else "Kalshi safeguards satisfied",
+        "performance": performance,
+    }
+
+
 def open_position(db_path, starting_cash, decision, risk, spot_price):
     side = _side_from_action(decision.get("action"))
     if side is None or not bool(risk.get("approved")):
@@ -220,6 +342,10 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if not ticker:
         return None
     strategy = "LOCK" if str(decision.get("action", "")).upper().startswith("LOCK") else "SCALP"
+    if strategy == "SCALP" and not scalp_profitability_gate(
+        db_path, starting_cash
+    )["approved"]:
+        return None
     if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
         return None
     entry = _quote(decision, side, ask=True)
@@ -239,6 +365,12 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         expires_at = now + remain if remain is not None else None
     if expires_at is None or expires_at <= now:
         return None
+    post_fix = paper_performance_since_update(db_path, starting_cash)
+    exposure_cap = (
+        UNPROVEN_POSITION_CAP
+        if post_fix["samples"] < POST_FIX_VALIDATION_TRADES
+        else 0.25
+    )
     conn = _connect(db_path, starting_cash)
     try:
         conn.execute('BEGIN IMMEDIATE')
@@ -258,7 +390,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
             return None
         acct = conn.execute("SELECT cash FROM kalshi_paper_account WHERE id=1").fetchone()
         cash = float(acct["cash"])
-        pct = min(0.25, max(0.0, _f(risk.get("position_pct"), 0.0)))
+        pct = min(exposure_cap, max(0.0, _f(risk.get("position_pct"), 0.0)))
         budget = cash * pct
         contracts = int(budget // max(entry, 0.01))
         while contracts > 0 and entry * contracts + kalshi_taker_fee(contracts, entry) > min(cash, budget):
@@ -470,6 +602,16 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
         }
     if entry_side:
         strategy = "LOCK" if str(decision.get("action", "")).upper().startswith("LOCK") else "SCALP"
+        if strategy == "SCALP":
+            profitability_gate = scalp_profitability_gate(db_path, starting_cash)
+            if not profitability_gate["approved"]:
+                return {
+                    "event": False,
+                    "message": (
+                        "Skipped PAPER SCALP: post-fix Kalshi profitability "
+                        "gate is active — " + profitability_gate["reason"] + "."
+                    ),
+                }
         if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
             return {
                 "event": False,

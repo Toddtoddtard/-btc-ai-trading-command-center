@@ -23,7 +23,15 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
-from kalshi_paper_engine import manage_kalshi_paper_cycle, paper_chart_entries, paper_history, paper_summary, persistent_lock_side
+from kalshi_paper_engine import (
+    manage_kalshi_paper_cycle,
+    paper_chart_entries,
+    paper_history,
+    paper_performance_since_update,
+    paper_summary,
+    persistent_lock_side,
+    scalp_profitability_gate,
+)
 from learning_prices import closed_price_at
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
@@ -60,7 +68,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.08-r73-clock-skew-guard"
+APP_VERSION = "2026.09.09-r74-kalshi-profitability-validation"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -2047,23 +2055,37 @@ def risk_evaluate(decision, account, hist, futures):
     position_pct = max(0.02, min(exposure_cap, base * (1 - volatility_penalty)))
     sizing_note = ""
 
-    # Let actual executable contract results influence future exposure. The
-    # directional learner remains useful for signals, but BTC-direction hits do
-    # not prove profitability after Kalshi spread and fees.
+    # Keep every specialist active, including rare-event specialists.  This
+    # gate judges only realized Kalshi SCALP execution after the loss-loop fix.
+    post_fix = paper_performance_since_update(DB_PATH, STARTING_CASH)
+    scalp_gate = scalp_profitability_gate(DB_PATH, STARTING_CASH)
+    if not is_lock and not scalp_gate["approved"]:
+        return {
+            "approved": False,
+            "position_pct": 0.0,
+            "risk_score": 1.0,
+            "reason": "Kalshi SCALP profitability gate: " + scalp_gate["reason"],
+        }
+    if post_fix["samples"] < post_fix["validation_sample_target"]:
+        position_pct = min(position_pct, 0.02)
+        sizing_note = (
+            f"; post-fix Kalshi validation {post_fix['samples']}/"
+            f"{post_fix['validation_sample_target']} — exposure capped at 2%"
+        )
+
+    # Let only post-fix executable Kalshi results influence this version's
+    # exposure.  Older fills remain visible in the lifetime ledger.
     try:
         strategy = "LOCK" if is_lock else "SCALP"
-        recent_contracts = [
-            row for row in paper_history(DB_PATH, STARTING_CASH, limit=20)
-            if row.get("status") == "CLOSED" and row.get("strategy") == strategy
-        ]
-        if len(recent_contracts) >= 5:
-            recent_pnls = [float(row.get("pnl", 0.0)) for row in recent_contracts]
-            gross_wins = sum(p for p in recent_pnls if p > 0)
-            gross_losses = abs(sum(p for p in recent_pnls if p < 0))
-            execution_pf = gross_wins / gross_losses if gross_losses else 2.0
+        strategy_performance = paper_performance_since_update(
+            DB_PATH, STARTING_CASH, strategy=strategy
+        )
+        if strategy_performance["samples"] >= 5:
+            execution_pf = strategy_performance["profit_factor"]
+            execution_pf = 2.0 if execution_pf is None else execution_pf
             execution_multiplier = float(np.clip(execution_pf / 1.25, 0.35, 1.0))
             position_pct = max(0.01, position_pct * execution_multiplier)
-            sizing_note = f"; execution P/F {execution_pf:.2f} adjusted size"
+            sizing_note += f"; execution P/F {execution_pf:.2f} adjusted size"
     except Exception:
         pass
     risk_score = clamp(0.6 - confidence * 0.35 - consensus * 0.15 + volatility_penalty, 0, 1)
@@ -5707,6 +5729,8 @@ def live_dashboard():
         st.subheader("Automatic Paper Trading")
 
         _kp = paper_summary(DB_PATH, STARTING_CASH)
+        _post_fix = paper_performance_since_update(DB_PATH, STARTING_CASH)
+        _scalp_gate = scalp_profitability_gate(DB_PATH, STARTING_CASH)
         st.caption(
             "PRIMARY P/L EVIDENCE — every balance, position and trade below "
             "comes from the same automatic Kalshi paper ledger."
@@ -5720,6 +5744,36 @@ def live_dashboard():
         k5.metric(
             "Contract Profit Factor",
             "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"),
+        )
+
+        st.markdown("#### Since Loss-Loop Fix — Kalshi Execution Scorecard")
+        st.caption(
+            "This scorecard isolates trades opened after the new safeguards. "
+            "Older losses stay in the lifetime ledger but do not decide whether "
+            "the updated Kalshi strategy passes validation."
+        )
+        pf1, pf2, pf3, pf4, pf5 = st.columns(5)
+        pf1.metric(
+            "Closed trades",
+            f"{_post_fix['samples']}/{_post_fix['validation_sample_target']}",
+        )
+        pf2.metric("Kalshi markets", _post_fix["markets"])
+        pf3.metric("Post-fix P/L", f"${_post_fix['total_pnl']:+,.2f}")
+        _post_pf = _post_fix.get("profit_factor")
+        pf4.metric(
+            "Post-fix profit factor",
+            "Learning" if _post_pf is None else (
+                "∞" if not np.isfinite(_post_pf) else f"{_post_pf:.2f}"
+            ),
+        )
+        pf5.metric(
+            "Max drawdown",
+            f"{_post_fix['max_drawdown_pct'] * 100:.2f}%",
+        )
+        st.info(
+            f"Validation: {_scalp_gate['status']} • "
+            f"SCALP safety gate begins after {_post_fix['gate_sample_target']} "
+            "closed post-fix SCALPs. Every specialist remains active."
         )
 
         _open_contract = _kp.get("open_position")
@@ -6130,24 +6184,43 @@ def live_dashboard():
 
 
     with tab_backtest:
-        st.subheader("Walk-forward Backtest")
-        st.caption("This is deliberately not rerun every dashboard refresh. Press the button when you want a fresh historical check.")
-        if st.button("Run backtest", use_container_width=True):
-            bt, stats = walk_forward_backtest(hist, horizon=PREDICTION_HORIZON_MIN)
-            if not stats:
-                st.warning("Not enough qualifying historical signals in the current 1-minute window.")
-            else:
-                b1, b2, b3, b4, b5 = st.columns(5)
-                b1.metric("Signals", stats["trades"])
-                b2.metric("Win rate", f"{stats['win_rate']*100:.1f}%")
-                b3.metric("Avg signal return", f"{stats['avg_return']*100:+.3f}%")
-                b4.metric("Median", f"{stats['median_return']*100:+.3f}%")
-                b5.metric("Compounded*", f"{stats['total_compound']*100:+.2f}%")
-                st.caption("*Compounded figure is diagnostic only; overlapping 15-minute observations make it unsuitable as a live-performance estimate.")
-                view = bt[["time", "close", "signal", "future_return", "strategy_return", "correct"]].tail(200).copy()
-                view["future_return"] = (view["future_return"] * 100).round(3)
-                view["strategy_return"] = (view["strategy_return"] * 100).round(3)
-                render_dashboard_table(view)
+        st.subheader("Kalshi Execution Validation")
+        st.caption(
+            "Profitability is judged from the authoritative Kalshi paper ledger: "
+            "actual executable entries/exits, recorded fees, one global position "
+            "at a time, and official Kalshi settlement. No overlapping BTC spot "
+            "signals are presented as simulated Kalshi profit."
+        )
+        validation = paper_performance_since_update(DB_PATH, STARTING_CASH)
+        validation_gate = scalp_profitability_gate(DB_PATH, STARTING_CASH)
+        v1, v2, v3, v4, v5 = st.columns(5)
+        v1.metric("Closed trades", validation["samples"])
+        v2.metric(
+            "Win rate",
+            "Learning" if validation["win_rate"] is None
+            else f"{validation['win_rate'] * 100:.1f}%",
+        )
+        v3.metric(
+            "Average P/L",
+            "Learning" if validation["expectancy"] is None
+            else f"${validation['expectancy']:+.2f}",
+        )
+        v4.metric("Recorded fees", f"${validation['fees']:,.2f}")
+        v5.metric(
+            "Max drawdown",
+            f"{validation['max_drawdown_pct'] * 100:.2f}%",
+        )
+        st.info(
+            f"{validation_gate['status']} • "
+            f"{validation['samples']}/{validation['validation_sample_target']} "
+            "closed post-fix Kalshi trades collected."
+        )
+        st.caption(
+            "SCALPs automatically pause after 50 post-fix SCALP trades if "
+            "profit factor is below 1.15, expectancy is not positive, or "
+            "maximum drawdown is above 10%. LOCK rules and all specialists "
+            "remain unchanged."
+        )
 
     # ============================================================
     # DIAGNOSTICS / STATUS
