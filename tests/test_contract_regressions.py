@@ -496,6 +496,36 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(position['strategy'], 'LOCK')
         self.assertEqual(position['entry_price'], .85)
 
+    def test_lock_rejects_fee_loss_at_ninety_five_percent_exit(self):
+        self.decision.update(
+            action='LOCK UP',
+            confidence=.95,
+            yes_ask_dollars=.95,
+            yes_bid_dollars=.94,
+        )
+        skipped = self.cycle()
+        self.assertFalse(skipped['event'])
+        self.assertIn('after estimated Kalshi fees', skipped['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+        self.assertIsNone(
+            engine.open_position(self.db, 500, self.decision, self.risk, 100)
+        )
+
+    def test_lock_accepts_profitable_fee_aware_price(self):
+        self.decision.update(
+            action='LOCK UP',
+            confidence=.95,
+            yes_ask_dollars=.94,
+            yes_bid_dollars=.93,
+        )
+        self.assertGreater(engine.lock_target_pnl(10, .94), 0)
+        opened = self.cycle()
+        self.assertTrue(opened['event'])
+        self.assertEqual(
+            engine.paper_summary(self.db)['open_position']['entry_price'],
+            .94,
+        )
+
     def test_expired_or_invalid_quote_cannot_open(self):
         self.decision['kalshi_close_ts'] = 1
         self.assertIsNone(engine.open_position(self.db, 500, self.decision, self.risk, 100))
