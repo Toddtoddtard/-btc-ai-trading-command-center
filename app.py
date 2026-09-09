@@ -69,7 +69,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.09-r75-kalshi-target-endpoint-fix"
+APP_VERSION = "2026.09.09-r76-consistent-learning-summary"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -2163,9 +2163,44 @@ def learning_db():
     return conn
 
 
+def _remote_learning_is_usable(remote):
+    """A zeroed emergency baseline is not a real learning record."""
+    if not isinstance(remote, dict):
+        return False
+    quality = remote.get("data_quality")
+    quality = quality if isinstance(quality, dict) else {}
+    if bool(quality.get("fallback_baseline")):
+        return False
+    if quality.get("shared_learning_source") == "conservative-baseline":
+        return False
+    forecast = remote.get("forecast")
+    history = remote.get("master_history")
+    samples = int((forecast or {}).get("samples", 0)) if isinstance(forecast, dict) else 0
+    return samples > 0 or (isinstance(history, list) and len(history) > 0)
+
+
+def _local_learning_performance(conn):
+    """Rebuild displayed performance from the resolved rows that power rolling stats."""
+    row = conn.execute("""
+        SELECT
+            COUNT(direction_correct),
+            COALESCE(SUM(direction_correct), 0),
+            AVG(abs_error),
+            AVG(path_error)
+        FROM forecast_windows
+        WHERE resolved = 1 AND direction_correct IS NOT NULL
+    """).fetchone()
+    return {
+        "samples": int(row[0] or 0),
+        "direction_hits": int(row[1] or 0),
+        "avg_abs_error": float(row[2] or 0.0),
+        "avg_path_error": float(row[3] or 0.0),
+    }
+
+
 def get_learning_state():
     remote = fetch_remote_learning_state()
-    if isinstance(remote, dict):
+    if _remote_learning_is_usable(remote):
         r = remote.get("forecast")
         if isinstance(r, dict):
             defaults = {
@@ -2201,7 +2236,6 @@ def get_learning_state():
         FROM forecast_learning_state
         WHERE id = 1
     """).fetchone()
-    conn.close()
 
     keys = [
         "w_ret3", "w_ret8", "w_ret15", "momentum_scale",
@@ -2209,6 +2243,13 @@ def get_learning_state():
         "samples", "direction_hits", "avg_abs_error", "avg_path_error"
     ]
     state = dict(zip(keys, row))
+
+    # The rolling cards already read forecast_windows. Rebuild the summary from
+    # those same rows so a remote-fetch failure can never show zero above a
+    # populated rolling history.
+    performance = _local_learning_performance(conn)
+    conn.close()
+    state.update(performance)
     state["direction_accuracy"] = (
         state["direction_hits"] / state["samples"]
         if state["samples"] else np.nan
@@ -6019,7 +6060,7 @@ def live_dashboard():
         learn = get_learning_state()
 
         l1, l2, l3, l4 = st.columns(4)
-        l1.metric("Completed windows", int(learn["samples"]))
+        l1.metric("Scored 15m windows", int(learn["samples"]))
         l2.metric(
             "Direction accuracy",
             "N/A"
@@ -6057,9 +6098,9 @@ def live_dashboard():
         )
 
         st.caption(
-            "After each completed 15-minute Kalshi window, the model grades "
-            "its forecast and adjusts its momentum weights, move scale, "
-            "target influence, and directional bias."
+            "The summary and rolling cards use the same resolved 15-minute "
+            "forecast history. HOLD/WAIT trade outcomes remain excluded from "
+            "the separate trading win/loss rate."
         )
 
         w1, w2, w3, w4 = st.columns(4)
