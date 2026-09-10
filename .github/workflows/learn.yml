@@ -11,6 +11,7 @@ on:
       - 'learner_v31.py'
       - 'reliability_v31.py'
       - 'ai_core.py'
+      - 'market_research.py'
       - 'council_v4.py'
       - 'bot_intelligence_report.py'
       - 'specialist_knowledge_v5.py'
@@ -19,6 +20,7 @@ on:
       - 'time_rewards_v1.py'
       - 'audit_scorecard_v7.py'
       - 'tests/test_audit_v6.py'
+      - 'tests/test_market_research.py'
       - 'background_paper.py'
       - 'tests/test_background_paper.py'
       - 'kalshi_paper_engine.py'
@@ -49,9 +51,9 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py tests/test_audit_v6.py tests/test_background_paper.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py
       - name: Run audit v6 regression tests
-        run: python -m unittest tests.test_audit_v6 tests.test_background_paper -v
+        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper -v
       - name: Load previous private learning state and historical priors
         shell: bash
         run: |
@@ -131,6 +133,7 @@ jobs:
           assert data.get('status', {}).get('current_regime') in {'HIGH_VOL', 'TREND_UP', 'TREND_DOWN', 'LOW_VOL_RANGE', 'RANGE'}
           assert data.get('status', {}).get('specialist_knowledge_regime') == data.get('status', {}).get('current_regime') or data.get('specialist_knowledge_v5', {}).get('regime') == data.get('pending', {}).get('regime')
           assert 'Kalshi Context AI' in data.get('specialists', {})
+          assert 'Cross-Market Research AI' in data.get('specialists', {})
           assert 'Event AI' not in data.get('specialists', {})
           assert 'rolling' in data
           assert 'regimes' in data

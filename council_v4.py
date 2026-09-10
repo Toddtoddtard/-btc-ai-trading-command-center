@@ -34,6 +34,9 @@ BASE_WEIGHTS = {
     "Kalshi Context AI": 0.88,
     "Historical Pattern AI": 0.76,
     "FVG / MACD AI": 0.92,
+    # New Internet-derived hypotheses begin conservatively and must earn more
+    # influence through the same live outcome grading as every other bot.
+    "Cross-Market Research AI": 0.58,
 }
 
 # Combination AI is intentionally excluded from the source council so the
@@ -101,6 +104,8 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
         if name in exclude or not isinstance(item, dict):
             continue
         if name == "Political Event Watch AI" and str(item.get("event_status", "INACTIVE")).upper() != "ACTIVE":
+            continue
+        if name == "Cross-Market Research AI" and str(item.get("research_status", "INACTIVE")).upper() != "ACTIVE":
             continue
         score = float(np.clip(_safe_float(item.get("score"), 0.0), -1.0, 1.0))
         confidence = float(np.clip(_safe_float(item.get("confidence"), 0.5), 0.05, 0.99))

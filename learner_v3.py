@@ -92,6 +92,10 @@ def weighted_master_confidence(pending, state):
     denom = 0.0
     signed = []
     for name, call in calls.items():
+        if name == "Political Event Watch AI" and str(call.get("event_status", "INACTIVE")).upper() != "ACTIVE":
+            continue
+        if name == "Cross-Market Research AI" and str(call.get("research_status", "INACTIVE")).upper() != "ACTIVE":
+            continue
         score = safe_float(call.get("score"), 0.0)
         confidence = safe_float(call.get("confidence"), 0.5)
         learned = state.get("specialists", {}).get(name, {})

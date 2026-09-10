@@ -9,6 +9,7 @@ on:
       - 'historical_specialist_backtest_v7.py'
       - 'ai_core.py'
       - 'council_v4.py'
+      - 'market_research.py'
       - '.github/workflows/historical-specialist-v7.yml'
 
 permissions:
@@ -32,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r learner-requirements.txt
       - name: Compile evaluator
-        run: python -m py_compile historical_specialist_backtest_v7.py ai_core.py reliability_v31.py
+        run: python -m py_compile historical_specialist_backtest_v7.py ai_core.py market_research.py reliability_v31.py
       - name: Run up-to-ten-year specialist walk-forward
         env:
           HISTORICAL_SPECIALIST_OUTPUT: /tmp/historical_specialist_knowledge_v7.json

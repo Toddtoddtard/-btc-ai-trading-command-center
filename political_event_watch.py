@@ -103,21 +103,23 @@ def political_specialist_result(hist):
     """
     try:
         last_ts = hist.iloc[-1].get("time")
-        if last_ts is not None:
-            ts = last_ts.to_pydatetime() if hasattr(last_ts, "to_pydatetime") else last_ts
-            if getattr(ts, "tzinfo", None) is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            if abs((datetime.now(timezone.utc) - ts).total_seconds()) > 900:
-                return {
-                    "name": "Political Event Watch AI",
-                    "signal": "NEUTRAL",
-                    "score": 0.0,
-                    "confidence": 0.0,
-                    "reason": "Inactive during historical/backtest data",
-                    "event_status": "INACTIVE",
-                }
+        if last_ts is None:
+            raise ValueError("history has no timestamp")
+        ts = last_ts.to_pydatetime() if hasattr(last_ts, "to_pydatetime") else last_ts
+        if getattr(ts, "tzinfo", None) is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        live = abs((datetime.now(timezone.utc) - ts).total_seconds()) <= 900
     except Exception:
-        pass
+        live = False
+    if not live:
+        return {
+            "name": "Political Event Watch AI",
+            "signal": "NEUTRAL",
+            "score": 0.0,
+            "confidence": 0.0,
+            "reason": "Inactive during historical/backtest data",
+            "event_status": "INACTIVE",
+        }
 
     state = load_political_event_state()
     active = bool(state.get("active"))

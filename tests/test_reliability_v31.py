@@ -57,6 +57,8 @@ class ReliabilityTests(unittest.TestCase):
         ensure_v3(state)
         self.assertIn("Political Event Watch AI", state["specialist_history"])
         self.assertEqual(state["specialist_history"]["Political Event Watch AI"], [])
+        self.assertIn("Cross-Market Research AI", state["specialist_history"])
+        self.assertEqual(state["specialist_history"]["Cross-Market Research AI"], [])
 
     def test_regime_weight_shrinks_small_sample(self):
         state = {"adaptive_weight": 1.2, "regimes": {"RANGE": {"samples": 2, "adaptive_weight": 0.5}}}

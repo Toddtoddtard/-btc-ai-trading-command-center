@@ -263,7 +263,7 @@ def main():
         "walk_forward": True,
         "production_parameters_changed": False,
         "eligible_specialists": sorted(ELIGIBLE),
-        "excluded_specialists": ["Whale AI", "Liquidity AI", "Derivatives AI", "Kalshi Context AI", "Political Event Watch AI", "Combination AI"],
+        "excluded_specialists": ["Whale AI", "Liquidity AI", "Derivatives AI", "Kalshi Context AI", "Political Event Watch AI", "Cross-Market Research AI", "Combination AI"],
         "months_requested": [f"{year}-{month:02d}" for year, month in requested_months],
         "months_loaded": months_loaded,
         "months_failed": months_failed,

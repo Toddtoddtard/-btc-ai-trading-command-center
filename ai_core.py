@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 
 from political_event_watch import political_specialist_result
+from market_research import cross_market_research_result
 
 SPECIALIST_NAMES = [
     "Trend AI",
@@ -19,6 +20,7 @@ SPECIALIST_NAMES = [
     "Historical Pattern AI",
     "FVG / MACD AI",
     "Political Event Watch AI",
+    "Cross-Market Research AI",
     "Combination AI",
 ]
 
@@ -100,7 +102,7 @@ def _specialist(name, score, reason):
     return {"name": name, "signal": signal, "score": score, "confidence": confidence, "reason": reason}
 
 
-def run_specialists_core(hist, agg, futures, kctx):
+def run_specialists_core(hist, agg, futures, kctx, research_snapshot=None):
     last = hist.iloc[-1]
     prev = hist.iloc[-2]
     px = float(last["close"])
@@ -334,6 +336,7 @@ def run_specialists_core(hist, agg, futures, kctx):
     # political event is active. Added after Combination so an inactive watcher
     # cannot dilute or distort the normal technical specialist ensemble.
     out["Political Event Watch AI"] = political_specialist_result(hist)
+    out["Cross-Market Research AI"] = cross_market_research_result(hist, research_snapshot)
     return out
 
 
