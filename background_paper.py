@@ -196,6 +196,155 @@ def _gate(metrics):
     return {"approved": not reasons, "status": status, "reason": "; ".join(reasons) or "Kalshi safeguards satisfied"}
 
 
+def shared_paper_summary(paper):
+    """Normalize the GitHub-persisted ledger for the Streamlit dashboard."""
+    paper = paper if isinstance(paper, dict) else {}
+    starting_cash = _f(paper.get("starting_cash"), STARTING_CASH)
+    legacy_pnl = _f(paper.get("legacy_realized_pnl"), 0.0)
+    trades = [
+        trade for trade in paper.get("trades", [])
+        if isinstance(trade, dict) and str(trade.get("status", "CLOSED")).upper() == "CLOSED"
+    ]
+    trade_pnls = [_f(trade.get("pnl"), 0.0) for trade in trades]
+    realized = legacy_pnl + sum(trade_pnls)
+    open_position = paper.get("open_position")
+    open_position = dict(open_position) if isinstance(open_position, dict) else None
+    unrealized = 0.0
+    if open_position:
+        entry = _f(open_position.get("entry_price"), 0.0)
+        mark = _f(open_position.get("last_mark"), entry)
+        contracts = max(0, int(_f(open_position.get("contracts"), 0)))
+        amount = _f(
+            open_position.get("amount"),
+            contracts * entry + _f(open_position.get("entry_fee"), 0.0),
+        )
+        unrealized = contracts * mark - kalshi_taker_fee(contracts, mark) - amount
+        open_position["amount_down"] = amount
+
+    all_known_pnls = ([legacy_pnl] if legacy_pnl else []) + trade_pnls
+    wins = [pnl for pnl in all_known_pnls if pnl > 0]
+    losses = [pnl for pnl in all_known_pnls if pnl < 0]
+    equity = starting_cash + realized + unrealized
+    return {
+        "cash": _f(paper.get("cash"), starting_cash + realized),
+        "starting_cash": starting_cash,
+        "realized_pnl": realized,
+        "unrealized_pnl": unrealized,
+        "total_pnl": realized + unrealized,
+        "equity": equity,
+        "return_pct": ((equity - starting_cash) / starting_cash * 100.0) if starting_cash else 0.0,
+        "samples": len(trades),
+        "wins": sum(pnl > 0 for pnl in trade_pnls),
+        "losses": sum(pnl < 0 for pnl in trade_pnls),
+        "win_rate": (
+            sum(pnl > 0 for pnl in trade_pnls) / len(trade_pnls)
+            if trade_pnls else None
+        ),
+        "profit_factor": (
+            sum(wins) / abs(sum(losses))
+            if losses else (math.inf if wins else None)
+        ),
+        "open_position": open_position,
+        "ledger_source": "github-learning-state",
+    }
+
+
+def shared_paper_scorecard(paper):
+    """Recalculate post-fix metrics and validation from persisted trades."""
+    paper = paper if isinstance(paper, dict) else {}
+    metrics = _post_fix_metrics(paper)
+    return metrics, _gate(metrics)
+
+
+def shared_paper_history(paper, limit=100):
+    """Return display-ready rows from the persistent GitHub ledger."""
+    paper = paper if isinstance(paper, dict) else {}
+    positions = [
+        trade for trade in paper.get("trades", []) if isinstance(trade, dict)
+    ]
+    if isinstance(paper.get("open_position"), dict):
+        positions.append(paper["open_position"])
+    positions.sort(
+        key=lambda row: (_f(row.get("opened_at"), 0.0), str(row.get("ticker", ""))),
+        reverse=True,
+    )
+    history = []
+    for row in positions[:max(1, min(1000, int(limit)))]:
+        is_open = str(row.get("status", "OPEN")).upper() == "OPEN"
+        entry = _f(row.get("entry_price"), 0.0)
+        contracts = max(0, int(_f(row.get("contracts"), 0)))
+        amount = _f(
+            row.get("amount"),
+            contracts * entry + _f(row.get("entry_fee"), 0.0),
+        )
+        current_or_exit = (
+            _f(row.get("last_mark"), entry)
+            if is_open else _f(row.get("exit_price"))
+        )
+        if is_open:
+            pnl = (
+                contracts * current_or_exit
+                - kalshi_taker_fee(contracts, current_or_exit)
+                - amount
+            )
+            result = "OPEN"
+        else:
+            pnl = _f(row.get("pnl"), 0.0)
+            result = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "EVEN")
+        history.append({
+            "status": "OPEN" if is_open else "CLOSED",
+            "direction": "UP" if row.get("side") == "YES" else "DOWN",
+            "strategy": str(row.get("strategy", "SCALP")),
+            "amount": amount,
+            "kalshi_entry_pct": entry * 100.0,
+            "current_or_exit_pct": (
+                current_or_exit * 100.0 if current_or_exit is not None else None
+            ),
+            "result": result,
+            "pnl": pnl,
+            "opened_at": _f(row.get("opened_at"), 0.0),
+            "closed_at": _f(row.get("closed_at")),
+            "expires_at": _f(row.get("expires_at")),
+            "exit_reason": row.get("exit_reason"),
+            "ticker": str(row.get("ticker", "")),
+        })
+    return history
+
+
+def shared_paper_chart_entries(paper, ticker, limit=11):
+    """Return entry markers from the same persistent ledger shown in the tab."""
+    ticker = str(ticker or "").strip()
+    if not ticker:
+        return []
+    rows = [
+        row for row in shared_paper_history(paper, limit=1000)
+        if row.get("ticker") == ticker
+    ]
+    rows.sort(key=lambda row: row["opened_at"])
+    return [
+        {
+            "direction": row["direction"],
+            "strategy": row["strategy"],
+            "opened_at": row["opened_at"],
+            "kalshi_entry_pct": row["kalshi_entry_pct"],
+            "spot_entry_price": next(
+                (
+                    _f(source.get("spot_entry_price"))
+                    for source in (
+                        list(paper.get("trades", []))
+                        + ([paper.get("open_position")] if paper.get("open_position") else [])
+                    )
+                    if isinstance(source, dict)
+                    and str(source.get("ticker", "")) == ticker
+                    and _f(source.get("opened_at"), 0.0) == row["opened_at"]
+                ),
+                None,
+            ),
+        }
+        for row in rows[-max(1, min(25, int(limit))):]
+    ]
+
+
 def _close(paper, position, exit_price, reason, now, charge_fee=True):
     contracts = int(position["contracts"])
     exit_fee = kalshi_taker_fee(contracts, exit_price) if charge_fee else 0.0

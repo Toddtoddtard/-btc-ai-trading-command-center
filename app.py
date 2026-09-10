@@ -23,6 +23,12 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
+from background_paper import (
+    shared_paper_chart_entries,
+    shared_paper_history,
+    shared_paper_scorecard,
+    shared_paper_summary,
+)
 from kalshi_paper_engine import (
     manage_kalshi_paper_cycle,
     paper_chart_entries,
@@ -4044,33 +4050,31 @@ refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3
 record_predictions = st.sidebar.checkbox("Auto-journal predictions", value=True)
 show_raw = st.sidebar.checkbox("Show diagnostics", value=False)
 
-db_auto_state = get_auto_state()
-if "auto_paper_enabled" not in st.session_state:
-    st.session_state.auto_paper_enabled = bool(db_auto_state["enabled"])
-auto_paper_enabled = st.sidebar.toggle(
+_sidebar_learning_state = fetch_remote_learning_state() or {}
+_sidebar_paper_state = _sidebar_learning_state.get("background_paper", {})
+auto_paper_enabled = bool(_sidebar_paper_state.get("enabled", True))
+st.sidebar.toggle(
     "AUTO PAPER TRADING",
-    key="auto_paper_enabled",
-    help="Automatically opens and manages simulated long/short BTC positions. PAPER ONLY.",
+    value=auto_paper_enabled,
+    disabled=True,
+    help="Controlled by the persistent GitHub learner. PAPER ONLY.",
 )
-if bool(db_auto_state["enabled"]) != bool(auto_paper_enabled):
-    set_auto_enabled(auto_paper_enabled)
-    db_auto_state = get_auto_state()
 
 if auto_paper_enabled:
     st.sidebar.success("AUTO PAPER: ON")
-    st.sidebar.caption("Approved signals execute automatically. Stops, targets, reversals and the 15-minute horizon can close positions.")
-    # Automatic execution requires the Streamlit session to keep rerunning.
-    auto_refresh = True
+    st.sidebar.caption(
+        "The scheduled GitHub learner manages the persistent paper ledger about "
+        "every 10 minutes, even when this page is closed."
+    )
 else:
     st.sidebar.info("AUTO PAPER: OFF")
 
 st.sidebar.divider()
 st.sidebar.subheader("Safety")
 st.sidebar.warning("Paper trading only. This app intentionally contains no live order endpoint and asks for no exchange API key.")
-if st.sidebar.button("Reset paper account", use_container_width=True):
-    reset_account()
-    st.sidebar.success("Paper account reset.")
-    st.rerun()
+st.sidebar.caption(
+    "The persistent GitHub paper ledger cannot be accidentally reset from this browser."
+)
 
 # ============================================================
 # SMOOTH LIVE DASHBOARD
@@ -5016,10 +5020,11 @@ except Exception:
 _learning_state = get_learning_state()
 
 try:
-    _persistent_paper_entries = paper_chart_entries(
-        DB_PATH,
+    _persistent_learning_state = fetch_remote_learning_state() or {}
+    _persistent_paper_state = _persistent_learning_state.get("background_paper", {})
+    _persistent_paper_entries = shared_paper_chart_entries(
+        _persistent_paper_state,
         _persistent_ctx.get("ticker", ""),
-        STARTING_CASH,
         limit=11,
     )
 except Exception:
@@ -5138,14 +5143,15 @@ def live_dashboard():
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
 
-    auto_result = manage_auto_paper(decision, risk, price, hist)
-    if auto_result.get("event"):
-        account = get_account(price)
-        risk = risk_evaluate(decision, account, hist, futures)
-        # A new entry needs one full rerun so the persistent chart receives the
-        # freshly stored marker. Closing events do not need to rebuild it.
-        if str(auto_result.get("message", "")).startswith("Opened PAPER"):
-            st.rerun(scope="app")
+    _shared_learning_state = fetch_remote_learning_state() or {}
+    _shared_paper = _shared_learning_state.get("background_paper", {})
+    auto_result = {
+        "event": False,
+        "message": _shared_paper.get(
+            "last_message",
+            "Persistent GitHub paper learner is waiting for an approved signal.",
+        ),
+    }
 
     if record_predictions:
         maybe_record_prediction(decision, price, min_seconds=60)
@@ -5451,10 +5457,9 @@ def live_dashboard():
 
     with tab_ai:
         st.subheader("Master Kalshi 15-minute Prediction AI")
-        _call_entries = paper_chart_entries(
-            DB_PATH,
+        _call_entries = shared_paper_chart_entries(
+            _shared_paper,
             decision.get("kalshi_ticker", ""),
-            STARTING_CASH,
             limit=11,
         )
         d1, d2, d3, d4, d5 = st.columns(5)
@@ -5801,12 +5806,11 @@ def live_dashboard():
     with tab_paper:
         st.subheader("Automatic Paper Trading")
 
-        _kp = paper_summary(DB_PATH, STARTING_CASH)
-        _post_fix = paper_performance_since_update(DB_PATH, STARTING_CASH)
-        _scalp_gate = scalp_profitability_gate(DB_PATH, STARTING_CASH)
+        _kp = shared_paper_summary(_shared_paper)
+        _post_fix, _scalp_gate = shared_paper_scorecard(_shared_paper)
         st.caption(
             "PRIMARY P/L EVIDENCE — every balance, position and trade below "
-            "comes from the same automatic Kalshi paper ledger."
+            "comes from the persistent GitHub learning-state ledger."
         )
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")
@@ -5858,7 +5862,12 @@ def live_dashboard():
                 f"Kalshi entry: {_open_contract['entry_price'] * 100:.0f}%"
             )
 
-        auto_state = get_auto_state()
+        auto_state = {
+            "enabled": bool(_shared_paper.get("enabled", True)),
+            "last_message": _shared_paper.get(
+                "last_message", "Persistent paper learner is waiting."
+            ),
+        }
         _status_side = (
             "UP" if _open_contract and _open_contract["side"] == "YES"
             else "DOWN" if _open_contract
@@ -5908,15 +5917,16 @@ def live_dashboard():
             "Entry rule: automatic SCALP trades are rejected above a 75% "
             "Kalshi contract price; final LOCK calls may enter above 75% only "
             "when a 95% bid exit remains profitable after estimated Kalshi "
-            "fees. SCALP requires a projected 20% gross return on entry cost, "
+            "fees. SCALP requires a projected 10% gross return on entry cost, "
             "has no maximum-spread filter, stops after a "
-            "5-point adverse contract move, and must receive a fresh signal "
+            "15-point emergency adverse contract move, can exit earlier on an "
+            "AI-confirmed reversal, and must receive a fresh signal "
             "before same-side re-entry. LOCK sells automatically at a 95% "
             "executable bid."
         )
 
         st.subheader("Automatic Kalshi Paper Trade Log")
-        _contract_history = paper_history(DB_PATH, STARTING_CASH, limit=100)
+        _contract_history = shared_paper_history(_shared_paper, limit=100)
         if _contract_history:
             _history_view = pd.DataFrame([
                 {

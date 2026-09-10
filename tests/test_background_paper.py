@@ -144,6 +144,39 @@ class BackgroundPaperTests(unittest.TestCase):
         paper = bg.run_cycle(state, lambda _: self.market(yes_bid_dollars=.40, yes_ask_dollars=.50), now=1000)
         self.assertIsNotNone(paper["open_position"])
 
+    def test_shared_dashboard_summary_includes_legacy_and_open_pnl(self):
+        paper = bg.initial_state(now=1000)
+        paper["legacy_realized_pnl"] = -10.0
+        paper["trades"] = [{"status": "CLOSED", "pnl": 2.0}]
+        paper["open_position"] = {
+            "status": "OPEN", "ticker": "TEST", "side": "YES",
+            "strategy": "SCALP", "entry_price": .50, "last_mark": .60,
+            "contracts": 10, "entry_fee": .20, "amount": 5.20,
+            "opened_at": 1000,
+        }
+        summary = bg.shared_paper_summary(paper)
+        expected_open = 6.0 - bg.kalshi_taker_fee(10, .60) - 5.20
+        self.assertAlmostEqual(summary["realized_pnl"], -8.0)
+        self.assertAlmostEqual(summary["unrealized_pnl"], expected_open)
+        self.assertAlmostEqual(summary["equity"], 500.0 - 8.0 + expected_open)
+        self.assertEqual(summary["ledger_source"], "github-learning-state")
+
+    def test_shared_dashboard_history_and_chart_use_same_ledger(self):
+        paper = bg.initial_state(now=1000)
+        paper["trades"] = [{
+            "status": "CLOSED", "ticker": "TEST", "side": "YES",
+            "direction": "UP", "strategy": "SCALP", "entry_price": .50,
+            "exit_price": .65, "contracts": 10, "entry_fee": .20,
+            "amount": 5.20, "pnl": 1.10, "opened_at": 1000,
+            "closed_at": 1010, "spot_entry_price": 100000,
+        }]
+        history = bg.shared_paper_history(paper)
+        markers = bg.shared_paper_chart_entries(paper, "TEST")
+        self.assertEqual(history[0]["ticker"], "TEST")
+        self.assertEqual(history[0]["result"], "WIN")
+        self.assertEqual(markers[0]["kalshi_entry_pct"], 50.0)
+        self.assertEqual(markers[0]["spot_entry_price"], 100000)
+
 
 if __name__ == "__main__":
     unittest.main()

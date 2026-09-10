@@ -465,6 +465,12 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('paper_entries=_persistent_paper_entries', source)
         self.assertIn("Entered at {_call_entries[-1]", source)
         self.assertIn('Since Loss-Loop Fix — Kalshi Execution Scorecard', source)
+        self.assertIn('_kp = shared_paper_summary(_shared_paper)', source)
+        self.assertIn('_contract_history = shared_paper_history(_shared_paper', source)
+        self.assertNotIn('auto_result = manage_auto_paper(', source)
+        self.assertIn('persistent GitHub learning-state ledger', source)
+        self.assertIn('projected 10% gross return', source)
+        self.assertIn('15-point emergency adverse contract move', source)
         self.assertIn('Kalshi Execution Validation', source)
         self.assertIn('Every specialist remains active', source)
         self.assertIn(
