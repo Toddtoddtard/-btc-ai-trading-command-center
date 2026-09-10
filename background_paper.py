@@ -29,6 +29,7 @@ from kalshi_paper_engine import (
     POST_FIX_PROFIT_FACTOR_FLOOR,
     POST_FIX_VALIDATION_TRADES,
     SCALP_MIN_GROSS_RETURN,
+    SCALP_MIN_REMAINING_EDGE,
     SCALP_STOP_LOSS_POINTS,
     UNPROVEN_POSITION_CAP,
     kalshi_taker_fee,
@@ -255,8 +256,31 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             elif position["strategy"] == "SCALP":
                 entry_price = position["entry_price"]
                 gain = bid - entry_price
-                if gain >= entry_price * SCALP_MIN_GROSS_RETURN:
-                    _close(paper, position, bid, "TAKE_PROFIT_10_PCT_GROSS", now)
+                signal_side = (
+                    "YES"
+                    if int(pending.get("predicted_direction", 0)) > 0
+                    else "NO"
+                )
+                projected_exit = _projected_side_value(
+                    pending, market, position["side"]
+                )
+                sees_more_upside = (
+                    not bool(pending.get("would_wait", True))
+                    and signal_side == position["side"]
+                    and projected_exit is not None
+                    and projected_exit >= bid + SCALP_MIN_REMAINING_EDGE
+                )
+                if (
+                    gain >= entry_price * SCALP_MIN_GROSS_RETURN
+                    and not sees_more_upside
+                ):
+                    _close(
+                        paper,
+                        position,
+                        bid,
+                        "TAKE_PROFIT_AI_UPSIDE_EXHAUSTED",
+                        now,
+                    )
                 elif gain <= -SCALP_STOP_LOSS_POINTS:
                     _close(paper, position, bid, "STOP_LOSS_5_POINTS", now)
                 else:

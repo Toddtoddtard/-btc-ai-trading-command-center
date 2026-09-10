@@ -19,6 +19,7 @@ except ModuleNotFoundError:  # Allows this isolated test artifact to run locally
     stub.POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
     stub.POST_FIX_VALIDATION_TRADES = 100
     stub.SCALP_MIN_GROSS_RETURN = .10
+    stub.SCALP_MIN_REMAINING_EDGE = .01
     stub.SCALP_STOP_LOSS_POINTS = .05
     stub.UNPROVEN_POSITION_CAP = .02
     stub.kalshi_taker_fee = lambda contracts, price: math.ceil(.07 * contracts * price * (1-price) * 100) / 100
@@ -107,10 +108,23 @@ class BackgroundPaperTests(unittest.TestCase):
         state = self.pending()
         paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
         self.assertIsNotNone(paper["open_position"])
+        state["pending"]["would_wait"] = True
         paper = bg.run_cycle(state, lambda _: self.market(yes_bid_dollars=.65, yes_ask_dollars=.67), now=1010)
         self.assertIsNone(paper["open_position"])
         self.assertEqual(paper["metrics"]["samples"], 1)
         self.assertGreater(paper["metrics"]["total_pnl"], 0)
+
+    def test_profitable_scalp_holds_while_ai_sees_more_upside(self):
+        state = self.pending(predicted_end=101000)
+        paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
+        self.assertIsNotNone(paper["open_position"])
+        paper = bg.run_cycle(
+            state,
+            lambda _: self.market(yes_bid_dollars=.55, yes_ask_dollars=.57),
+            now=1010,
+        )
+        self.assertIsNotNone(paper["open_position"])
+        self.assertIn("Holding PAPER SCALP", paper["last_message"])
 
     def test_wide_spread_does_not_block_entry(self):
         state = self.pending()

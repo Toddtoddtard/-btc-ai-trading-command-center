@@ -194,7 +194,7 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['entry_price'], .50)
 
-    def test_scalp_takes_profit_at_ten_percent_gross_return(self):
+    def test_scalp_takes_profit_when_ai_sees_no_more_upside(self):
         self.decision.update(
             action='SCALP UP',
             confidence=.80,
@@ -211,8 +211,20 @@ class ContractRegressionTests(unittest.TestCase):
             reason = conn.execute(
                 'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
             ).fetchone()['exit_reason']
-        self.assertEqual(reason, 'TAKE_PROFIT_10_PCT_GROSS')
+        self.assertEqual(reason, 'TAKE_PROFIT_AI_UPSIDE_EXHAUSTED')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+
+    def test_scalp_holds_beyond_ten_percent_when_ai_sees_more_upside(self):
+        self.decision.update(
+            action='SCALP UP',
+            confidence=.80,
+            scalp_projected_exit_price=.70,
+        )
+        self.open()
+        self.decision['yes_bid_dollars'] = .55
+        held = self.cycle()
+        self.assertFalse(held['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_ignores_normal_opposite_signal(self):
         self.open()
@@ -282,9 +294,16 @@ class ContractRegressionTests(unittest.TestCase):
     def test_at_most_ten_scalps_are_allowed_per_market(self):
         self.decision.update(action='SCALP UP', confidence=.80)
         for _ in range(10):
-            self.decision.update(yes_ask_dollars=.50, yes_bid_dollars=.48)
+            self.decision.update(
+                yes_ask_dollars=.50,
+                yes_bid_dollars=.48,
+                scalp_projected_exit_price=.80,
+            )
             self.assertTrue(self.cycle()['event'])
-            self.decision['yes_bid_dollars'] = .65
+            self.decision.update(
+                yes_bid_dollars=.65,
+                scalp_projected_exit_price=.65,
+            )
             self.assertTrue(self.cycle()['event'])
             self.decision['action'] = 'HOLD'
             self.assertFalse(self.cycle()['event'])

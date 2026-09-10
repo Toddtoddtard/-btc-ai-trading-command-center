@@ -46,6 +46,9 @@ UNPROVEN_POSITION_CAP = 0.02
 # Kalshi opportunities can enter while the 75% entry cap and fee accounting
 # continue to prevent expensive or negative-value fills.
 SCALP_MIN_GROSS_RETURN = 0.10
+# After the minimum return is reached, hold only when the live forecast still
+# shows meaningful additional upside beyond the executable exit bid.
+SCALP_MIN_REMAINING_EDGE = 0.01
 SCALP_STOP_LOSS_POINTS = 0.05
 OPPOSITE_SIGNAL_CONFIRM_SECONDS = 10.0
 
@@ -590,8 +593,22 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                 action_side = _side_from_action(decision.get("action"))
                 entry_price = float(row["entry_price"])
                 price_gain = mark - entry_price
-                if price_gain >= entry_price * SCALP_MIN_GROSS_RETURN - 1e-12:
-                    return _close(conn, row, mark, "TAKE_PROFIT_10_PCT_GROSS")
+                projected_exit = _projected_scalp_exit(decision)
+                sees_more_upside = (
+                    action_side == side
+                    and projected_exit is not None
+                    and projected_exit >= mark + SCALP_MIN_REMAINING_EDGE - 1e-12
+                )
+                if (
+                    price_gain >= entry_price * SCALP_MIN_GROSS_RETURN - 1e-12
+                    and not sees_more_upside
+                ):
+                    return _close(
+                        conn,
+                        row,
+                        mark,
+                        "TAKE_PROFIT_AI_UPSIDE_EXHAUSTED",
+                    )
                 price_loss = float(row["entry_price"]) - mark
                 if price_loss >= SCALP_STOP_LOSS_POINTS - 1e-12:
                     return _close(conn, row, mark, "STOP_LOSS_5_POINTS")
