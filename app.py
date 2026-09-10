@@ -3084,6 +3084,10 @@ def rolling_specialist_accuracy(window):
                     pd.Series([r.get("signed_edge") for r in rows]),
                     errors="coerce",
                 )
+                rewards = pd.to_numeric(
+                    pd.Series([r.get("time_reward") for r in rows]),
+                    errors="coerce",
+                )
                 out.append({
                     "Specialist": specialist,
                     "Samples": int(len(correct)),
@@ -3093,6 +3097,12 @@ def rolling_specialist_accuracy(window):
                     ),
                     "Avg Signed Edge": (
                         float(edge.mean()) if edge.notna().any() else np.nan
+                    ),
+                    "Reward Points": (
+                        float(rewards.sum()) if rewards.notna().any() else 0.0
+                    ),
+                    "Avg Time Reward": (
+                        float(rewards.mean()) if rewards.notna().any() else np.nan
                     ),
                 })
             return pd.DataFrame(out)
@@ -3108,7 +3118,7 @@ def rolling_specialist_accuracy(window):
 
     if df.empty:
         return pd.DataFrame(
-            columns=["Specialist", "Samples", "Accuracy %", "Avg Signed Edge"]
+            columns=["Specialist", "Samples", "Accuracy %", "Avg Signed Edge", "Reward Points", "Avg Time Reward"]
         )
 
     df["direction_correct"] = pd.to_numeric(df["direction_correct"], errors="coerce")
@@ -3125,6 +3135,8 @@ def rolling_specialist_accuracy(window):
                 np.nan if len(valid) == 0 else float(valid.mean() * 100.0)
             ),
             "Avg Signed Edge": float(g["signed_edge"].mean()) if len(g) else np.nan,
+            "Reward Points": np.nan,
+            "Avg Time Reward": np.nan,
         })
 
     return pd.DataFrame(out)
@@ -3139,6 +3151,8 @@ def specialist_multiwindow_accuracy():
             "Samples": f"N{window}",
             "Accuracy %": f"Acc {window} %",
             "Avg Signed Edge": f"Edge {window}",
+            "Reward Points": f"Reward {window}",
+            "Avg Time Reward": f"Avg Reward {window}",
         }
 
         df = df.rename(columns=rename)
@@ -3148,6 +3162,8 @@ def specialist_multiwindow_accuracy():
             f"N{window}",
             f"Acc {window} %",
             f"Edge {window}",
+            f"Reward {window}",
+            f"Avg Reward {window}",
         ]
 
         df = df[cols]

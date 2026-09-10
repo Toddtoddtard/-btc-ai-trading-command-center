@@ -14,6 +14,7 @@ import pandas as pd
 
 from ai_core import SPECIALIST_NAMES, enrich_history_core, forecast_path_core, run_specialists_core
 from learning_prices import closed_price_at
+from time_rewards_v1 import time_reward
 
 SPOT = "https://data-api.binance.vision"
 FUTURES = "https://fapi.binance.com"
@@ -311,6 +312,16 @@ def grade(state, df):
     predicted_end = float(pending["predicted_end"])
     actual_direction = 1 if actual >= start else -1
     direction_correct = int(actual_direction == int(pending["predicted_direction"]))
+    master_reward = time_reward(
+        pending.get("opened_at"),
+        pending.get("expires_at"),
+        direction_correct,
+        directional=int(pending.get("predicted_direction", 0)) != 0,
+    )
+    reward_system = state.setdefault("reward_system", {})
+    reward_system["version"] = 1
+    reward_system["master_points"] = float(reward_system.get("master_points", 0.0)) + master_reward["points"]
+    reward_system["last_master_reward"] = master_reward
     abs_error = abs(actual - predicted_end)
 
     path_error = abs_error
@@ -359,6 +370,10 @@ def grade(state, df):
         "path_error": path_error,
         "kalshi_correct": None,
         "kalshi_result": None,
+        "time_reward": master_reward["points"],
+        "reward_magnitude": master_reward["magnitude"],
+        "earliness": master_reward["earliness"],
+        "lead_seconds": master_reward["lead_seconds"],
     }
     state["master_history"].append(history_row)
     state["master_history"] = state["master_history"][-1000:]
@@ -380,18 +395,55 @@ def grade(state, df):
         predicted_direction = 1 if score > 0.03 else -1 if score < -0.03 else 0
         hit = int(predicted_direction != 0 and predicted_direction == actual_direction)
         edge = score * realized * 100 if predicted_direction else 0.0
-        calibration = float(call["confidence"]) if hit else -float(call["confidence"])
-        alpha = 0.10
-        learned["ewma_accuracy"] = (1 - alpha) * learned["ewma_accuracy"] + alpha * hit
-        learned["ewma_edge"] = (1 - alpha) * learned["ewma_edge"] + alpha * edge
-        learned["ewma_calibration"] = (1 - alpha) * learned["ewma_calibration"] + alpha * calibration
-        learned["samples"] += 1
-        learned["direction_hits"] += hit
-        quality = 0.55 * (learned["ewma_accuracy"] - 0.5) * 2 + 0.25 * np.tanh(learned["ewma_edge"] * 4) + 0.20 * learned["ewma_calibration"]
-        target_weight = float(np.clip(1 + quality, 0.35, 1.85))
-        learned["adaptive_weight"] = float(np.clip(0.9 * learned["adaptive_weight"] + 0.1 * target_weight, 0.35, 1.85))
+        reward = time_reward(
+            pending.get("opened_at"),
+            pending.get("expires_at"),
+            hit,
+            directional=predicted_direction != 0,
+        )
+        learned["reward_points"] = float(learned.get("reward_points", 0.0)) + reward["points"]
+        learned["reward_ewma"] = 0.90 * float(learned.get("reward_ewma", 0.0)) + 0.10 * reward["points"]
+        if hit:
+            learned["rewarded_correct_calls"] = int(learned.get("rewarded_correct_calls", 0)) + 1
+        specialist_rewards = reward_system.setdefault("specialists", {}).setdefault(
+            name, {"points": 0.0, "correct_calls": 0, "directional_calls": 0}
+        )
+        specialist_rewards["points"] = float(specialist_rewards.get("points", 0.0)) + reward["points"]
+        specialist_rewards["correct_calls"] = int(specialist_rewards.get("correct_calls", 0)) + hit
+        specialist_rewards["directional_calls"] = int(specialist_rewards.get("directional_calls", 0)) + int(predicted_direction != 0)
+        specialist_rewards["last_reward"] = reward
+
+        if predicted_direction != 0:
+            calibration = float(call["confidence"]) if hit else -float(call["confidence"])
+            alpha = 0.10
+            learned["ewma_accuracy"] = (1 - alpha) * learned["ewma_accuracy"] + alpha * hit
+            learned["ewma_edge"] = (1 - alpha) * learned["ewma_edge"] + alpha * edge
+            learned["ewma_calibration"] = (1 - alpha) * learned["ewma_calibration"] + alpha * calibration
+            learned["samples"] += 1
+            learned["direction_hits"] += hit
+            reward_quality = float(np.tanh(float(learned.get("reward_ewma", 0.0)) / 1.5))
+            quality = (
+                0.48 * (learned["ewma_accuracy"] - 0.5) * 2
+                + 0.22 * np.tanh(learned["ewma_edge"] * 4)
+                + 0.18 * learned["ewma_calibration"]
+                + 0.12 * reward_quality
+            )
+            target_weight = float(np.clip(1 + quality, 0.35, 1.85))
+            learned["adaptive_weight"] = float(np.clip(0.9 * learned["adaptive_weight"] + 0.1 * target_weight, 0.35, 1.85))
+
         history = state.setdefault("specialist_history", {}).setdefault(name, [])
-        history.append({"ticker": pending["ticker"], "expires_at": pending["expires_at"], "direction_correct": hit, "signed_edge": edge})
+        history.append({
+            "ticker": pending["ticker"],
+            "opened_at": pending.get("opened_at"),
+            "expires_at": pending["expires_at"],
+            "directional_call": bool(predicted_direction != 0),
+            "direction_correct": hit if predicted_direction != 0 else None,
+            "signed_edge": edge,
+            "time_reward": reward["points"],
+            "reward_magnitude": reward["magnitude"],
+            "earliness": reward["earliness"],
+            "lead_seconds": reward["lead_seconds"],
+        })
         state["specialist_history"][name] = history[-1000:]
 
     state["pending"] = None

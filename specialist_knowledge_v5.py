@@ -66,21 +66,35 @@ def specialist_posterior(state, name, regime=None):
     alpha = 1.0 + effective_prior * hist_acc
     beta = 1.0 + effective_prior * (1.0 - hist_acc)
     live_n = live_hits = 0
-    edge_sum = 0.0
+    edge_sum = reward_sum = 0.0
     for r in rows[-500:]:
         hit = r.get("direction_correct")
-        if hit is None:
+        if hit is None or r.get("directional_call") is False:
             continue
         live_n += 1
         live_hits += int(bool(hit))
         edge_sum += _f(r.get("signed_edge"), 0.0)
-        alpha += int(bool(hit))
-        beta += 1 - int(bool(hit))
+        reward_value = r.get("time_reward")
+        if reward_value is None:
+            reward_value = 1.0 if bool(hit) else -1.0
+        reward_value = float(np.clip(_f(reward_value, 0.0), -2.0, 2.0))
+        reward_magnitude = max(1.0, abs(reward_value))
+        reward_sum += reward_value
+        alpha += reward_magnitude if bool(hit) else 0.0
+        beta += reward_magnitude if not bool(hit) else 0.0
     mean = alpha / (alpha + beta)
     var = (alpha * beta) / (((alpha + beta) ** 2) * (alpha + beta + 1.0))
     lower95 = float(np.clip(mean - 1.96 * math.sqrt(max(var, 0.0)), 0.0, 1.0))
     avg_edge = edge_sum / live_n if live_n else 0.0
-    reliability = float(np.clip(1.0 + (mean - 0.50) * 1.35 + np.tanh(avg_edge * 4.0) * 0.10, 0.55, 1.45))
+    avg_reward = reward_sum / live_n if live_n else 0.0
+    reliability = float(np.clip(
+        1.0
+        + (mean - 0.50) * 1.20
+        + np.tanh(avg_edge * 4.0) * 0.10
+        + np.tanh(avg_reward / 1.5) * 0.12,
+        0.55,
+        1.45,
+    ))
     return {
         "name": name,
         "posterior_accuracy": float(mean),
@@ -91,6 +105,7 @@ def specialist_posterior(state, name, regime=None):
         "live_samples": int(live_n),
         "live_hits": int(live_hits),
         "avg_signed_edge": float(avg_edge),
+        "avg_time_reward": float(avg_reward),
         "reliability_multiplier": reliability,
         "mature": bool(live_n >= MIN_LIVE_SAMPLES or hist_n >= 100),
     }

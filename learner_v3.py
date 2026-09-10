@@ -74,6 +74,9 @@ def ensure_v3(state):
         spec.setdefault("ewma_calibration", 0.0)
         spec.setdefault("brier_ewma", 0.25)
         spec.setdefault("overconfident_misses", 0)
+        spec.setdefault("reward_points", 0.0)
+        spec.setdefault("reward_ewma", 0.0)
+        spec.setdefault("rewarded_correct_calls", 0)
         spec.setdefault("regimes", {})
         # Older saved states may predate a newly added specialist. Keep the
         # parallel history mapping in sync during every state migration.
@@ -170,7 +173,9 @@ def recalibrate_weights(state, pending, actual_direction, realized_return):
         score = safe_float(call.get("score"), 0.0)
         conf = float(np.clip(safe_float(call.get("confidence"), 0.5), 0.01, 0.99))
         pred = 1 if score > 0.03 else -1 if score < -0.03 else 0
-        hit = int(pred != 0 and pred == actual_direction)
+        if pred == 0:
+            continue
+        hit = int(pred == actual_direction)
         outcome = 1.0 if hit else 0.0
         brier = (conf - outcome) ** 2 if pred != 0 else 0.25
         learned["brier_ewma"] = 0.90 * safe_float(learned.get("brier_ewma"), 0.25) + 0.10 * brier
@@ -181,7 +186,13 @@ def recalibrate_weights(state, pending, actual_direction, realized_return):
         accuracy_edge = (safe_float(learned.get("ewma_accuracy"), 0.5) - 0.5) * 2.0
         calibration_quality = 1.0 - min(1.0, safe_float(learned.get("brier_ewma"), 0.25) / 0.35)
         signed_edge = math.tanh(safe_float(learned.get("ewma_edge"), 0.0) * 4.0)
-        quality = 0.48 * accuracy_edge + 0.22 * signed_edge + 0.30 * (calibration_quality - 0.3)
+        reward_quality = math.tanh(safe_float(learned.get("reward_ewma"), 0.0) / 1.5)
+        quality = (
+            0.42 * accuracy_edge
+            + 0.18 * signed_edge
+            + 0.24 * (calibration_quality - 0.3)
+            + 0.16 * reward_quality
+        )
         target_weight = 1.0 + sample_shrink * quality
         learned["adaptive_weight"] = float(np.clip(0.86 * safe_float(learned.get("adaptive_weight"), 1.0) + 0.14 * target_weight, 0.30, 1.75))
 
