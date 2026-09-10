@@ -40,9 +40,12 @@ POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
 POST_FIX_MAX_DRAWDOWN_PCT = 0.10
 UNPROVEN_POSITION_CAP = 0.02
 
-# SCALP positions require a forecast and realized move worth at least a 20%
-# gross return on entry cost (for example, 50% to 60%), before fees.
-SCALP_MIN_GROSS_RETURN = 0.20
+# SCALP positions require a forecast and realized move worth at least a 10%
+# gross return on entry cost (for example, 50% to 55%), before fees.  This is
+# deliberately lower than the original 20% gate so moderate, correctly-priced
+# Kalshi opportunities can enter while the 75% entry cap and fee accounting
+# continue to prevent expensive or negative-value fills.
+SCALP_MIN_GROSS_RETURN = 0.10
 SCALP_STOP_LOSS_POINTS = 0.05
 OPPOSITE_SIGNAL_CONFIRM_SECONDS = 10.0
 
@@ -588,7 +591,7 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                 entry_price = float(row["entry_price"])
                 price_gain = mark - entry_price
                 if price_gain >= entry_price * SCALP_MIN_GROSS_RETURN - 1e-12:
-                    return _close(conn, row, mark, "TAKE_PROFIT_20_PCT_GROSS")
+                    return _close(conn, row, mark, "TAKE_PROFIT_10_PCT_GROSS")
                 price_loss = float(row["entry_price"]) - mark
                 if price_loss >= SCALP_STOP_LOSS_POINTS - 1e-12:
                     return _close(conn, row, mark, "STOP_LOSS_5_POINTS")

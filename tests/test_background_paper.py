@@ -18,7 +18,7 @@ except ModuleNotFoundError:  # Allows this isolated test artifact to run locally
     stub.POST_FIX_MAX_DRAWDOWN_PCT = .10
     stub.POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
     stub.POST_FIX_VALIDATION_TRADES = 100
-    stub.SCALP_MIN_GROSS_RETURN = .20
+    stub.SCALP_MIN_GROSS_RETURN = .10
     stub.SCALP_STOP_LOSS_POINTS = .05
     stub.UNPROVEN_POSITION_CAP = .02
     stub.kalshi_taker_fee = lambda contracts, price: math.ceil(.07 * contracts * price * (1-price) * 100) / 100

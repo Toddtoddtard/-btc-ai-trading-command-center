@@ -256,7 +256,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 entry_price = position["entry_price"]
                 gain = bid - entry_price
                 if gain >= entry_price * SCALP_MIN_GROSS_RETURN:
-                    _close(paper, position, bid, "TAKE_PROFIT_20_PCT_GROSS", now)
+                    _close(paper, position, bid, "TAKE_PROFIT_10_PCT_GROSS", now)
                 elif gain <= -SCALP_STOP_LOSS_POINTS:
                     _close(paper, position, bid, "STOP_LOSS_5_POINTS", now)
                 else:

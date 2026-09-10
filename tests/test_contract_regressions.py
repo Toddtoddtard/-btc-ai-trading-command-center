@@ -181,37 +181,37 @@ class ContractRegressionTests(unittest.TestCase):
             engine.open_position(self.db, 500, self.decision, self.risk, 100)
         )
 
-    def test_scalp_requires_projected_twenty_percent_gross_return(self):
-        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.59)
+    def test_scalp_requires_projected_ten_percent_gross_return(self):
+        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.54)
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
-        self.assertIn('20% gross-return target', skipped['message'])
+        self.assertIn('10% gross-return target', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-        # At a 50% entry, a 60% forecast is exactly a 20% gross return.
-        self.decision['scalp_projected_exit_price'] = .60
+        # At a 50% entry, a 55% forecast is exactly a 10% gross return.
+        self.decision['scalp_projected_exit_price'] = .55
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['entry_price'], .50)
 
-    def test_scalp_takes_profit_at_twenty_percent_gross_return(self):
+    def test_scalp_takes_profit_at_ten_percent_gross_return(self):
         self.decision.update(
             action='SCALP UP',
             confidence=.80,
-            scalp_projected_exit_price=.60,
+            scalp_projected_exit_price=.55,
         )
         self.open()
-        self.decision['yes_bid_dollars'] = .59
+        self.decision['yes_bid_dollars'] = .54
         self.assertFalse(self.cycle()['event'])
         self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
-        self.decision['yes_bid_dollars'] = .60
+        self.decision['yes_bid_dollars'] = .55
         closed = self.cycle()
         self.assertTrue(closed['event'])
         with engine._connect(self.db) as conn:
             reason = conn.execute(
                 'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
             ).fetchone()['exit_reason']
-        self.assertEqual(reason, 'TAKE_PROFIT_20_PCT_GROSS')
+        self.assertEqual(reason, 'TAKE_PROFIT_10_PCT_GROSS')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_ignores_normal_opposite_signal(self):
@@ -488,10 +488,10 @@ class ContractRegressionTests(unittest.TestCase):
             engine.open_position(self.db, 500, self.decision, self.risk, 100)
         )
 
-        # Exactly 75% remains eligible; its 20% gross-return target is 90%.
+        # Exactly 75% remains eligible; its 10% gross-return target is 82.5%.
         self.decision.update(
             yes_ask_dollars=.75,
-            scalp_projected_exit_price=.90,
+            scalp_projected_exit_price=.825,
         )
         opened = self.cycle()
         self.assertTrue(opened['event'])
