@@ -4932,7 +4932,7 @@ else:
 # ============================================================
 
 try:
-    _persistent_raw_hist, _ = fetch_klines("1m", 90)
+    _persistent_raw_hist, _ = fetch_klines("1m", 500)
     _persistent_hist = enrich_history(_persistent_raw_hist)
 except Exception:
     _persistent_hist = pd.DataFrame()

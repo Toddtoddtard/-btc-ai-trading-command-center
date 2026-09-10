@@ -130,7 +130,7 @@ jobs:
           assert data.get('status', {}).get('strict_expiry_grading') is True
           assert data.get('status', {}).get('bot_intelligence_v4_ok') is True
           assert data.get('status', {}).get('specialist_self_learning_v5') is True
-          assert data.get('status', {}).get('intelligence_version') in {6, 7, 9}
+          assert data.get('status', {}).get('intelligence_version') in {6, 7, 9, 10}
           assert data.get('status', {}).get('regime_tagged_specialist_history') is True
           assert data.get('status', {}).get('current_regime') in {'HIGH_VOL', 'TREND_UP', 'TREND_DOWN', 'LOW_VOL_RANGE', 'RANGE'}
           assert data.get('status', {}).get('specialist_knowledge_regime') == data.get('status', {}).get('current_regime') or data.get('specialist_knowledge_v5', {}).get('regime') == data.get('pending', {}).get('regime')
@@ -161,8 +161,8 @@ jobs:
               historical = data.get('historical_specialist_knowledge_v7', {})
               assert historical.get('evaluated_windows', 0) >= 10000
               historical_version = historical.get('version')
-              assert historical_version in {7, 9}
-              expected_intelligence_version = 9 if historical_version == 9 else 7
+              assert historical_version in {7, 9, 10}
+              expected_intelligence_version = int(historical_version)
               assert data.get('status', {}).get('intelligence_version') == expected_intelligence_version
           print('learning-state v3.1 + v4 + Specialist Intelligence validation passed; samples', before, '->', after)
           PY

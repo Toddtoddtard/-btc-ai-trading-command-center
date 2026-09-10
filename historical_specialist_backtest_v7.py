@@ -30,6 +30,7 @@ INTERVAL = "1m"
 YEARS = int(os.getenv("HISTORICAL_YEARS", "10"))
 HOLDOUT_YEARS = int(os.getenv("HISTORICAL_HOLDOUT_YEARS", "2"))
 COUNCIL_NAME = "Historical OHLCV Council"
+QUALIFIED_COUNCIL_NAME = "Qualified OHLCV Council"
 BASE = "https://data.binance.vision/data/spot/monthly/klines"
 OUT = Path(os.getenv("HISTORICAL_SPECIALIST_OUTPUT", "/tmp/historical_specialist_knowledge_v7.json"))
 ELIGIBLE = {
@@ -111,10 +112,31 @@ def first_fresh_index(enriched, fresh_start):
     return int(idx[0]) if len(idx) else len(enriched)
 
 
-def historical_council_score(results, regime="UNKNOWN"):
-    """Score the eligible historical specialists with production council math."""
+def historical_council_vote(results, regime="UNKNOWN"):
+    """Run production council math on the feeds reproducible from OHLCV history."""
     eligible_results = {name: item for name, item in (results or {}).items() if name in ELIGIBLE}
-    return float(council_vote(eligible_results, {}, regime).get("base_score", 0.0))
+    return council_vote(eligible_results, {}, regime)
+
+
+def historical_council_score(results, regime="UNKNOWN"):
+    return float(historical_council_vote(results, regime).get("base_score", 0.0))
+
+
+def qualified_council_score(vote):
+    """Return direction only when the historical vote clears live edge/confidence floors.
+
+    Source-health and Kalshi price rules are reported as unavailable rather than
+    fabricated because Binance candle archives cannot reconstruct those feeds.
+    """
+    vote = vote or {}
+    policy = vote.get("policy", {}) or {}
+    score = float(vote.get("base_score", 0.0))
+    edge_floor = float(policy.get("edge_floor", 0.16))
+    confidence_floor = float(policy.get("trade_confidence_floor", 0.56))
+    confidence = float(vote.get("raw_confidence", 0.0))
+    if abs(score) < edge_floor or confidence < confidence_floor:
+        return 0.0
+    return score
 
 
 def main():
@@ -160,7 +182,7 @@ def main():
         fresh_start = month_first
         combined = fresh
         if not history.empty:
-            combined = pd.concat([history.tail(180), fresh], ignore_index=True)
+            combined = pd.concat([history.tail(500), fresh], ignore_index=True)
             combined = combined.drop_duplicates("time").sort_values("time").reset_index(drop=True)
 
         enriched = enrich_history_core(combined.copy())
@@ -192,16 +214,18 @@ def main():
             minute_key = int(ts.timestamp() // 60)
             if minute_key % 15 != 0:
                 continue
-            hist_slice = enriched.iloc[: i + 1].tail(180).copy()
-            if len(hist_slice) < 80 or hist_slice[["ema50", "rsi", "atr14"]].tail(1).isna().any(axis=None):
+            hist_slice = enriched.iloc[: i + 1].tail(500).copy()
+            if len(hist_slice) < 241 or hist_slice[["ema50", "ema200", "ret60", "ret240", "rsi", "atr14"]].tail(1).isna().any(axis=None):
                 continue
             results = run_specialists_core(hist_slice, pd.DataFrame(), {}, {"available": False})
             calls = {name: float(item.get("score", 0.0)) for name, item in results.items() if name in ELIGIBLE}
             regime = detect_regime(hist_slice)
-            calls[COUNCIL_NAME] = historical_council_score(results, regime)
+            vote = historical_council_vote(results, regime)
+            calls[COUNCIL_NAME] = float(vote.get("base_score", 0.0))
+            calls[QUALIFIED_COUNCIL_NAME] = qualified_council_score(vote)
             pending.append((ts.value + HORIZON_NS, px, regime, calls, ts >= holdout_start))
 
-        history = combined.tail(240).copy()
+        history = combined.tail(600).copy()
 
     specialists = {}
     for name in sorted(ELIGIBLE):
@@ -226,8 +250,8 @@ def main():
         )
 
     report = {
-        "version": 9,
-        "methodology": "fresh-row-only cross-month walk-forward with final-period holdout",
+        "version": 10,
+        "methodology": "fresh-row-only cross-month walk-forward with final-period holdout and live-like OHLCV qualification",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "Binance Vision monthly BTCUSDT 1m archives",
         "period_requested_years": YEARS,
@@ -245,11 +269,18 @@ def main():
         "months_failed": months_failed,
         "evaluated_windows": total_windows,
         "overall_council": summarize(global_stats[COUNCIL_NAME]),
+        "qualified_ohlcv_council": summarize(global_stats[QUALIFIED_COUNCIL_NAME]),
+        "qualified_ohlcv_limitations": [
+            "No historical Kalshi contract price or target gate",
+            "No historical whale, order-book, funding, or open-interest feeds",
+            "Uses live edge and raw-confidence floors; unavailable-feed health is not fabricated",
+        ],
         "holdout": {
             "years": HOLDOUT_YEARS,
             "start": holdout_start.isoformat(),
             "evaluated_windows": holdout_windows,
             "overall_council": summarize(holdout_stats[COUNCIL_NAME]),
+            "qualified_ohlcv_council": summarize(holdout_stats[QUALIFIED_COUNCIL_NAME]),
             "specialists": holdout_specialists,
         },
         "learning_prior_source": "final holdout period only",
@@ -266,6 +297,8 @@ def main():
         "actual_coverage_years": round(coverage_years, 2),
         "council_accuracy": summarize(global_stats[COUNCIL_NAME])["accuracy"],
         "holdout_council_accuracy": summarize(holdout_stats[COUNCIL_NAME])["accuracy"],
+        "qualified_ohlcv_accuracy": summarize(global_stats[QUALIFIED_COUNCIL_NAME])["accuracy"],
+        "holdout_qualified_ohlcv_accuracy": summarize(holdout_stats[QUALIFIED_COUNCIL_NAME])["accuracy"],
         "stale_discarded": stale_windows,
     }, indent=2))
     if total_windows < 10000:

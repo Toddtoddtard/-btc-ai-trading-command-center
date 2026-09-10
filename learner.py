@@ -120,7 +120,7 @@ def load():
 
 
 def history():
-    raw = get(SPOT + "/api/v3/klines", {"symbol": "BTCUSDT", "interval": "1m", "limit": 240})
+    raw = get(SPOT + "/api/v3/klines", {"symbol": "BTCUSDT", "interval": "1m", "limit": 500})
     cols = ["ot", "open", "high", "low", "close", "volume", "ct", "qv", "trades", "tb", "tq", "x"]
     df = pd.DataFrame(raw, columns=cols)
     for key in ["open", "high", "low", "close", "volume"]:

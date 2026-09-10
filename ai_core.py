@@ -42,9 +42,13 @@ def enrich_history_core(df):
     x = df.copy()
     c = x["close"]
     x["ret1"] = c.pct_change()
+    x["ret15"] = c.pct_change(15)
+    x["ret60"] = c.pct_change(60)
+    x["ret240"] = c.pct_change(240)
     x["ema9"] = c.ewm(span=9, adjust=False).mean()
     x["ema21"] = c.ewm(span=21, adjust=False).mean()
     x["ema50"] = c.ewm(span=50, adjust=False).mean()
+    x["ema200"] = c.ewm(span=200, adjust=False).mean()
     delta = c.diff()
     gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
     loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
@@ -106,13 +110,31 @@ def run_specialists_core(hist, agg, futures, kctx):
     # EMA differences from producing a false +/-1 trend conviction.
     fast_spread = safe_float((last["ema9"] - last["ema21"]) / px, 0.0)
     slow_spread = safe_float((last["ema21"] - last["ema50"]) / px, 0.0)
+    long_spread = safe_float((last["ema50"] - last.get("ema200", last["ema50"])) / px, 0.0)
     fast_component = math.tanh(fast_spread / 0.0010)
     slow_component = math.tanh(slow_spread / 0.0018)
-    trend_score = clamp(0.58 * fast_component + 0.42 * slow_component)
+    long_component = math.tanh(long_spread / 0.0045)
+    hour_component = math.tanh(safe_float(last.get("ret60"), 0.0) / 0.0060)
+    four_hour_component = math.tanh(safe_float(last.get("ret240"), 0.0) / 0.0120)
+    short_trend = clamp(0.58 * fast_component + 0.42 * slow_component)
+    higher_trend = clamp(0.50 * long_component + 0.30 * hour_component + 0.20 * four_hour_component)
+    if abs(higher_trend) < 0.08:
+        trend_score = clamp(0.78 * short_trend)
+        alignment = "higher timeframe neutral"
+    elif short_trend * higher_trend < 0:
+        trend_score = clamp(0.35 * short_trend + 0.15 * higher_trend)
+        alignment = "short/long conflict damped"
+    else:
+        trend_score = clamp(0.70 * short_trend + 0.30 * higher_trend)
+        alignment = "short/long aligned"
     out["Trend AI"] = _specialist(
         "Trend AI",
         trend_score,
-        f"EMA9 {last['ema9']:.0f}, EMA21 {last['ema21']:.0f}, EMA50 {last['ema50']:.0f}; spread strength {trend_score:+.2f}",
+        (
+            f"EMA9 {last['ema9']:.0f}, EMA21 {last['ema21']:.0f}, EMA50 {last['ema50']:.0f}, "
+            f"EMA200 {safe_float(last.get('ema200'), px):.0f}; 1h {hour_component:+.2f}; "
+            f"4h {four_hour_component:+.2f}; {alignment}"
+        ),
     )
 
     rsi = safe_float(last["rsi"], 50.0)
@@ -149,10 +171,19 @@ def run_specialists_core(hist, agg, futures, kctx):
     vol_score = clamp(-stretch / 3.0) if atr_pct > 0.0015 else clamp(np.sign(last["ema9"] - last["ema21"]) * 0.25)
     out["Volatility AI"] = _specialist("Volatility AI", vol_score, f"ATR {atr_pct*100:.3f}% of price; BB stretch {stretch:.2f}")
 
-    ema_spread = abs(last["ema9"] - last["ema50"]) / px
-    regime_dir = np.sign(last["ema9"] - last["ema50"])
-    regime_score = clamp(regime_dir * min(ema_spread / 0.003, 1.0))
-    out["Market Regime AI"] = _specialist("Market Regime AI", regime_score, "Trend regime from EMA separation")
+    ema_spread = safe_float((last["ema9"] - last["ema50"]) / px, 0.0)
+    short_regime = math.tanh(ema_spread / 0.0030)
+    regime_score = clamp(0.55 * short_regime + 0.45 * higher_trend)
+    if short_regime * higher_trend < 0 and abs(higher_trend) >= 0.08:
+        regime_score = clamp(regime_score * 0.45)
+        regime_alignment = "conflicting timeframes"
+    else:
+        regime_alignment = "timeframes aligned/neutral"
+    out["Market Regime AI"] = _specialist(
+        "Market Regime AI",
+        regime_score,
+        f"Short regime {short_regime:+.2f}; higher-timeframe regime {higher_trend:+.2f}; {regime_alignment}",
+    )
 
     if agg is not None and not agg.empty:
         buy = agg.loc[agg["aggressor"] == "BUY", "notional"].sum()
@@ -208,8 +239,17 @@ def run_specialists_core(hist, agg, futures, kctx):
     out["Kalshi Context AI"] = _specialist("Kalshi Context AI", context_score, context_reason)
 
     recent3 = safe_float((hist["close"].iloc[-1] / hist["close"].iloc[-4] - 1), 0.0) if len(hist) >= 4 else 0.0
-    hist_score = clamp(np.sign(recent3) * min(abs(recent3) / 0.003, 1.0) * 0.5)
-    out["Historical Pattern AI"] = _specialist("Historical Pattern AI", hist_score, f"Recent 3-minute move {recent3*100:+.3f}%")
+    recent15 = safe_float(last.get("ret15"), 0.0)
+    recent60 = safe_float(last.get("ret60"), 0.0)
+    move3 = math.tanh(recent3 / 0.0030)
+    move15 = math.tanh(recent15 / 0.0060)
+    move60 = math.tanh(recent60 / 0.0120)
+    hist_score = clamp(0.35 * move3 + 0.35 * move15 + 0.30 * move60)
+    out["Historical Pattern AI"] = _specialist(
+        "Historical Pattern AI",
+        hist_score,
+        f"Multi-horizon move: 3m {recent3*100:+.3f}%, 15m {recent15*100:+.3f}%, 1h {recent60*100:+.3f}%",
+    )
 
     # FVG / MACD Technical AI: combines price imbalance structure with
     # momentum confirmation. It is intentionally one council member rather

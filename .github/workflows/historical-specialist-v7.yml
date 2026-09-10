@@ -1,4 +1,4 @@
-name: BTC AI Ten-Year Walk-Forward v9
+name: BTC AI Ten-Year Walk-Forward v10
 
 on:
   workflow_dispatch:
@@ -7,13 +7,15 @@ on:
       - main
     paths:
       - 'historical_specialist_backtest_v7.py'
+      - 'ai_core.py'
+      - 'council_v4.py'
       - '.github/workflows/historical-specialist-v7.yml'
 
 permissions:
   contents: write
 
 concurrency:
-  group: btc-ai-historical-specialist-v9
+  group: btc-ai-historical-specialist-v10
   cancel-in-progress: false
 
 jobs:
@@ -43,7 +45,7 @@ jobs:
           import json
           p='/tmp/historical_specialist_knowledge_v7.json'
           d=json.load(open(p))
-          assert d.get('version') == 9
+          assert d.get('version') == 10
           assert d.get('period_requested_years') == 10
           assert d.get('actual_coverage_years', 0) >= 8.0
           assert d.get('walk_forward') is True
@@ -57,8 +59,12 @@ jobs:
           council=d.get('overall_council', {})
           holdout=d.get('holdout', {})
           assert council.get('directional_calls', 0) > 1000
+          qualified=d.get('qualified_ohlcv_council', {})
+          assert qualified.get('directional_calls', 0) > 100
+          assert 0.0 <= qualified.get('accuracy', -1.0) <= 1.0
           assert holdout.get('evaluated_windows', 0) > 10000
           assert holdout.get('overall_council', {}).get('directional_calls', 0) > 1000
+          assert holdout.get('qualified_ohlcv_council', {}).get('directional_calls', 0) > 100
           assert required.issubset(holdout.get('specialists', {}))
           assert d.get('production_parameters_changed') is False
           print('validated', d['evaluated_windows'], 'historical windows; holdout', holdout['evaluated_windows'])
@@ -82,5 +88,5 @@ jobs:
             echo 'No historical specialist report change.'
             exit 0
           fi
-          git commit -m 'Update ten-year walk-forward priors v9'
+          git commit -m 'Update ten-year walk-forward priors v10'
           git push origin learning-state --force-with-lease

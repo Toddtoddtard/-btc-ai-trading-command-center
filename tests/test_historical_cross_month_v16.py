@@ -1,7 +1,11 @@
 import unittest
 import pandas as pd
 
-from historical_specialist_backtest_v7 import first_fresh_index, historical_council_score
+from historical_specialist_backtest_v7 import (
+    first_fresh_index,
+    historical_council_score,
+    qualified_council_score,
+)
 from specialist_knowledge_v5 import specialist_posterior
 
 
@@ -22,6 +26,20 @@ class HistoricalCrossMonthV16Tests(unittest.TestCase):
             "Whale AI": {"score": -1.0, "confidence": 0.99},
         }
         self.assertGreater(historical_council_score(results, "TREND_UP"), 0.0)
+
+    def test_qualified_score_rejects_weak_research_guesses(self):
+        weak = {
+            "base_score": 0.08,
+            "raw_confidence": 0.70,
+            "policy": {"edge_floor": 0.16, "trade_confidence_floor": 0.56},
+        }
+        strong = {
+            "base_score": -0.24,
+            "raw_confidence": 0.67,
+            "policy": {"edge_floor": 0.16, "trade_confidence_floor": 0.56},
+        }
+        self.assertEqual(qualified_council_score(weak), 0.0)
+        self.assertLess(qualified_council_score(strong), 0.0)
 
     def test_version_nine_uses_holdout_as_learning_prior(self):
         state = {

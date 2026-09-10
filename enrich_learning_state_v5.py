@@ -33,14 +33,14 @@ def resolve_current_regime(state):
 
 
 def load_historical_specialist_prior(state):
-    """Load a validated v7 report when the workflow supplied one."""
+    """Load a validated historical report when the workflow supplied one."""
     if not HISTORICAL_SPECIALIST_INPUT.exists():
         return False
     try:
         report = json.loads(HISTORICAL_SPECIALIST_INPUT.read_text())
     except Exception:
         return False
-    if not isinstance(report, dict) or report.get("version") not in {7, 9} or report.get("walk_forward") is not True:
+    if not isinstance(report, dict) or report.get("version") not in {7, 9, 10} or report.get("walk_forward") is not True:
         return False
     specialists = report.get("specialists")
     if not isinstance(specialists, dict) or not specialists:
@@ -72,7 +72,10 @@ def main():
         "ranking": [x["name"] for x in ranked],
         "warning": "90% is a target, not a guaranteed or reported accuracy. Precision gate may abstain heavily.",
     }
-    state.setdefault("status", {})["intelligence_version"] = 9 if historical_loaded else 6
+    state.setdefault("status", {})["intelligence_version"] = (
+        int(state.get("historical_specialist_knowledge_v7", {}).get("version", 9))
+        if historical_loaded else 6
+    )
     state["status"]["specialist_self_learning_v5"] = True
     state["status"]["specialist_knowledge_regime"] = regime
     state["status"]["historical_specialist_v7_loaded"] = historical_loaded
