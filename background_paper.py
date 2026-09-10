@@ -270,6 +270,10 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                     and projected_exit is not None
                     and projected_exit >= bid + SCALP_MIN_REMAINING_EDGE
                 )
+                confirmed_reversal = (
+                    not bool(pending.get("would_wait", True))
+                    and signal_side != position["side"]
+                )
                 if (
                     gain >= entry_price * SCALP_MIN_GROSS_RETURN
                     and not sees_more_upside
@@ -281,8 +285,22 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                         "TAKE_PROFIT_AI_UPSIDE_EXHAUSTED",
                         now,
                     )
+                elif confirmed_reversal:
+                    _close(
+                        paper,
+                        position,
+                        bid,
+                        "AI_CONFIRMED_REVERSAL",
+                        now,
+                    )
                 elif gain <= -SCALP_STOP_LOSS_POINTS:
-                    _close(paper, position, bid, "STOP_LOSS_5_POINTS", now)
+                    _close(
+                        paper,
+                        position,
+                        bid,
+                        "EMERGENCY_STOP_15_POINTS",
+                        now,
+                    )
                 else:
                     paper["last_message"] = f"Holding PAPER SCALP {position['side']} {ticker}"
         paper["metrics"] = _post_fix_metrics(paper)

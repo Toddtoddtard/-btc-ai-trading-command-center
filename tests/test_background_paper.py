@@ -20,7 +20,7 @@ except ModuleNotFoundError:  # Allows this isolated test artifact to run locally
     stub.POST_FIX_VALIDATION_TRADES = 100
     stub.SCALP_MIN_GROSS_RETURN = .10
     stub.SCALP_MIN_REMAINING_EDGE = .01
-    stub.SCALP_STOP_LOSS_POINTS = .05
+    stub.SCALP_STOP_LOSS_POINTS = .15
     stub.UNPROVEN_POSITION_CAP = .02
     stub.kalshi_taker_fee = lambda contracts, price: math.ceil(.07 * contracts * price * (1-price) * 100) / 100
     sys.modules["kalshi_paper_engine"] = stub
@@ -125,6 +125,19 @@ class BackgroundPaperTests(unittest.TestCase):
         )
         self.assertIsNotNone(paper["open_position"])
         self.assertIn("Holding PAPER SCALP", paper["last_message"])
+
+    def test_scalp_exits_early_on_ai_confirmed_reversal(self):
+        state = self.pending()
+        paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
+        self.assertIsNotNone(paper["open_position"])
+        state["pending"].update(predicted_direction=-1, predicted_end=99000)
+        paper = bg.run_cycle(
+            state,
+            lambda _: self.market(yes_bid_dollars=.47, yes_ask_dollars=.49),
+            now=1010,
+        )
+        self.assertIsNone(paper["open_position"])
+        self.assertEqual(paper["trades"][-1]["exit_reason"], "AI_CONFIRMED_REVERSAL")
 
     def test_wide_spread_does_not_block_entry(self):
         state = self.pending()

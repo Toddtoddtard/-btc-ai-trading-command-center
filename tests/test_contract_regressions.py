@@ -319,16 +319,21 @@ class ContractRegressionTests(unittest.TestCase):
         self.decision.update(action='SCALP UP', scalp_projected_exit_price=.80)
         self.assertTrue(self.cycle()['event'])
 
-        # A two-point bid/ask spread is transaction cost, not a five-point
-        # adverse contract move. The position must remain open.
+        # A two-point bid/ask spread is transaction cost, not an adverse
+        # contract move. The position must remain open.
         held = self.cycle()
         self.assertFalse(held['event'])
         self.assertIn('Holding', held['message'])
         self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
 
-        # A real five-point adverse move closes once, then the unchanged
+        # A five-point adverse move is now tolerated as ordinary contract noise.
         # signal stays disarmed instead of churning ten identical entries.
         self.decision['yes_bid_dollars'] = .45
+        self.assertFalse(self.cycle()['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+
+        # The wider 15-point emergency boundary closes the position once.
+        self.decision['yes_bid_dollars'] = .35
         self.assertTrue(self.cycle()['event'])
         self.decision['yes_bid_dollars'] = .48
         blocked = self.cycle()
@@ -385,7 +390,7 @@ class ContractRegressionTests(unittest.TestCase):
         for _ in range(2):
             self.decision.update(yes_ask_dollars=.50, yes_bid_dollars=.48)
             self.assertTrue(self.cycle()['event'])
-            self.decision['yes_bid_dollars'] = .45
+            self.decision['yes_bid_dollars'] = .35
             self.assertTrue(self.cycle()['event'])
             self.decision['action'] = 'HOLD'
             self.assertFalse(self.cycle()['event'])

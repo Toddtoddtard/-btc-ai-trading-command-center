@@ -49,7 +49,9 @@ SCALP_MIN_GROSS_RETURN = 0.10
 # After the minimum return is reached, hold only when the live forecast still
 # shows meaningful additional upside beyond the executable exit bid.
 SCALP_MIN_REMAINING_EDGE = 0.01
-SCALP_STOP_LOSS_POINTS = 0.05
+# Last-resort loss boundary. Normal exits should come from a confirmed AI
+# reversal; the wider boundary avoids treating ordinary Kalshi noise as failure.
+SCALP_STOP_LOSS_POINTS = 0.15
 OPPOSITE_SIGNAL_CONFIRM_SECONDS = 10.0
 
 # A LOCK keeps its original direction, but its paper position realizes the
@@ -611,7 +613,7 @@ def manage_kalshi_paper_cycle(db_path, starting_cash, decision, risk, spot_price
                     )
                 price_loss = float(row["entry_price"]) - mark
                 if price_loss >= SCALP_STOP_LOSS_POINTS - 1e-12:
-                    return _close(conn, row, mark, "STOP_LOSS_5_POINTS")
+                    return _close(conn, row, mark, "EMERGENCY_STOP_15_POINTS")
                 opposite_since = _f(row["opposite_since"])
                 if action_side and action_side != side:
                     if opposite_since is None:
