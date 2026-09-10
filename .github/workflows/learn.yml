@@ -76,7 +76,7 @@ jobs:
           import json
           p='/tmp/historical_specialist_knowledge_v7.json'
           data=json.load(open(p))
-          print('Loaded historical specialist v7 report with', data.get('evaluated_windows', 0), 'windows')
+          print('Loaded historical specialist report v%s with' % data.get('version', 'unknown'), data.get('evaluated_windows', 0), 'windows')
           PY
           else
             echo "Historical specialist v7 report not available yet; live learner continues without it."
@@ -93,7 +93,7 @@ jobs:
         run: |
           python bot_intelligence_report.py
           mv /tmp/learning_state_v4.json /tmp/learning_state.json
-      - name: Enrich specialist self-learning v7 knowledge
+      - name: Enrich specialist self-learning knowledge
         env:
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
           HISTORICAL_SPECIALIST_INPUT: /tmp/historical_specialist_knowledge_v7.json
@@ -130,7 +130,7 @@ jobs:
           assert data.get('status', {}).get('strict_expiry_grading') is True
           assert data.get('status', {}).get('bot_intelligence_v4_ok') is True
           assert data.get('status', {}).get('specialist_self_learning_v5') is True
-          assert data.get('status', {}).get('intelligence_version') in {6, 7}
+          assert data.get('status', {}).get('intelligence_version') in {6, 7, 9}
           assert data.get('status', {}).get('regime_tagged_specialist_history') is True
           assert data.get('status', {}).get('current_regime') in {'HIGH_VOL', 'TREND_UP', 'TREND_DOWN', 'LOW_VOL_RANGE', 'RANGE'}
           assert data.get('status', {}).get('specialist_knowledge_regime') == data.get('status', {}).get('current_regime') or data.get('specialist_knowledge_v5', {}).get('regime') == data.get('pending', {}).get('regime')
@@ -158,9 +158,13 @@ jobs:
           after=int(data.get('status', {}).get('samples_after_run', 0))
           assert after >= before, (before, after)
           if data.get('status', {}).get('historical_specialist_v7_loaded'):
-              assert data.get('historical_specialist_knowledge_v7', {}).get('evaluated_windows', 0) >= 10000
-              assert data.get('status', {}).get('intelligence_version') == 7
-          print('learning-state v3.1 + v4 + Specialist Intelligence v7 validation passed; samples', before, '->', after)
+              historical = data.get('historical_specialist_knowledge_v7', {})
+              assert historical.get('evaluated_windows', 0) >= 10000
+              historical_version = historical.get('version')
+              assert historical_version in {7, 9}
+              expected_intelligence_version = 9 if historical_version == 9 else 7
+              assert data.get('status', {}).get('intelligence_version') == expected_intelligence_version
+          print('learning-state v3.1 + v4 + Specialist Intelligence validation passed; samples', before, '->', after)
           PY
       - name: Publish learning state
         shell: bash
@@ -181,5 +185,5 @@ jobs:
             echo "No learning-state change to publish."
             exit 0
           fi
-          git commit -m "Update BTC AI learning state with Specialist Intelligence v7"
+          git commit -m "Update BTC AI learning state"
           git push origin learning-state --force-with-lease
