@@ -359,6 +359,137 @@ def _close(paper, position, exit_price, reason, now, charge_fee=True):
     paper["last_message"] = f"Closed PAPER {position['strategy']} {position['side']} @ {exit_price*100:.0f}% | P/L ${pnl:+.2f}"
 
 
+def _recompute_cash(paper):
+    """Rebuild cash from the authoritative paper ledger after a correction."""
+    base = _f(paper.get("starting_cash"), STARTING_CASH) + _f(
+        paper.get("legacy_realized_pnl"), LEGACY_REALIZED_PNL
+    )
+    cash = base
+    for trade in paper.get("trades", []):
+        if not isinstance(trade, dict):
+            continue
+        amount = _f(trade.get("amount"), 0.0)
+        contracts = max(0, int(_f(trade.get("contracts"), 0)))
+        exit_price = _f(trade.get("exit_price"), 0.0)
+        exit_fee = _f(trade.get("exit_fee"), 0.0)
+        cash -= amount
+        cash += contracts * exit_price - exit_fee
+    position = paper.get("open_position")
+    if isinstance(position, dict):
+        cash -= _f(position.get("amount"), 0.0)
+    paper["cash"] = cash
+    return cash
+
+
+def _repair_closed_settlements(paper, market_reader, now):
+    """Repair only rows previously labeled as official settlements.
+
+    A past bug could advance to the next pending ticker and then use that NEW
+    market's result to settle the OLD position. Every repair below refetches the
+    trade's own ticker and trusts only its official finalized YES/NO result.
+    """
+    corrected = []
+    for trade in paper.get("trades", []):
+        if not isinstance(trade, dict):
+            continue
+        reason = str(trade.get("exit_reason") or "")
+        if not reason.startswith("OFFICIAL_SETTLEMENT:"):
+            continue
+        ticker = str(trade.get("ticker") or "")
+        side = str(trade.get("side") or "").upper()
+        if not ticker or side not in {"YES", "NO"}:
+            continue
+        try:
+            market = market_reader(ticker)
+        except Exception:
+            continue
+        if str(market.get("ticker") or ticker) != ticker:
+            continue
+        status = str(market.get("status") or "").lower()
+        result = str(market.get("result") or "").lower()
+        if status not in {"settled", "finalized"} or result not in {"yes", "no"}:
+            continue
+        exit_price = 1.0 if side.lower() == result else 0.0
+        contracts = max(0, int(_f(trade.get("contracts"), 0)))
+        amount = _f(trade.get("amount"), 0.0)
+        pnl = contracts * exit_price - amount
+        recorded_exit = _f(trade.get("exit_price"), -1.0)
+        recorded_result = str(trade.get("result") or "").upper()
+        expected_result = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "EVEN")
+        if abs(recorded_exit - exit_price) <= 1e-12 and recorded_result == expected_result:
+            continue
+        trade.update(
+            exit_price=exit_price,
+            exit_fee=0.0,
+            pnl=pnl,
+            result=expected_result,
+            last_mark=exit_price,
+            exit_reason="OFFICIAL_SETTLEMENT:" + result,
+            corrected_at=now,
+            correction_reason="REFETCHED_OWN_KALSHI_TICKER",
+        )
+        corrected.append(ticker)
+    if corrected:
+        _recompute_cash(paper)
+        paper["last_message"] = (
+            "Corrected prior paper settlement from each trade's own official "
+            "Kalshi result: " + ", ".join(corrected)
+        )
+    return corrected
+
+
+def _repair_master_learning_credit(learning_state, corrected_tickers):
+    """Restore master credit when a paper trade is proven to be an official win.
+
+    This does not blindly rewrite specialist calls. It only reverses a prior
+    master-level wrong mark for the exact ticker whose executed paper side is
+    now confirmed as the winning Kalshi side.
+    """
+    if not corrected_tickers:
+        return 0
+    paper = learning_state.get("background_paper") or {}
+    winning = {
+        str(t.get("ticker")): t
+        for t in paper.get("trades", [])
+        if isinstance(t, dict)
+        and str(t.get("ticker")) in set(corrected_tickers)
+        and str(t.get("result") or "").upper() == "WIN"
+        and str(t.get("exit_reason") or "").startswith("OFFICIAL_SETTLEMENT:")
+    }
+    if not winning:
+        return 0
+    repaired = 0
+    reward_system = learning_state.setdefault("reward_system", {})
+    forecast = learning_state.setdefault("forecast", {})
+    for row in learning_state.get("master_history", []):
+        ticker = str(row.get("ticker") or "")
+        if ticker not in winning or row.get("paper_truth_repaired"):
+            continue
+        old_hit = int(_f(row.get("direction_correct"), 0.0) or 0)
+        if old_hit != 1:
+            row["direction_correct"] = 1
+            forecast["direction_hits"] = int(forecast.get("direction_hits", 0)) + 1
+        old_reward = _f(row.get("time_reward"), 0.0)
+        magnitude = abs(_f(row.get("reward_magnitude"), old_reward))
+        if old_reward < 0 and magnitude > 0:
+            new_reward = magnitude
+            reward_system["master_points"] = float(
+                reward_system.get("master_points", 0.0)
+            ) + (new_reward - old_reward)
+            row["time_reward"] = new_reward
+        trade = winning[ticker]
+        row["kalshi_correct"] = 1
+        row["kalshi_result"] = str(trade.get("exit_reason")).split(":", 1)[-1]
+        row["paper_truth_repaired"] = True
+        row["reward_correction"] = "OFFICIAL_KALSHI_PAPER_WIN"
+        repaired += 1
+    if repaired:
+        reward_system["paper_truth_repairs"] = int(
+            reward_system.get("paper_truth_repairs", 0)
+        ) + repaired
+    return repaired
+
+
 def run_cycle(learning_state, market_reader=_market, now=None):
     now = float(now or time.time())
     paper = learning_state.get("background_paper")
@@ -374,8 +505,17 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         paper["last_message"] = "24/7 paper engine paused."
         return paper
 
+    corrected = _repair_closed_settlements(paper, market_reader, now)
+    if corrected:
+        _repair_master_learning_credit(learning_state, corrected)
+
     pending = learning_state.get("pending") or {}
-    ticker = str(pending.get("ticker") or (paper.get("open_position") or {}).get("ticker") or "")
+    position = paper.get("open_position")
+    pending_ticker = str(pending.get("ticker") or "")
+    # While a position exists, its own ticker is authoritative. The old code
+    # could accidentally fetch the next pending market and use that market's
+    # result to settle the previous trade.
+    ticker = str((position or {}).get("ticker") or pending_ticker or "")
     if not ticker:
         paper["last_message"] = "No active Kalshi learner window."
         return paper
@@ -384,15 +524,23 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         paper["last_message"] = "Kalshi ticker mismatch; no paper action."
         return paper
 
-    position = paper.get("open_position")
     if position:
         bid, _ = _quotes(market, position["side"])
         expired = now >= _f(position.get("expires_at"), now + 1)
-        if expired:
+        rolled_to_new_market = bool(pending_ticker and pending_ticker != ticker)
+        if expired or rolled_to_new_market:
             result = str(market.get("result") or "").lower()
             status = str(market.get("status") or "").lower()
             if result in {"yes", "no"} and status in {"settled", "finalized"}:
-                _close(paper, position, 1.0 if position["side"].lower() == result else 0.0, "OFFICIAL_SETTLEMENT:" + result, now, False)
+                _close(
+                    paper,
+                    position,
+                    1.0 if position["side"].lower() == result else 0.0,
+                    "OFFICIAL_SETTLEMENT:" + result,
+                    now,
+                    False,
+                )
+                _repair_master_learning_credit(learning_state, [ticker])
             else:
                 paper["last_message"] = "Awaiting official Kalshi settlement: " + ticker
             paper["metrics"] = _post_fix_metrics(paper)

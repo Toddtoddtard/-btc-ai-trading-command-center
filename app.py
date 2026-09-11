@@ -3427,13 +3427,9 @@ def resolve_predictions(hist, current_price=None):
             ret = (resolved_price / start_price - 1.0) * 100.0
             strike = safe_float(row["target_price"])
 
-            if action == "SCALP UP":
-                correct = int(resolved_price > start_price)
-            elif action == "SCALP DOWN":
-                correct = int(resolved_price < start_price)
-            elif action == "LOCK UP":
+            if action in {"SCALP UP", "LOCK UP"}:
                 correct = int(resolved_price >= strike) if pd.notna(strike) else int(resolved_price > start_price)
-            elif action == "LOCK DOWN":
+            elif action in {"SCALP DOWN", "LOCK DOWN"}:
                 correct = int(resolved_price < strike) if pd.notna(strike) else int(resolved_price < start_price)
             else:
                 correct = None
@@ -3452,6 +3448,22 @@ def resolve_predictions(hist, current_price=None):
             )
             updated += 1
 
+        # Repair legacy resolved directional rows that were graded against the
+        # opening spot instead of the Kalshi target. HOLD/WAIT stays untouched.
+        conn.execute(
+            """UPDATE predictions
+               SET correct = CASE
+                   WHEN action IN ('SCALP UP','LOCK UP')
+                       THEN CASE WHEN resolved_price >= target_price THEN 1 ELSE 0 END
+                   WHEN action IN ('SCALP DOWN','LOCK DOWN')
+                       THEN CASE WHEN resolved_price < target_price THEN 1 ELSE 0 END
+                   ELSE correct
+               END
+               WHERE resolved=1
+                 AND resolved_price IS NOT NULL
+                 AND target_price IS NOT NULL
+                 AND action IN ('SCALP UP','SCALP DOWN','LOCK UP','LOCK DOWN')"""
+        )
         conn.commit()
     return updated
 
@@ -3475,6 +3487,9 @@ def recent_predictions(limit=100):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
+        if "created_iso" in df.columns:
+            _created_et = pd.to_datetime(df["created_iso"], utc=True, errors="coerce").dt.tz_convert("America/New_York")
+            df["created_iso"] = _created_et.dt.strftime("%Y-%m-%d %I:%M %p %Z")
         df["confidence"] = (df["confidence"] * 100.0).round(1)
         df["consensus"] = (df["consensus"] * 100.0).round(1)
         df["score"] = df["score"].round(3)
@@ -5943,12 +5958,12 @@ def live_dashboard():
                     "P/L": f"${row['pnl']:+,.2f}",
                     "Opened": pd.to_datetime(
                         row["opened_at"], unit="s", utc=True
-                    ).strftime("%Y-%m-%d %H:%M UTC"),
+                    ).tz_convert("America/New_York").strftime("%Y-%m-%d %I:%M %p %Z"),
                     "Closed": (
                         "OPEN" if row["closed_at"] is None
                         else pd.to_datetime(
                             row["closed_at"], unit="s", utc=True
-                        ).strftime("%Y-%m-%d %H:%M UTC")
+                        ).tz_convert("America/New_York").strftime("%Y-%m-%d %I:%M %p %Z")
                     ),
                 }
                 for row in _contract_history
@@ -6331,7 +6346,7 @@ def live_dashboard():
 
     st.divider()
     st.caption(
-        f"Last update {utc_now().strftime('%Y-%m-%d %H:%M:%S UTC')} • "
+        f"Last update {utc_now().astimezone(ZoneInfo('America/New_York')).strftime('%Y-%m-%d %I:%M:%S %p %Z')} • "
         "Safety: PAPER ONLY • automatic simulation may trade long/short • no order API keys • no real-money exchange execution."
     )
 

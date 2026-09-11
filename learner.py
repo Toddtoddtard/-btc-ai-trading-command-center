@@ -310,7 +310,10 @@ def grade(state, df):
         return False
     start = float(pending["start_price"])
     predicted_end = float(pending["predicted_end"])
-    actual_direction = 1 if actual >= start else -1
+    target = float(pending.get("target", start))
+    # Kalshi KXBTC15M direction is defined by settlement versus the contract
+    # target/strike, not simply whether BTC rose or fell from the window open.
+    actual_direction = 1 if actual >= target else -1
     direction_correct = int(actual_direction == int(pending["predicted_direction"]))
     master_reward = time_reward(
         pending.get("opened_at"),
@@ -387,6 +390,7 @@ def grade(state, df):
     state["official_pending"] = state["official_pending"][-100:]
 
     realized = actual / start - 1.0
+    contract_realized = (actual - target) / max(abs(start), 1.0)
     for name, call in pending["specialists"].items():
         if name not in state["specialists"]:
             continue
@@ -394,7 +398,8 @@ def grade(state, df):
         score = float(call["score"])
         predicted_direction = 1 if score > 0.03 else -1 if score < -0.03 else 0
         hit = int(predicted_direction != 0 and predicted_direction == actual_direction)
-        edge = score * realized * 100 if predicted_direction else 0.0
+        # Edge must agree with the same target-based outcome used for hit/reward.
+        edge = score * contract_realized * 100 if predicted_direction else 0.0
         reward = time_reward(
             pending.get("opened_at"),
             pending.get("expires_at"),
