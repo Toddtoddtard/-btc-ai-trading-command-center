@@ -1,0 +1,63 @@
+name: Repair observed paper win
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repair-observed-paper-win.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-and-repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: learning-state
+          fetch-depth: 0
+      - name: Inspect candidate paper trade
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path('learning_state.json')
+          data = json.loads(p.read_text())
+          matches = []
+
+          def walk(obj, path='$'):
+              if isinstance(obj, dict):
+                  text = json.dumps(obj, default=str, separators=(',', ':'))
+                  low = text.lower()
+                  score = 0
+                  if '-9.95' in text:
+                      score += 4
+                  if '2026-09-11' in text:
+                      score += 2
+                  if '10:18' in text or '14:18' in text:
+                      score += 2
+                  if '10:35' in text or '14:35' in text:
+                      score += 2
+                  if 'loss' in low:
+                      score += 1
+                  if score >= 4:
+                      matches.append((score, path, obj))
+                  for k, v in obj.items():
+                      walk(v, f'{path}.{k}')
+              elif isinstance(obj, list):
+                  for i, v in enumerate(obj):
+                      walk(v, f'{path}[{i}]')
+
+          walk(data)
+          matches.sort(key=lambda x: (-x[0], x[1]))
+          print(f'CANDIDATE_COUNT={len(matches)}')
+          for score, path, obj in matches[:20]:
+              print('---')
+              print('SCORE', score, 'PATH', path)
+              print(json.dumps(obj, indent=2, default=str)[:8000])
+          if not matches:
+              raise SystemExit('No candidate found')
+          PY
