@@ -18,46 +18,121 @@ jobs:
         with:
           ref: learning-state
           fetch-depth: 0
-      - name: Inspect candidate paper trade
+      - name: Refresh learning state
+        run: git pull --ff-only origin learning-state
+      - name: Repair exact observed winning trade
         run: |
           python - <<'PY'
-          import json
+          import json, math
           from pathlib import Path
 
+          TARGET = 'KXBTC15M-26SEP111030-30'
           p = Path('learning_state.json')
           data = json.loads(p.read_text())
-          matches = []
+          paper = data.get('background_paper')
+          if not isinstance(paper, dict):
+              raise SystemExit('background_paper missing')
 
-          def walk(obj, path='$'):
-              if isinstance(obj, dict):
-                  text = json.dumps(obj, default=str, separators=(',', ':'))
-                  low = text.lower()
-                  score = 0
-                  if '-9.95' in text:
-                      score += 4
-                  if '2026-09-11' in text:
-                      score += 2
-                  if '10:18' in text or '14:18' in text:
-                      score += 2
-                  if '10:35' in text or '14:35' in text:
-                      score += 2
-                  if 'loss' in low:
-                      score += 1
-                  if score >= 4:
-                      matches.append((score, path, obj))
-                  for k, v in obj.items():
-                      walk(v, f'{path}.{k}')
-              elif isinstance(obj, list):
-                  for i, v in enumerate(obj):
-                      walk(v, f'{path}[{i}]')
+          trades = paper.get('trades')
+          if not isinstance(trades, list):
+              raise SystemExit('background_paper.trades missing')
 
-          walk(data)
-          matches.sort(key=lambda x: (-x[0], x[1]))
-          print(f'CANDIDATE_COUNT={len(matches)}')
-          for score, path, obj in matches[:20]:
-              print('---')
-              print('SCORE', score, 'PATH', path)
-              print(json.dumps(obj, indent=2, default=str)[:8000])
-          if not matches:
-              raise SystemExit('No candidate found')
+          matches = [
+              t for t in trades
+              if isinstance(t, dict)
+              and t.get('ticker') == TARGET
+              and str(t.get('side', '')).upper() == 'YES'
+              and abs(float(t.get('entry_price', 0)) - 0.48) < 1e-9
+              and int(t.get('contracts', 0)) == 20
+          ]
+          if len(matches) != 1:
+              raise SystemExit(f'Expected one exact target trade, found {len(matches)}')
+          trade = matches[0]
+
+          marker = trade.get('manual_correction')
+          if isinstance(marker, dict) and marker.get('id') == 'observed-win-2026-09-11-1030-window':
+              print('Target trade already corrected; no cash adjustment needed.')
+          else:
+              previous = {
+                  'result': trade.get('result'),
+                  'pnl': trade.get('pnl'),
+                  'exit_price': trade.get('exit_price'),
+                  'exit_reason': trade.get('exit_reason'),
+                  'last_mark': trade.get('last_mark'),
+              }
+              old_exit = float(trade.get('exit_price') or 0.0)
+              contracts = int(trade['contracts'])
+              entry_cost = float(trade.get('amount') or (contracts * float(trade['entry_price']) + float(trade.get('entry_fee') or 0.0)))
+              corrected_exit = 1.0
+              corrected_exit_fee = 0.0
+              corrected_pnl = round(contracts * corrected_exit - corrected_exit_fee - entry_cost, 2)
+              cash_delta = round(contracts * (corrected_exit - old_exit) - corrected_exit_fee + float(trade.get('exit_fee') or 0.0), 2)
+
+              trade['exit_price'] = corrected_exit
+              trade['exit_fee'] = corrected_exit_fee
+              trade['last_mark'] = corrected_exit
+              trade['pnl'] = corrected_pnl
+              trade['result'] = 'WIN'
+              trade['status'] = 'CLOSED'
+              trade['exit_reason'] = 'MANUAL_CORRECTION:USER_OBSERVED_YES_100'
+              trade['manual_correction'] = {
+                  'id': 'observed-win-2026-09-11-1030-window',
+                  'source': 'user_observed_contract_at_100_percent',
+                  'ticker': TARGET,
+                  'previous': previous,
+                  'note': 'Historical paper-ledger correction only; future settlement logic remains authoritative.'
+              }
+              paper['cash'] = round(float(paper.get('cash', 0.0)) + cash_delta, 2)
+              print(f'Corrected {TARGET}: pnl {previous["pnl"]} -> {corrected_pnl}; cash delta +{cash_delta:.2f}')
+
+          # Recompute post-fix metrics exactly from the persisted closed ledger.
+          closed = [t for t in trades if isinstance(t, dict) and t.get('status') == 'CLOSED']
+          pnls = [float(t.get('pnl') or 0.0) for t in closed]
+          wins = [x for x in pnls if x > 0]
+          losses = [x for x in pnls if x < 0]
+          gross_profit = sum(wins)
+          gross_loss = abs(sum(losses))
+          starting_cash = 500.0
+          equity = peak = starting_cash
+          max_dd = 0.0
+          for pnl in pnls:
+              equity += pnl
+              peak = max(peak, equity)
+              max_dd = max(max_dd, (peak - equity) / peak if peak else 0.0)
+          metrics = {
+              'samples': len(pnls),
+              'markets': len({t.get('ticker') for t in closed}),
+              'wins': len(wins),
+              'losses': len(losses),
+              'win_rate': len(wins) / len(pnls) if pnls else None,
+              'profit_factor': gross_profit / gross_loss if gross_loss else (math.inf if gross_profit else None),
+              'total_pnl': sum(pnls),
+              'expectancy': sum(pnls) / len(pnls) if pnls else None,
+              'fees': sum(float(t.get('entry_fee') or 0.0) + float(t.get('exit_fee') or 0.0) for t in closed),
+              'max_drawdown_pct': max_dd,
+              'gate_sample_target': 50,
+              'validation_sample_target': 100,
+          }
+          paper['metrics'] = metrics
+
+          # Preserve the unrelated currently-open position exactly as-is.
+          op = paper.get('open_position')
+          if isinstance(op, dict):
+              print('OPEN_POSITION', op.get('ticker'), op.get('side'), op.get('amount'))
+          print('CORRECTED_TRADE', json.dumps(trade, sort_keys=True))
+          print('CASH', paper.get('cash'))
+          print('METRICS', json.dumps(metrics, sort_keys=True))
+
+          p.write_text(json.dumps(data, indent=2, sort_keys=True, allow_nan=True) + '\n')
           PY
+      - name: Commit repaired learning state
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add learning_state.json
+          if git diff --cached --quiet; then
+            echo 'No state changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Repair observed KXBTC15M-26SEP111030-30 paper win'
+          git push origin learning-state
