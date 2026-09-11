@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install test dependency
+        run: python -m pip install --disable-pip-version-check pytest
       - name: Apply LOCK policy correction
         run: |
           python - <<'PY'
@@ -56,8 +58,6 @@ jobs:
 
           t = Path('tests/test_contract_regressions.py')
           ts = t.read_text()
-          marker = 'class '
-          # Add source-level regression assertions without depending on test class names.
           extra = '''\n\ndef test_lock_95_is_exit_target_not_entry_confidence_gate():\n    from pathlib import Path\n    engine = Path("kalshi_paper_engine.py").read_text()\n    background = Path("background_paper.py").read_text()\n    assert 'strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE' not in engine\n    assert 'strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"' not in background\n    assert 'strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"' in background\n    assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine\n'''
           if 'test_lock_95_is_exit_target_not_entry_confidence_gate' not in ts:
               t.write_text(ts + extra)
