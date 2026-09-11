@@ -44,6 +44,19 @@ STARTING_CASH = 500.0
 LEGACY_REALIZED_PNL = -141.31
 SEED_CASH = STARTING_CASH + LEGACY_REALIZED_PNL
 
+# This pre-guard row was admitted at a 0.1% ask seconds before expiry, then sat
+# open until the background worker revisited it 45 minutes later.  Keep the
+# row for auditability, but void it from paper P/L and validation because the
+# current 20% lottery floor would have rejected the entry.
+INVALID_LEGACY_PAPER_TRADES = {
+    "KXBTC15M-26SEP091400-00": {
+        "opened_at": 1788976788.0083666,
+        "maximum_entry_price": 0.001,
+        "reason": "PRE_GUARD_ENTRY_BELOW_20_PCT_LOTTERY_FLOOR",
+    },
+}
+PAPER_ACCOUNT_RESET_ID = "2026-09-11-post-fix-500-v1"
+
 
 def _f(value, default=None):
     try:
@@ -270,7 +283,10 @@ def shared_paper_history(paper, limit=100):
     )
     history = []
     for row in positions[:max(1, min(1000, int(limit)))]:
-        is_open = str(row.get("status", "OPEN")).upper() == "OPEN"
+        status = str(row.get("status", "OPEN")).upper()
+        is_open = status == "OPEN"
+        is_void = status == "VOID"
+        is_archived = status == "ARCHIVED"
         entry = _f(row.get("entry_price"), 0.0)
         contracts = max(0, int(_f(row.get("contracts"), 0)))
         amount = _f(
@@ -281,7 +297,13 @@ def shared_paper_history(paper, limit=100):
             _f(row.get("last_mark"), entry)
             if is_open else _f(row.get("exit_price"))
         )
-        if is_open:
+        if is_void:
+            pnl = 0.0
+            result = "VOID"
+        elif is_archived:
+            pnl = 0.0
+            result = "ARCHIVED"
+        elif is_open:
             pnl = (
                 contracts * current_or_exit
                 - kalshi_taker_fee(contracts, current_or_exit)
@@ -292,7 +314,11 @@ def shared_paper_history(paper, limit=100):
             pnl = _f(row.get("pnl"), 0.0)
             result = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "EVEN")
         history.append({
-            "status": "OPEN" if is_open else "CLOSED",
+            "status": (
+                status
+                if status in {"OPEN", "CLOSED", "VOID", "ARCHIVED"}
+                else "CLOSED"
+            ),
             "direction": "UP" if row.get("side") == "YES" else "DOWN",
             "strategy": str(row.get("strategy", "SCALP")),
             "amount": amount,
@@ -318,7 +344,7 @@ def shared_paper_chart_entries(paper, ticker, limit=11):
         return []
     rows = [
         row for row in shared_paper_history(paper, limit=1000)
-        if row.get("ticker") == ticker
+        if row.get("ticker") == ticker and row.get("status") == "CLOSED"
     ]
     rows.sort(key=lambda row: row["opened_at"])
     return [
@@ -366,7 +392,10 @@ def _recompute_cash(paper):
     )
     cash = base
     for trade in paper.get("trades", []):
-        if not isinstance(trade, dict):
+        if (
+            not isinstance(trade, dict)
+            or str(trade.get("status", "CLOSED")).upper() != "CLOSED"
+        ):
             continue
         amount = _f(trade.get("amount"), 0.0)
         contracts = max(0, int(_f(trade.get("contracts"), 0)))
@@ -381,6 +410,100 @@ def _recompute_cash(paper):
     return cash
 
 
+def _void_invalid_legacy_paper_trades(paper, now):
+    """Quarantine exact pre-guard executions without rewriting market truth."""
+    voided = []
+    for trade in paper.get("trades", []):
+        if not isinstance(trade, dict):
+            continue
+        ticker = str(trade.get("ticker") or "")
+        rule = INVALID_LEGACY_PAPER_TRADES.get(ticker)
+        if not rule or str(trade.get("status", "")).upper() == "VOID":
+            continue
+        opened_at = _f(trade.get("opened_at"))
+        entry_price = _f(trade.get("entry_price"))
+        if (
+            str(trade.get("strategy", "")).upper() != "SCALP"
+            or opened_at is None
+            or abs(opened_at - rule["opened_at"]) > 1.0
+            or entry_price is None
+            or entry_price > rule["maximum_entry_price"] + 1e-12
+        ):
+            continue
+        trade.update(
+            original_status=str(trade.get("status") or "CLOSED"),
+            original_result=trade.get("result"),
+            original_pnl=_f(trade.get("pnl"), 0.0),
+            status="VOID",
+            result="VOID",
+            pnl=0.0,
+            voided_at=now,
+            void_reason=rule["reason"],
+        )
+        for attempt in paper.get("signal_attempts", []):
+            if (
+                isinstance(attempt, dict)
+                and str(attempt.get("ticker") or "") == ticker
+                and str(attempt.get("outcome") or "").upper() == "OPENED"
+            ):
+                attempt["outcome"] = "VOIDED"
+                attempt["void_reason"] = rule["reason"]
+        voided.append(ticker)
+    if voided:
+        _recompute_cash(paper)
+        paper["last_message"] = (
+            "Voided invalid pre-guard paper trade below the 20% lottery floor: "
+            + ", ".join(voided)
+        )
+    return voided
+
+
+def _reset_paper_account_to_post_fix_500(paper, now):
+    """Start a clean $500 scorecard while retaining prior rows for audit."""
+    reset = paper.get("balance_reset")
+    if isinstance(reset, dict) and reset.get("id") == PAPER_ACCOUNT_RESET_ID:
+        return False
+
+    archived = 0
+    for trade in paper.get("trades", []):
+        if (
+            not isinstance(trade, dict)
+            or str(trade.get("status", "")).upper() != "CLOSED"
+        ):
+            continue
+        trade.update(
+            original_status="CLOSED",
+            original_result=trade.get("result"),
+            original_pnl=_f(trade.get("pnl"), 0.0),
+            status="ARCHIVED",
+            result="ARCHIVED",
+            pnl=0.0,
+            archived_at=now,
+            archive_reason="PRE_POST_FIX_500_BASELINE",
+        )
+        archived += 1
+
+    paper["starting_cash"] = STARTING_CASH
+    paper["legacy_realized_pnl"] = 0.0
+    position = paper.get("open_position")
+    reserved = _f(position.get("amount"), 0.0) if isinstance(position, dict) else 0.0
+    paper["cash"] = STARTING_CASH - reserved
+    paper["balance_reset"] = {
+        "id": PAPER_ACCOUNT_RESET_ID,
+        "at": _now_iso(now),
+        "starting_cash": STARTING_CASH,
+        "archived_trades": archived,
+        "reason": "CLEAN_POST_FIX_PAPER_BASELINE",
+    }
+    paper["metrics"] = _post_fix_metrics(paper)
+    paper["gate"] = _gate(paper["metrics"])
+    paper["last_message"] = (
+        f"Paper account reset to ${STARTING_CASH:.2f}; "
+        f"archived {archived} pre-reset settled trade(s)."
+    )
+    return True
+
+
 def _repair_closed_settlements(paper, market_reader, now):
     """Repair only rows previously labeled as official settlements.
 
@@ -390,7 +513,10 @@ def _repair_closed_settlements(paper, market_reader, now):
     """
     corrected = []
     for trade in paper.get("trades", []):
-        if not isinstance(trade, dict):
+        if (
+            not isinstance(trade, dict)
+            or str(trade.get("status", "CLOSED")).upper() == "VOID"
+        ):
             continue
         reason = str(trade.get("exit_reason") or "")
         if not reason.startswith("OFFICIAL_SETTLEMENT:"):
@@ -501,6 +627,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     paper.setdefault("last_signal_at", None)
     paper.setdefault("last_signal_message", "No approved signal has reached execution yet.")
     paper.setdefault("signal_attempts", [])
+    _void_invalid_legacy_paper_trades(paper, now)
+    _reset_paper_account_to_post_fix_500(paper, now)
     if not paper.get("enabled", True):
         paper["last_message"] = "24/7 paper engine paused."
         return paper
@@ -633,7 +761,12 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 message, "BLOCKED", now,
             )
             return paper
-    same_market = [t for t in paper.get("trades", []) if t.get("ticker") == ticker and t.get("strategy") == strategy]
+    same_market = [
+        t for t in paper.get("trades", [])
+        if t.get("ticker") == ticker
+        and t.get("strategy") == strategy
+        and str(t.get("status", "CLOSED")).upper() == "CLOSED"
+    ]
     if len(same_market) >= (MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET):
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: per-market limit reached.", "BLOCKED", now)
         return paper
