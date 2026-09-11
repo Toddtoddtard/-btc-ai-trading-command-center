@@ -32,6 +32,8 @@ MAX_ENTRY_PRICE = 0.75
 # Match the master decision's extreme-opposing-odds veto. A selected side
 # priced below 20% is a lottery-style thesis, not an approved SCALP setup.
 MIN_SCALP_MARKET_PROBABILITY = 0.20
+# 95% is the LOCK executable-bid TAKE-PROFIT target, not an entry-confidence gate.
+# Kept only as a legacy compatibility constant; do not use it to authorize LOCK entry.
 LOCK_MIN_CONFIDENCE = 0.95
 MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
@@ -402,8 +404,6 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if strategy == "SCALP" and not scalp_profitability_gate(
         db_path, starting_cash
     )["approved"]:
-        return None
-    if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
         return None
     entry = _quote(decision, side, ask=True)
     if entry is None or (strategy == "SCALP" and entry > MAX_ENTRY_PRICE):
@@ -830,16 +830,6 @@ def manage_kalshi_paper_cycle(
                         "gate is active — " + profitability_gate["reason"] + "."
                     ),
                 }
-
-        if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
-            return {
-                "event": False,
-                "message": (
-                    f"Skipped PAPER LOCK: confidence "
-                    f"{_decision_confidence(decision) * 100:.0f}% is below the "
-                    f"{LOCK_MIN_CONFIDENCE * 100:.0f}% minimum."
-                ),
-            }
 
         if strategy == "LOCK" and entry_price is not None:
             performance = paper_performance_since_update(db_path, starting_cash)

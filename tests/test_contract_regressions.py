@@ -266,17 +266,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(reason, 'LOCK_BID_95_PCT')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-    def test_lock_requires_ninety_five_percent_confidence(self):
-        self.decision['confidence'] = .949
-        skipped = self.cycle()
-        self.assertFalse(skipped['event'])
-        self.assertIn('below the 95% minimum', skipped['message'])
-        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
-        self.assertIsNone(
-            engine.open_position(self.db, 500, self.decision, self.risk, 100)
-        )
-
-        self.decision['confidence'] = .95
+    def test_lock_does_not_require_ninety_five_percent_confidence(self):
+        self.decision['confidence'] = .60
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')
@@ -621,3 +612,13 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn("async function fetchKalshiJson(path)", source)
         self.assertIn("Kalshi target unavailable — retrying…", source)
         self.assertIn("currentTarget = NaN;", source)
+
+
+def test_lock_95_is_exit_target_not_entry_confidence_gate():
+    from pathlib import Path
+    engine_src = Path("kalshi_paper_engine.py").read_text()
+    background = Path("background_paper.py").read_text()
+    assert 'strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE' not in engine_src
+    assert 'strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"' not in background
+    assert 'strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"' in background
+    assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine_src

@@ -67,7 +67,7 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(len(paper["signal_attempts"]), 1)
 
     def test_final_lock_may_enter_above_75(self):
-        state = self.pending(master_confidence=.95)
+        state = self.pending(master_confidence=.60, master_action="LOCK UP")
         paper = bg.run_cycle(
             state,
             lambda _: self.market(yes_bid_dollars=.84, yes_ask_dollars=.85),
@@ -79,7 +79,7 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(paper["last_signal"]["outcome"], "OPENED")
 
     def test_lock_rejects_fee_loss_at_95_exit(self):
-        state = self.pending(master_confidence=.95)
+        state = self.pending(master_confidence=.60, master_action="LOCK UP")
         paper = bg.run_cycle(
             state,
             lambda _: self.market(yes_bid_dollars=.94, yes_ask_dollars=.95),

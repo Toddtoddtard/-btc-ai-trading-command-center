@@ -341,6 +341,17 @@ def enhanced_register(state, df, market_info):
             abs(base_score) < safe_float(wait.get("minimum_edge_score"), 0.18)
             or confidence < safe_float(wait.get("minimum_calibrated_confidence"), 0.58)
         )
+        # Persist an explicit execution action so the background paper engine never
+        # invents SCALP-vs-LOCK from a 95% confidence threshold. The scheduled
+        # learner defaults qualified directional calls to SCALP; LOCK is reserved
+        # for an explicit master action supplied by the decision layer.
+        if state["pending"]["would_wait"]:
+            state["pending"]["master_action"] = "WAIT"
+        else:
+            state["pending"]["master_action"] = (
+                "SCALP UP" if int(state["pending"].get("predicted_direction", 0)) > 0
+                else "SCALP DOWN"
+            )
     return registered
 
 

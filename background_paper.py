@@ -751,9 +751,19 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if bool(pending.get("would_wait", True)):
         paper["last_message"] = "No paper action: learner selected WAIT."
         return paper
-    side = "YES" if int(pending.get("predicted_direction", 0)) > 0 else "NO"
+    explicit_action = str(pending.get("master_action") or pending.get("action") or "").upper().strip()
+    if explicit_action in {"WAIT", "HOLD"}:
+        paper["last_message"] = "No paper action: learner selected WAIT."
+        return paper
+    if explicit_action in {"LOCK UP", "SCALP UP"}:
+        side = "YES"
+    elif explicit_action in {"LOCK DOWN", "SCALP DOWN"}:
+        side = "NO"
+    else:
+        side = "YES" if int(pending.get("predicted_direction", 0)) > 0 else "NO"
     confidence = _f(pending.get("master_confidence"), 0.0)
-    strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"
+    # LOCK is an explicit master action. 95% belongs only to the exit bid target.
+    strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"
     bid, ask = _quotes(market, side)
     if ask is None or bid is None:
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER entry: executable quote unavailable.", "BLOCKED", now)
