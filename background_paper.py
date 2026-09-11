@@ -55,7 +55,8 @@ INVALID_LEGACY_PAPER_TRADES = {
         "reason": "PRE_GUARD_ENTRY_BELOW_20_PCT_LOTTERY_FLOOR",
     },
 }
-PAPER_ACCOUNT_RESET_ID = "2026-09-11-post-fix-500-v1"
+PAPER_ACCOUNT_RESET_ID = "2026-09-11-post-fix-500-v2"
+POST_FIX_CARRY_FORWARD_WINS = {"KXBTC15M-26SEP101845-45"}
 
 
 def _f(value, default=None):
@@ -459,29 +460,29 @@ def _void_invalid_legacy_paper_trades(paper, now):
 
 
 def _reset_paper_account_to_post_fix_500(paper, now):
-    """Start a clean $500 scorecard while retaining prior rows for audit."""
+    """Reset bad legacy P/L but carry forward verified post-fix wins."""
     reset = paper.get("balance_reset")
     if isinstance(reset, dict) and reset.get("id") == PAPER_ACCOUNT_RESET_ID:
-        normalized = False
-        for trade in paper.get("trades", []):
-            if (
-                isinstance(trade, dict)
-                and str(trade.get("status", "")).upper() == "ARCHIVED"
-                and (trade.get("result") != "ARCHIVED" or _f(trade.get("pnl"), 0.0) != 0.0)
-            ):
-                trade["result"] = "ARCHIVED"
-                trade["pnl"] = 0.0
-                normalized = True
-        if normalized:
-            _recompute_cash(paper)
-        return normalized
+        return False
 
     archived = 0
+    carried_wins = 0
     for trade in paper.get("trades", []):
-        if (
-            not isinstance(trade, dict)
-            or str(trade.get("status", "")).upper() != "CLOSED"
-        ):
+        if not isinstance(trade, dict):
+            continue
+        ticker = str(trade.get("ticker") or "")
+        if ticker in POST_FIX_CARRY_FORWARD_WINS:
+            original_pnl = _f(trade.get("original_pnl"), _f(trade.get("pnl"), 0.0))
+            trade.update(
+                status="CLOSED",
+                result="WIN",
+                pnl=original_pnl,
+                carry_forward=True,
+                carry_forward_reason="VERIFIED_OFFICIAL_KALSHI_WIN",
+            )
+            carried_wins += 1
+            continue
+        if str(trade.get("status", "")).upper() != "CLOSED":
             continue
         trade.update(
             original_status="CLOSED",
@@ -497,21 +498,20 @@ def _reset_paper_account_to_post_fix_500(paper, now):
 
     paper["starting_cash"] = STARTING_CASH
     paper["legacy_realized_pnl"] = 0.0
-    position = paper.get("open_position")
-    reserved = _f(position.get("amount"), 0.0) if isinstance(position, dict) else 0.0
-    paper["cash"] = STARTING_CASH - reserved
+    _recompute_cash(paper)
     paper["balance_reset"] = {
         "id": PAPER_ACCOUNT_RESET_ID,
         "at": _now_iso(now),
         "starting_cash": STARTING_CASH,
         "archived_trades": archived,
+        "carried_forward_wins": carried_wins,
         "reason": "CLEAN_POST_FIX_PAPER_BASELINE",
     }
     paper["metrics"] = _post_fix_metrics(paper)
     paper["gate"] = _gate(paper["metrics"])
     paper["last_message"] = (
-        f"Paper account reset to ${STARTING_CASH:.2f}; "
-        f"archived {archived} pre-reset settled trade(s)."
+        f"Paper account reset from ${STARTING_CASH:.2f}; carried forward "
+        f"{carried_wins} verified win(s) and archived {archived} old trade(s)."
     )
     return True
 
