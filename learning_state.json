@@ -51,7 +51,7 @@
       "kalshi_accuracy": 0.7350746268656716,
       "samples": 268
     },
-    "generated_at": "2026-09-11T01:01:22.568944+00:00",
+    "generated_at": "2026-09-11T01:04:32.928697+00:00",
     "milestones": [
       25,
       50,
@@ -65,20 +65,21 @@
   },
   "background_paper": {
     "balance_reset": {
-      "archived_trades": 1,
-      "at": "2026-09-11T00:58:22.584859+00:00",
-      "id": "2026-09-11-post-fix-500-v1",
+      "archived_trades": 0,
+      "at": "2026-09-11T01:04:33.077569+00:00",
+      "carried_forward_wins": 1,
+      "id": "2026-09-11-post-fix-500-v2",
       "reason": "CLEAN_POST_FIX_PAPER_BASELINE",
       "starting_cash": 500.0
     },
-    "cash": 500.0,
+    "cash": 503.14,
     "enabled": true,
     "gate": {
       "approved": true,
       "reason": "Kalshi safeguards satisfied",
       "status": "COLLECTING EVIDENCE"
     },
-    "last_cycle_at": "2026-09-11T01:01:22.738549+00:00",
+    "last_cycle_at": "2026-09-11T01:04:33.077569+00:00",
     "last_message": "No paper action: learner selected WAIT.",
     "last_signal": {
       "at": "2026-09-10T22:33:25.443039+00:00",
@@ -95,18 +96,18 @@
     "last_signal_message": "Opened PAPER SCALP DOWN \u2022 Amount: $6.86 \u2022 Kalshi entry: 67%",
     "legacy_realized_pnl": 0.0,
     "metrics": {
-      "expectancy": null,
-      "fees": 0,
+      "expectancy": 3.1399999999999997,
+      "fees": 0.16,
       "gate_sample_target": 50,
       "losses": 0,
-      "markets": 0,
+      "markets": 1,
       "max_drawdown_pct": 0.0,
-      "profit_factor": null,
-      "samples": 0,
-      "total_pnl": 0,
+      "profit_factor": Infinity,
+      "samples": 1,
+      "total_pnl": 3.1399999999999997,
       "validation_sample_target": 100,
-      "win_rate": null,
-      "wins": 0
+      "win_rate": 1.0,
+      "wins": 1
     },
     "open_position": null,
     "paper_only": true,
@@ -259,6 +260,8 @@
         "amount": 6.86,
         "archive_reason": "PRE_POST_FIX_500_BASELINE",
         "archived_at": 1789088302.5848587,
+        "carry_forward": true,
+        "carry_forward_reason": "VERIFIED_OFFICIAL_KALSHI_WIN",
         "closed_at": 1789087641.9228146,
         "contracts": 10,
         "corrected_at": 1789088302.5848587,
@@ -275,11 +278,11 @@
         "original_pnl": 3.1399999999999997,
         "original_result": "WIN",
         "original_status": "CLOSED",
-        "pnl": 0.0,
-        "result": "ARCHIVED",
+        "pnl": 3.1399999999999997,
+        "result": "WIN",
         "side": "NO",
         "spot_entry_price": 76985.16,
-        "status": "ARCHIVED",
+        "status": "CLOSED",
         "strategy": "SCALP",
         "ticker": "KXBTC15M-26SEP101845-45"
       }
@@ -289,7 +292,7 @@
   },
   "bot_intelligence_v4": {
     "evaluated_snapshots": 283,
-    "generated_at": "2026-09-11T01:01:21.928309+00:00",
+    "generated_at": "2026-09-11T01:04:32.372804+00:00",
     "minimum_samples_for_verdict": 12,
     "ranking": [
       {
@@ -306,6 +309,19 @@
         "without_bot_accuracy": 0.38515901060070673
       },
       {
+        "avg_abs_score": 0.2292022884295389,
+        "contribution_score": 0.010070671378091867,
+        "full_council_accuracy": 0.3957597173144876,
+        "harmful_flip_rate": 0.0035335689045936395,
+        "marginal_accuracy": 0.007067137809187274,
+        "name": "Momentum AI",
+        "samples": 283,
+        "standalone_accuracy": 0.4541984732824427,
+        "unique_save_rate": 0.01060070671378092,
+        "verdict": "USEFUL",
+        "without_bot_accuracy": 0.38869257950530034
+      },
+      {
         "avg_abs_score": 0.25,
         "contribution_score": 0.009010600706713775,
         "full_council_accuracy": 0.3957597173144876,
@@ -317,19 +333,6 @@
         "unique_save_rate": 0.0176678445229682,
         "verdict": "USEFUL",
         "without_bot_accuracy": 0.38869257950530034
-      },
-      {
-        "avg_abs_score": 0.2292022884295389,
-        "contribution_score": 0.0047703180212013835,
-        "full_council_accuracy": 0.3957597173144876,
-        "harmful_flip_rate": 0.0035335689045936395,
-        "marginal_accuracy": 0.003533568904593609,
-        "name": "Momentum AI",
-        "samples": 283,
-        "standalone_accuracy": 0.4541984732824427,
-        "unique_save_rate": 0.007067137809187279,
-        "verdict": "REDUNDANT",
-        "without_bot_accuracy": 0.392226148409894
       },
       {
         "avg_abs_score": 0.2698520962960449,
@@ -411,16 +414,16 @@
       },
       {
         "avg_abs_score": 0.4171726303074667,
-        "contribution_score": -0.016795366795366834,
+        "contribution_score": -0.010424710424710472,
         "full_council_accuracy": 0.4015444015444015,
-        "harmful_flip_rate": 0.03474903474903475,
-        "marginal_accuracy": -0.007722007722007762,
+        "harmful_flip_rate": 0.03088803088803089,
+        "marginal_accuracy": -0.003861003861003909,
         "name": "FVG / MACD AI",
         "samples": 259,
         "standalone_accuracy": 0.48249027237354086,
         "unique_save_rate": 0.02702702702702703,
         "verdict": "USEFUL",
-        "without_bot_accuracy": 0.4092664092664093
+        "without_bot_accuracy": 0.40540540540540543
       },
       {
         "avg_abs_score": 0.31292997134314043,
@@ -462,6 +465,19 @@
         "without_bot_accuracy": 0.42402826855123676
       },
       {
+        "avg_abs_score": 0.3696287848205316,
+        "contribution_score": -0.05936395759717318,
+        "full_council_accuracy": 0.3957597173144876,
+        "harmful_flip_rate": 0.04240282685512368,
+        "marginal_accuracy": -0.035335689045936425,
+        "name": "Support/Resistance AI",
+        "samples": 283,
+        "standalone_accuracy": 0.4612546125461255,
+        "unique_save_rate": 0.007067137809187279,
+        "verdict": "HURTING COUNCIL",
+        "without_bot_accuracy": 0.43109540636042404
+      },
+      {
         "avg_abs_score": 0.3994911650283746,
         "contribution_score": -0.06042402826855126,
         "full_council_accuracy": 0.3957597173144876,
@@ -473,35 +489,22 @@
         "unique_save_rate": 0.014134275618374558,
         "verdict": "HURTING COUNCIL",
         "without_bot_accuracy": 0.43109540636042404
-      },
-      {
-        "avg_abs_score": 0.3696287848205316,
-        "contribution_score": -0.06519434628975265,
-        "full_council_accuracy": 0.3957597173144876,
-        "harmful_flip_rate": 0.045936395759717315,
-        "marginal_accuracy": -0.038869257950530034,
-        "name": "Support/Resistance AI",
-        "samples": 283,
-        "standalone_accuracy": 0.4612546125461255,
-        "unique_save_rate": 0.007067137809187279,
-        "verdict": "HURTING COUNCIL",
-        "without_bot_accuracy": 0.43462897526501765
       }
     ],
     "version": 4
   },
   "champion_challenger": {
     "best_challenger": {
-      "accuracy": 0.5555555555555556,
-      "median_error": 78.08636976999696,
+      "accuracy": 0.48148148148148145,
+      "median_error": 42.669238343602046,
       "samples": 27
     },
     "champion": {
-      "accuracy": 0.5555555555555556,
-      "median_error": 78.51306342727912,
+      "accuracy": 0.48148148148148145,
+      "median_error": 42.972034857812105,
       "samples": 27
     },
-    "evaluated_at": "2026-09-11T01:01:19.278123+00:00",
+    "evaluated_at": "2026-09-11T01:04:29.947624+00:00",
     "max_error_multiplier": 1.1,
     "minimum_margin": 0.05,
     "minimum_samples": 20,
@@ -74570,7 +74573,7 @@
         "reliability_multiplier": 0.98816618079907
       }
     },
-    "generated_at": "2026-09-11T01:01:22.392758+00:00",
+    "generated_at": "2026-09-11T01:04:32.774033+00:00",
     "historical_specialist_v7_loaded": true,
     "method": "Bayesian posterior from graded live history plus optional long-history regime-specific holdout priors",
     "ranking": [
@@ -75231,22 +75234,22 @@
     "strict_expiry_grading": true,
     "worker_ok": true
   },
-  "updated_at": "2026-09-11T01:01:19.278186+00:00",
+  "updated_at": "2026-09-11T01:04:29.947669+00:00",
   "validation": {
     "direction_accuracy": 0.5384615384615384,
-    "evaluated_at": "2026-09-11T01:01:19.037229+00:00",
-    "mae": 95.94657570203483,
-    "median_abs_error": 93.97796485254366,
+    "evaluated_at": "2026-09-11T01:04:29.724693+00:00",
+    "mae": 61.733222847126086,
+    "median_abs_error": 31.349364725785563,
     "regimes": {
       "LOW_VOL_RANGE": {
-        "direction_accuracy": 0.5454545454545454,
-        "median_abs_error": 93.97796485254366,
-        "samples": 11
+        "direction_accuracy": 0.5833333333333334,
+        "median_abs_error": 44.634480789187364,
+        "samples": 12
       },
       "TREND_DOWN": {
-        "direction_accuracy": 0.5,
-        "median_abs_error": 73.4119612343784,
-        "samples": 2
+        "direction_accuracy": 0.0,
+        "median_abs_error": 14.83420455941814,
+        "samples": 1
       }
     },
     "samples": 13
