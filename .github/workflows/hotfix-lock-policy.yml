@@ -1,0 +1,75 @@
+name: Hotfix LOCK policy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hotfix-lock-policy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-lock-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply LOCK policy correction
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('kalshi_paper_engine.py')
+          s = p.read_text()
+          old1 = '''    if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:\n        return None\n'''
+          old2 = '''        if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:\n            return {\n                "event": False,\n                "message": (\n                    f"Skipped PAPER LOCK: confidence "\n                    f"{_decision_confidence(decision) * 100:.0f}% is below the "\n                    f"{LOCK_MIN_CONFIDENCE * 100:.0f}% minimum."\n                ),\n            }\n\n'''
+          if old1 not in s or old2 not in s:
+              raise SystemExit('Expected LOCK confidence gates not found; refusing unsafe partial patch')
+          s = s.replace(old1, '', 1).replace(old2, '', 1)
+          s = s.replace(
+              'LOCK_MIN_CONFIDENCE = 0.95\n',
+              '# 95% is the LOCK executable-bid TAKE-PROFIT target, not an entry-confidence gate.\n# Kept only as a legacy compatibility constant; do not use it to authorize LOCK entry.\nLOCK_MIN_CONFIDENCE = 0.95\n',
+              1,
+          )
+          p.write_text(s)
+
+          p = Path('background_paper.py')
+          s = p.read_text()
+          old = '''    side = "YES" if int(pending.get("predicted_direction", 0)) > 0 else "NO"\n    confidence = _f(pending.get("master_confidence"), 0.0)\n    strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"\n'''
+          new = '''    explicit_action = str(pending.get("master_action") or pending.get("action") or "").upper().strip()\n    if explicit_action in {"WAIT", "HOLD"}:\n        paper["last_message"] = "No paper action: learner selected WAIT."\n        return paper\n    if explicit_action in {"LOCK UP", "SCALP UP"}:\n        side = "YES"\n    elif explicit_action in {"LOCK DOWN", "SCALP DOWN"}:\n        side = "NO"\n    else:\n        side = "YES" if int(pending.get("predicted_direction", 0)) > 0 else "NO"\n    confidence = _f(pending.get("master_confidence"), 0.0)\n    # LOCK is an explicit master action. 95% belongs only to the exit bid target.\n    strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"\n'''
+          if old not in s:
+              raise SystemExit('Expected background confidence-derived strategy block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          p = Path('learner_v3.py')
+          s = p.read_text()
+          old = '''        state["pending"]["would_wait"] = bool(\n            abs(base_score) < safe_float(wait.get("minimum_edge_score"), 0.18)\n            or confidence < safe_float(wait.get("minimum_calibrated_confidence"), 0.58)\n        )\n'''
+          new = old + '''        # Persist an explicit execution action so the background paper engine never\n        # invents SCALP-vs-LOCK from a 95% confidence threshold. The scheduled\n        # learner defaults qualified directional calls to SCALP; LOCK is reserved\n        # for an explicit master action supplied by the decision layer.\n        if state["pending"]["would_wait"]:\n            state["pending"]["master_action"] = "WAIT"\n        else:\n            state["pending"]["master_action"] = (\n                "SCALP UP" if int(state["pending"].get("predicted_direction", 0)) > 0\n                else "SCALP DOWN"\n            )\n'''
+          if old not in s:
+              raise SystemExit('Expected learner decision persistence block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          t = Path('tests/test_contract_regressions.py')
+          ts = t.read_text()
+          marker = 'class '
+          # Add source-level regression assertions without depending on test class names.
+          extra = '''\n\ndef test_lock_95_is_exit_target_not_entry_confidence_gate():\n    from pathlib import Path\n    engine = Path("kalshi_paper_engine.py").read_text()\n    background = Path("background_paper.py").read_text()\n    assert 'strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE' not in engine\n    assert 'strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"' not in background\n    assert 'strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"' in background\n    assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine\n'''
+          if 'test_lock_95_is_exit_target_not_entry_confidence_gate' not in ts:
+              t.write_text(ts + extra)
+          PY
+      - name: Run focused regression tests
+        run: |
+          python -m pytest -q tests/test_contract_regressions.py tests/test_background_paper.py
+      - name: Commit hotfix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add kalshi_paper_engine.py background_paper.py learner_v3.py tests/test_contract_regressions.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'Correct LOCK execution and settlement policy'
+          git push origin main
