@@ -462,7 +462,19 @@ def _reset_paper_account_to_post_fix_500(paper, now):
     """Start a clean $500 scorecard while retaining prior rows for audit."""
     reset = paper.get("balance_reset")
     if isinstance(reset, dict) and reset.get("id") == PAPER_ACCOUNT_RESET_ID:
-        return False
+        normalized = False
+        for trade in paper.get("trades", []):
+            if (
+                isinstance(trade, dict)
+                and str(trade.get("status", "")).upper() == "ARCHIVED"
+                and (trade.get("result") != "ARCHIVED" or _f(trade.get("pnl"), 0.0) != 0.0)
+            ):
+                trade["result"] = "ARCHIVED"
+                trade["pnl"] = 0.0
+                normalized = True
+        if normalized:
+            _recompute_cash(paper)
+        return normalized
 
     archived = 0
     for trade in paper.get("trades", []):
@@ -515,7 +527,7 @@ def _repair_closed_settlements(paper, market_reader, now):
     for trade in paper.get("trades", []):
         if (
             not isinstance(trade, dict)
-            or str(trade.get("status", "CLOSED")).upper() == "VOID"
+            or str(trade.get("status", "CLOSED")).upper() != "CLOSED"
         ):
             continue
         reason = str(trade.get("exit_reason") or "")
@@ -579,6 +591,7 @@ def _repair_master_learning_credit(learning_state, corrected_tickers):
         for t in paper.get("trades", [])
         if isinstance(t, dict)
         and str(t.get("ticker")) in set(corrected_tickers)
+        and str(t.get("status", "CLOSED")).upper() == "CLOSED"
         and str(t.get("result") or "").upper() == "WIN"
         and str(t.get("exit_reason") or "").startswith("OFFICIAL_SETTLEMENT:")
     }
