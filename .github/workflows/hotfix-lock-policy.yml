@@ -58,9 +58,21 @@ jobs:
 
           t = Path('tests/test_contract_regressions.py')
           ts = t.read_text()
-          extra = '''\n\ndef test_lock_95_is_exit_target_not_entry_confidence_gate():\n    from pathlib import Path\n    engine = Path("kalshi_paper_engine.py").read_text()\n    background = Path("background_paper.py").read_text()\n    assert 'strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE' not in engine\n    assert 'strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"' not in background\n    assert 'strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"' in background\n    assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine\n'''
+          old_test = '''    def test_lock_requires_ninety_five_percent_confidence(self):\n        self.decision['confidence'] = .949\n        skipped = self.cycle()\n        self.assertFalse(skipped['event'])\n        self.assertIn('below the 95% minimum', skipped['message'])\n        self.assertIsNone(engine.paper_summary(self.db)['open_position'])\n        self.assertIsNone(\n            engine.open_position(self.db, 500, self.decision, self.risk, 100)\n        )\n\n        self.decision['confidence'] = .95\n        opened = self.cycle()\n        self.assertTrue(opened['event'])\n        self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')\n'''
+          new_test = '''    def test_lock_does_not_require_ninety_five_percent_confidence(self):\n        self.decision['confidence'] = .60\n        opened = self.cycle()\n        self.assertTrue(opened['event'])\n        self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')\n'''
+          if old_test not in ts:
+              raise SystemExit('Expected obsolete LOCK confidence regression test not found')
+          ts = ts.replace(old_test, new_test, 1)
+          extra = '''\n\ndef test_lock_95_is_exit_target_not_entry_confidence_gate():\n    from pathlib import Path\n    engine_src = Path("kalshi_paper_engine.py").read_text()\n    background = Path("background_paper.py").read_text()\n    assert 'strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE' not in engine_src\n    assert 'strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"' not in background\n    assert 'strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"' in background\n    assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine_src\n'''
           if 'test_lock_95_is_exit_target_not_entry_confidence_gate' not in ts:
-              t.write_text(ts + extra)
+              ts += extra
+          t.write_text(ts)
+
+          t = Path('tests/test_background_paper.py')
+          ts = t.read_text()
+          ts = ts.replace('state = self.pending(master_confidence=.95)\n        paper = bg.run_cycle(', 'state = self.pending(master_confidence=.60, master_action="LOCK UP")\n        paper = bg.run_cycle(', 1)
+          ts = ts.replace('state = self.pending(master_confidence=.95)\n        paper = bg.run_cycle(', 'state = self.pending(master_confidence=.60, master_action="LOCK UP")\n        paper = bg.run_cycle(', 1)
+          t.write_text(ts)
           PY
       - name: Run focused regression tests
         run: |
@@ -69,7 +81,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add kalshi_paper_engine.py background_paper.py learner_v3.py tests/test_contract_regressions.py
+          git add kalshi_paper_engine.py background_paper.py learner_v3.py tests/test_contract_regressions.py tests/test_background_paper.py
           git diff --cached --quiet && exit 0
           git commit -m 'Correct LOCK execution and settlement policy'
           git push origin main
