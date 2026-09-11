@@ -269,8 +269,20 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(
             bg.shared_paper_chart_entries(paper, "OLD-WIN"), []
         )
-        self.assertFalse(
-            bg._reset_paper_account_to_post_fix_500(paper, now=3000)
+        self.assertFalse(bg._reset_paper_account_to_post_fix_500(paper, now=3000))
+
+        paper["trades"][0]["result"] = "WIN"
+        paper["trades"][0]["pnl"] = 3.14
+        self.assertTrue(bg._reset_paper_account_to_post_fix_500(paper, now=4000))
+        self.assertEqual(paper["trades"][0]["result"], "ARCHIVED")
+        self.assertEqual(paper["trades"][0]["pnl"], 0.0)
+        self.assertEqual(
+            bg._repair_closed_settlements(
+                paper,
+                lambda _: {"status": "settled", "result": "no"},
+                now=5000,
+            ),
+            [],
         )
 
 
