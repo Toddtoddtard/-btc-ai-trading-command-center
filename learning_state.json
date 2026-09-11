@@ -72,7 +72,7 @@
       "reason": "CLEAN_POST_FIX_PAPER_BASELINE",
       "starting_cash": 500.0
     },
-    "cash": 483.52,
+    "cash": 503.52,
     "enabled": true,
     "gate": {
       "approved": true,
@@ -96,18 +96,18 @@
     "last_signal_message": "Opened PAPER SCALP DOWN \u2022 Amount: $9.67 \u2022 Kalshi entry: 73%",
     "legacy_realized_pnl": 0.0,
     "metrics": {
-      "expectancy": -3.405,
+      "expectancy": 6.595000000000001,
       "fees": 0.51,
       "gate_sample_target": 50,
-      "losses": 1,
+      "losses": 0,
       "markets": 2,
-      "max_drawdown_pct": 0.019775807926223295,
-      "profit_factor": 0.3155778894472362,
+      "max_drawdown_pct": 0.0,
+      "profit_factor": Infinity,
       "samples": 2,
-      "total_pnl": -6.81,
+      "total_pnl": 13.190000000000001,
       "validation_sample_target": 100,
-      "win_rate": 0.5,
-      "wins": 1
+      "win_rate": 1.0,
+      "wins": 2
     },
     "open_position": {
       "amount": 9.67,
@@ -474,13 +474,26 @@
         "entry_fee": 0.35,
         "entry_price": 0.48,
         "exit_fee": 0.0,
-        "exit_price": 0.0,
-        "exit_reason": "OFFICIAL_SETTLEMENT:no",
+        "exit_price": 1.0,
+        "exit_reason": "MANUAL_CORRECTION:USER_OBSERVED_YES_100",
         "expires_at": 1789137000.0,
-        "last_mark": 0.47,
+        "last_mark": 1.0,
+        "manual_correction": {
+          "id": "observed-win-2026-09-11-1030-window",
+          "note": "Historical paper-ledger correction only; future settlement logic remains authoritative.",
+          "previous": {
+            "exit_price": 0.0,
+            "exit_reason": "OFFICIAL_SETTLEMENT:no",
+            "last_mark": 0.47,
+            "pnl": -9.95,
+            "result": "LOSS"
+          },
+          "source": "user_observed_contract_at_100_percent",
+          "ticker": "KXBTC15M-26SEP111030-30"
+        },
         "opened_at": 1789136314.2077048,
-        "pnl": -9.95,
-        "result": "LOSS",
+        "pnl": 10.05,
+        "result": "WIN",
         "side": "YES",
         "spot_entry_price": 79092.27,
         "status": "CLOSED",
