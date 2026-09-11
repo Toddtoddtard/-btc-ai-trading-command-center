@@ -177,6 +177,102 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(markers[0]["kalshi_entry_pct"], 50.0)
         self.assertEqual(markers[0]["spot_entry_price"], 100000)
 
+    def test_invalid_159_pm_pre_guard_trade_is_voided_without_rewriting_truth(self):
+        paper = bg.initial_state(now=1000)
+        paper["trades"] = [{
+            "status": "CLOSED",
+            "ticker": "KXBTC15M-26SEP091400-00",
+            "side": "NO",
+            "direction": "DOWN",
+            "strategy": "SCALP",
+            "entry_price": .001,
+            "exit_price": 0.0,
+            "contracts": 717,
+            "entry_fee": .06,
+            "amount": .777,
+            "pnl": -.777,
+            "result": "LOSS",
+            "exit_reason": "OFFICIAL_SETTLEMENT:yes",
+            "opened_at": 1788976788.0083666,
+            "closed_at": 1788979506.8057601,
+        }]
+        paper["cash"] = bg.SEED_CASH - .777
+        paper["signal_attempts"] = [{
+            "ticker": "KXBTC15M-26SEP091400-00", "outcome": "OPENED"
+        }]
+
+        voided = bg._void_invalid_legacy_paper_trades(paper, now=2000)
+
+        self.assertEqual(voided, ["KXBTC15M-26SEP091400-00"])
+        self.assertEqual(paper["trades"][0]["status"], "VOID")
+        self.assertEqual(paper["trades"][0]["result"], "VOID")
+        self.assertEqual(paper["trades"][0]["pnl"], 0.0)
+
+        self.assertEqual(
+            paper["trades"][0]["exit_reason"], "OFFICIAL_SETTLEMENT:yes"
+        )
+        self.assertEqual(paper["trades"][0]["original_result"], "LOSS")
+        self.assertEqual(paper["signal_attempts"][0]["outcome"], "VOIDED")
+        self.assertAlmostEqual(paper["cash"], bg.SEED_CASH)
+        self.assertEqual(bg.shared_paper_summary(paper)["samples"], 0)
+        self.assertEqual(bg.shared_paper_history(paper)[0]["result"], "VOID")
+        self.assertEqual(
+            bg.shared_paper_chart_entries(
+                paper, "KXBTC15M-26SEP091400-00"
+            ),
+            [],
+        )
+
+        self.assertEqual(
+            bg._void_invalid_legacy_paper_trades(paper, now=3000), []
+        )
+
+        corrected = bg._repair_closed_settlements(
+            paper,
+            lambda _: {
+                "ticker": "KXBTC15M-26SEP091400-00",
+                "status": "settled",
+                "result": "yes",
+            },
+            now=3000,
+        )
+        self.assertEqual(corrected, [])
+        self.assertEqual(paper["trades"][0]["result"], "VOID")
+        self.assertEqual(paper["trades"][0]["pnl"], 0.0)
+
+    def test_post_fix_reset_starts_at_500_and_archives_old_results(self):
+        paper = bg.initial_state(now=1000)
+        paper["legacy_realized_pnl"] = -141.31
+        paper["cash"] = 361.83
+        paper["trades"] = [{
+            "status": "CLOSED", "ticker": "OLD-WIN", "side": "NO",
+            "strategy": "SCALP", "entry_price": .67, "exit_price": 1.0,
+            "contracts": 10, "entry_fee": .16, "amount": 6.86,
+            "pnl": 3.14, "result": "WIN", "opened_at": 1000,
+            "closed_at": 1100,
+        }]
+
+        changed = bg._reset_paper_account_to_post_fix_500(paper, now=2000)
+
+        self.assertTrue(changed)
+        self.assertEqual(paper["starting_cash"], 500.0)
+        self.assertEqual(paper["legacy_realized_pnl"], 0.0)
+        self.assertEqual(paper["cash"], 500.0)
+        self.assertEqual(paper["trades"][0]["status"], "ARCHIVED")
+        self.assertEqual(paper["trades"][0]["original_pnl"], 3.14)
+        self.assertEqual(paper["metrics"]["samples"], 0)
+        summary = bg.shared_paper_summary(paper)
+        self.assertEqual(summary["equity"], 500.0)
+        self.assertEqual(summary["total_pnl"], 0.0)
+        self.assertEqual(summary["samples"], 0)
+        self.assertEqual(bg.shared_paper_history(paper)[0]["result"], "ARCHIVED")
+        self.assertEqual(
+            bg.shared_paper_chart_entries(paper, "OLD-WIN"), []
+        )
+        self.assertFalse(
+            bg._reset_paper_account_to_post_fix_500(paper, now=3000)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
