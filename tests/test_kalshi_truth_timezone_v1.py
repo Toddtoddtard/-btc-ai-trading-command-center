@@ -71,6 +71,7 @@ class KalshiTruthTimezoneTests(unittest.TestCase):
             "last_mark": 0.0,
             "exit_reason": "OFFICIAL_SETTLEMENT:yes",
         }]
+        paper["balance_reset"] = {"id": bg.PAPER_ACCOUNT_RESET_ID}
         state["background_paper"] = paper
 
         def market_reader(requested):
