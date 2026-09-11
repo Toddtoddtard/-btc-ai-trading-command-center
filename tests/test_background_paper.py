@@ -240,15 +240,15 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(paper["trades"][0]["result"], "VOID")
         self.assertEqual(paper["trades"][0]["pnl"], 0.0)
 
-    def test_post_fix_reset_starts_at_500_and_archives_old_results(self):
+    def test_post_fix_reset_starts_at_500_and_carries_verified_win(self):
         paper = bg.initial_state(now=1000)
         paper["legacy_realized_pnl"] = -141.31
         paper["cash"] = 361.83
         paper["trades"] = [{
-            "status": "CLOSED", "ticker": "OLD-WIN", "side": "NO",
+            "status": "ARCHIVED", "ticker": "KXBTC15M-26SEP101845-45", "side": "NO",
             "strategy": "SCALP", "entry_price": .67, "exit_price": 1.0,
             "contracts": 10, "entry_fee": .16, "amount": 6.86,
-            "pnl": 3.14, "result": "WIN", "opened_at": 1000,
+            "pnl": 0.0, "original_pnl": 3.14, "result": "ARCHIVED", "opened_at": 1000,
             "closed_at": 1100,
         }]
 
@@ -257,25 +257,22 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(paper["starting_cash"], 500.0)
         self.assertEqual(paper["legacy_realized_pnl"], 0.0)
-        self.assertEqual(paper["cash"], 500.0)
-        self.assertEqual(paper["trades"][0]["status"], "ARCHIVED")
+        self.assertEqual(paper["cash"], 503.14)
+        self.assertEqual(paper["trades"][0]["status"], "CLOSED")
+        self.assertEqual(paper["trades"][0]["result"], "WIN")
+        self.assertEqual(paper["trades"][0]["pnl"], 3.14)
         self.assertEqual(paper["trades"][0]["original_pnl"], 3.14)
-        self.assertEqual(paper["metrics"]["samples"], 0)
+        self.assertEqual(paper["metrics"]["samples"], 1)
+        self.assertEqual(paper["metrics"]["wins"], 1)
         summary = bg.shared_paper_summary(paper)
-        self.assertEqual(summary["equity"], 500.0)
-        self.assertEqual(summary["total_pnl"], 0.0)
-        self.assertEqual(summary["samples"], 0)
-        self.assertEqual(bg.shared_paper_history(paper)[0]["result"], "ARCHIVED")
-        self.assertEqual(
-            bg.shared_paper_chart_entries(paper, "OLD-WIN"), []
-        )
+        self.assertEqual(summary["equity"], 503.14)
+        self.assertEqual(summary["total_pnl"], 3.14)
+        self.assertEqual(summary["samples"], 1)
+        self.assertEqual(bg.shared_paper_history(paper)[0]["result"], "WIN")
+        self.assertEqual(len(bg.shared_paper_chart_entries(
+            paper, "KXBTC15M-26SEP101845-45"
+        )), 1)
         self.assertFalse(bg._reset_paper_account_to_post_fix_500(paper, now=3000))
-
-        paper["trades"][0]["result"] = "WIN"
-        paper["trades"][0]["pnl"] = 3.14
-        self.assertTrue(bg._reset_paper_account_to_post_fix_500(paper, now=4000))
-        self.assertEqual(paper["trades"][0]["result"], "ARCHIVED")
-        self.assertEqual(paper["trades"][0]["pnl"], 0.0)
         self.assertEqual(
             bg._repair_closed_settlements(
                 paper,
