@@ -51,7 +51,7 @@
       "kalshi_accuracy": 0.7194444444444444,
       "samples": 360
     },
-    "generated_at": "2026-09-12T06:47:02.971896+00:00",
+    "generated_at": "2026-09-12T06:59:52.606549+00:00",
     "milestones": [
       25,
       50,
@@ -79,8 +79,8 @@
       "reason": "Kalshi safeguards satisfied",
       "status": "COLLECTING EVIDENCE"
     },
-    "last_cycle_at": "2026-09-12T06:47:03.182625+00:00",
-    "last_message": "Opened PAPER SCALP UP \u2022 Amount: $9.99 \u2022 Kalshi entry: 57%",
+    "last_cycle_at": "2026-09-12T06:59:52.801382+00:00",
+    "last_message": "Closed PAPER SCALP YES @ 0% | P/L $-9.99",
     "last_signal": {
       "at": "2026-09-12T06:47:03.182625+00:00",
       "confidence": 0.6295825276735936,
@@ -96,41 +96,28 @@
     "last_signal_message": "Opened PAPER SCALP UP \u2022 Amount: $9.99 \u2022 Kalshi entry: 57%",
     "legacy_realized_pnl": 0.0,
     "metrics": {
-      "expectancy": 1.6625000000000003,
-      "fees": 0.96,
+      "expectancy": -0.6679999999999998,
+      "fees": 1.26,
       "gate_sample_target": 50,
-      "losses": 1,
-      "markets": 4,
-      "max_drawdown_pct": 0.019108650197475423,
-      "profit_factor": 1.6737588652482271,
-      "samples": 4,
-      "total_pnl": 6.650000000000001,
+      "losses": 2,
+      "markets": 5,
+      "max_drawdown_pct": 0.038449624409509824,
+      "profit_factor": 0.8318227593152064,
+      "samples": 5,
+      "total_pnl": -3.339999999999999,
       "validation_sample_target": 100,
-      "win_rate": 0.75,
+      "win_rate": 0.6,
       "wins": 3
     },
-    "open_position": {
-      "amount": 9.99,
-      "contracts": 17,
-      "direction": "UP",
-      "entry_fee": 0.3,
-      "entry_price": 0.57,
-      "expires_at": 1789196400.0,
-      "last_mark": 0.56,
-      "opened_at": 1789195623.1826246,
-      "side": "YES",
-      "spot_entry_price": 77324.6,
-      "status": "OPEN",
-      "strategy": "SCALP",
-      "ticker": "KXBTC15M-26SEP120300-00"
-    },
+    "open_position": null,
     "paper_only": true,
     "rearm": {
       "KXBTC15M-26SEP091400-00:NO": false,
       "KXBTC15M-26SEP101845-45:NO": false,
       "KXBTC15M-26SEP111030-30:YES": false,
       "KXBTC15M-26SEP111230-30:NO": false,
-      "KXBTC15M-26SEP112130-30:YES": false
+      "KXBTC15M-26SEP112130-30:YES": false,
+      "KXBTC15M-26SEP120300-00:YES": false
     },
     "signal_attempts": [
       {
@@ -642,6 +629,27 @@
         "status": "CLOSED",
         "strategy": "SCALP",
         "ticker": "KXBTC15M-26SEP112130-30"
+      },
+      {
+        "amount": 9.99,
+        "closed_at": 1789196392.8013823,
+        "contracts": 17,
+        "direction": "UP",
+        "entry_fee": 0.3,
+        "entry_price": 0.57,
+        "exit_fee": 0.0,
+        "exit_price": 0.0,
+        "exit_reason": "EMERGENCY_STOP_15_POINTS",
+        "expires_at": 1789196400.0,
+        "last_mark": 0.0,
+        "opened_at": 1789195623.1826246,
+        "pnl": -9.99,
+        "result": "LOSS",
+        "side": "YES",
+        "spot_entry_price": 77324.6,
+        "status": "CLOSED",
+        "strategy": "SCALP",
+        "ticker": "KXBTC15M-26SEP120300-00"
       }
     ],
     "version": 1,
@@ -649,9 +657,35 @@
   },
   "bot_intelligence_v4": {
     "evaluated_snapshots": 375,
-    "generated_at": "2026-09-12T06:47:02.218091+00:00",
+    "generated_at": "2026-09-12T06:59:51.942657+00:00",
     "minimum_samples_for_verdict": 12,
     "ranking": [
+      {
+        "avg_abs_score": 0.01112412983279666,
+        "contribution_score": 0.003600000000000039,
+        "full_council_accuracy": 0.3626666666666667,
+        "harmful_flip_rate": 0.0026666666666666666,
+        "marginal_accuracy": 0.002666666666666706,
+        "name": "Derivatives AI",
+        "samples": 375,
+        "standalone_accuracy": 0.5714285714285714,
+        "unique_save_rate": 0.005333333333333333,
+        "verdict": "REDUNDANT",
+        "without_bot_accuracy": 0.36
+      },
+      {
+        "avg_abs_score": 0.012897119457753377,
+        "contribution_score": 0.003600000000000039,
+        "full_council_accuracy": 0.3626666666666667,
+        "harmful_flip_rate": 0.0026666666666666666,
+        "marginal_accuracy": 0.002666666666666706,
+        "name": "Liquidity AI",
+        "samples": 375,
+        "standalone_accuracy": 0.5714285714285714,
+        "unique_save_rate": 0.005333333333333333,
+        "verdict": "REDUNDANT",
+        "without_bot_accuracy": 0.36
+      },
       {
         "avg_abs_score": 0.0,
         "contribution_score": 0.0,
@@ -677,32 +711,6 @@
         "unique_save_rate": 0.0,
         "verdict": "REDUNDANT",
         "without_bot_accuracy": 0.3106796116504854
-      },
-      {
-        "avg_abs_score": 0.01112412983279666,
-        "contribution_score": -0.0007999999999999999,
-        "full_council_accuracy": 0.3626666666666667,
-        "harmful_flip_rate": 0.005333333333333333,
-        "marginal_accuracy": 0.0,
-        "name": "Derivatives AI",
-        "samples": 375,
-        "standalone_accuracy": 0.5714285714285714,
-        "unique_save_rate": 0.005333333333333333,
-        "verdict": "REDUNDANT",
-        "without_bot_accuracy": 0.3626666666666667
-      },
-      {
-        "avg_abs_score": 0.012897119457753377,
-        "contribution_score": -0.0007999999999999999,
-        "full_council_accuracy": 0.3626666666666667,
-        "harmful_flip_rate": 0.005333333333333333,
-        "marginal_accuracy": 0.0,
-        "name": "Liquidity AI",
-        "samples": 375,
-        "standalone_accuracy": 0.5714285714285714,
-        "unique_save_rate": 0.005333333333333333,
-        "verdict": "REDUNDANT",
-        "without_bot_accuracy": 0.3626666666666667
       },
       {
         "avg_abs_score": 0.23436540865839656,
@@ -757,6 +765,19 @@
         "without_bot_accuracy": 0.37066666666666664
       },
       {
+        "avg_abs_score": 0.2520017395516932,
+        "contribution_score": -0.01879999999999999,
+        "full_council_accuracy": 0.3626666666666667,
+        "harmful_flip_rate": 0.018666666666666668,
+        "marginal_accuracy": -0.010666666666666658,
+        "name": "Volatility AI",
+        "samples": 375,
+        "standalone_accuracy": 0.49066666666666664,
+        "unique_save_rate": 0.008,
+        "verdict": "USEFUL",
+        "without_bot_accuracy": 0.37333333333333335
+      },
+      {
         "avg_abs_score": 0.29864198926756924,
         "contribution_score": -0.023199999999999974,
         "full_council_accuracy": 0.3626666666666667,
@@ -781,19 +802,6 @@
         "unique_save_rate": 0.021333333333333333,
         "verdict": "HURTING COUNCIL",
         "without_bot_accuracy": 0.376
-      },
-      {
-        "avg_abs_score": 0.2520017395516932,
-        "contribution_score": -0.027599999999999958,
-        "full_council_accuracy": 0.3626666666666667,
-        "harmful_flip_rate": 0.024,
-        "marginal_accuracy": -0.01599999999999996,
-        "name": "Volatility AI",
-        "samples": 375,
-        "standalone_accuracy": 0.49066666666666664,
-        "unique_save_rate": 0.008,
-        "verdict": "HURTING COUNCIL",
-        "without_bot_accuracy": 0.37866666666666665
       },
       {
         "avg_abs_score": 0.2506845862565822,
@@ -852,16 +860,16 @@
   },
   "champion_challenger": {
     "best_challenger": {
-      "accuracy": 0.37037037037037035,
-      "median_error": 43.18169143535488,
+      "accuracy": 0.4444444444444444,
+      "median_error": 32.061926603651955,
       "samples": 27
     },
     "champion": {
-      "accuracy": 0.37037037037037035,
-      "median_error": 43.63295533845667,
+      "accuracy": 0.4444444444444444,
+      "median_error": 33.80869385144615,
       "samples": 27
     },
-    "evaluated_at": "2026-09-12T06:46:58.079737+00:00",
+    "evaluated_at": "2026-09-12T06:59:48.676255+00:00",
     "max_error_multiplier": 1.1,
     "minimum_margin": 0.05,
     "minimum_samples": 20,
@@ -108335,7 +108343,7 @@
         "reliability_multiplier": 0.9821220959915541
       }
     },
-    "generated_at": "2026-09-12T06:47:02.748942+00:00",
+    "generated_at": "2026-09-12T06:59:52.407600+00:00",
     "historical_specialist_v7_loaded": true,
     "method": "Bayesian posterior from graded live history plus optional long-history regime-specific holdout priors",
     "ranking": [
@@ -109087,33 +109095,33 @@
     "challenger_streak": 0,
     "champion_promoted": false,
     "current_regime": "LOW_VOL_RANGE",
-    "graded_this_run": true,
+    "graded_this_run": false,
     "historical_specialist_v7_loaded": true,
     "intelligence_version": 10,
     "last_graded_ticker": "KXBTC15M-26SEP120230-30",
     "learning_version": 31,
     "loaded_from_private_branch": true,
-    "official_results_resolved": 1,
+    "official_results_resolved": 0,
     "regime_tagged_specialist_history": true,
-    "registered_this_run": true,
+    "registered_this_run": false,
     "samples_after_run": 375,
-    "samples_before_run": 374,
+    "samples_before_run": 375,
     "shared_core": true,
     "specialist_knowledge_regime": "LOW_VOL_RANGE",
     "specialist_self_learning_v5": true,
     "strict_expiry_grading": true,
     "worker_ok": true
   },
-  "updated_at": "2026-09-12T06:46:58.079808+00:00",
+  "updated_at": "2026-09-12T06:59:48.676309+00:00",
   "validation": {
-    "direction_accuracy": 0.38461538461538464,
-    "evaluated_at": "2026-09-12T06:46:57.778023+00:00",
-    "mae": 39.60539551359454,
-    "median_abs_error": 43.63295533845667,
+    "direction_accuracy": 0.46153846153846156,
+    "evaluated_at": "2026-09-12T06:59:48.457575+00:00",
+    "mae": 27.888917122947394,
+    "median_abs_error": 17.51149688618898,
     "regimes": {
       "LOW_VOL_RANGE": {
-        "direction_accuracy": 0.38461538461538464,
-        "median_abs_error": 43.63295533845667,
+        "direction_accuracy": 0.46153846153846156,
+        "median_abs_error": 17.51149688618898,
         "samples": 13
       }
     },
