@@ -10,13 +10,15 @@ Use this file as the first-pass map for future maintenance/audits so the active 
 4. `background_paper.py` — scheduled learner's persistent paper-only mirror stored in learning state; shares constants/fee helpers from `kalshi_paper_engine.py`.
 5. `learner.py` — scheduled learning/grade loop and learning-state updates.
 6. `bot_intelligence_dashboard.py` — bot/specialist review UI.
-7. `.github/workflows/learn.yml` — scheduled learner execution and learning-state branch writes.
+7. `research_lab.py` / `research_dashboard.py` — official-settlement shadow trials, calibration baseline, phase results, advisory lifecycle, and UI.
+8. `.github/workflows/learn.yml` — scheduled learner execution and learning-state branch writes.
 
 ## Primary regression coverage
 
 - `tests/test_contract_regressions.py` — contract-entry/exit, fee, LOCK/SCALP, persistence and app integration regressions.
 - `tests/test_settlement_rollover.py` — stale-expiry/current-ticker rollover settlement regressions.
 - `tests/test_background_paper.py` — scheduled/background paper-ledger behavior.
+- `tests/test_research_lab.py` — shadow isolation, official grading, phases, rationale, and lifecycle safeguards.
 - `.github/workflows/integration-regressions.yml` — compile + offline regression gate.
 
 ## Maintenance rules
@@ -26,6 +28,7 @@ Use this file as the first-pass map for future maintenance/audits so the active 
 - Preserve SQLite schema/data compatibility when refactoring `kalshi_paper_engine.py`.
 - Preserve the shared-model guarantee: app and learner should use the same specialist/forecast implementations from `ai_core.py`.
 - Preserve the immutable one-direction-per-market LOCK behavior and the configured Kalshi entry/exit safeguards unless a separate explicit strategy change is requested.
+- Research-lab policy trials and lifecycle labels must stay paper-only and must not alter production execution until independently promoted by a tested strategy change.
 - Prefer small helpers and regression tests over duplicating lifecycle logic in `app.py`.
 
 ## Historical/support files

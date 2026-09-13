@@ -239,7 +239,25 @@ def market():
         except Exception:
             pass
     prob = sum(vals) / len(vals) if vals else 0.5
-    return {"ticker": ticker, "expires_at": expires, "target": float(target), "prob": prob}
+    def quote_value(name):
+        try:
+            return float(item[name + "_dollars"])
+        except Exception:
+            try:
+                return float(item[name]) / 100.0
+            except Exception:
+                return None
+
+    yes_bid, yes_ask = quote_value("yes_bid"), quote_value("yes_ask")
+    no_bid, no_ask = quote_value("no_bid"), quote_value("no_ask")
+    if no_ask is None and yes_bid is not None:
+        no_ask = 1.0 - yes_bid
+    if no_bid is None and yes_ask is not None:
+        no_bid = 1.0 - yes_ask
+    return {
+        "ticker": ticker, "expires_at": expires, "target": float(target), "prob": prob,
+        "yes_bid": yes_bid, "yes_ask": yes_ask, "no_bid": no_bid, "no_ask": no_ask,
+    }
 
 
 def kalshi_context(market_info, price):

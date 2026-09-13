@@ -2,6 +2,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from research_lab import enrich_rationales
+
 from political_event_watch import political_specialist_result
 from market_research import cross_market_research_result
 
@@ -337,7 +339,7 @@ def run_specialists_core(hist, agg, futures, kctx, research_snapshot=None):
     # cannot dilute or distort the normal technical specialist ensemble.
     out["Political Event Watch AI"] = political_specialist_result(hist)
     out["Cross-Market Research AI"] = cross_market_research_result(hist, research_snapshot)
-    return out
+    return enrich_rationales(out)
 
 
 def model_inputs_from_rows_core(rows, target=None):

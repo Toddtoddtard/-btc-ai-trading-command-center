@@ -13,6 +13,7 @@ import learner as legacy
 import learner_v3 as v3
 from ai_core import forecast_path_core
 from reliability_v31 import detect_regime, exact_expiry_row, safe_float
+from research_lab import ensure_research_lab, register_shadow, resolve_shadows, update_lifecycles
 
 PROMOTION_MIN_SAMPLES = 20
 PROMOTION_REQUIRED_STREAK = 3
@@ -28,6 +29,7 @@ def ensure_v31(state):
     state.setdefault("wait_counterfactual", {"samples": 0, "profitable_waits": 0, "avoided_losses": 0})
     state.setdefault("prediction_snapshots", [])
     state["status"].setdefault("learning_version", 31)
+    ensure_research_lab(state)
     return state
 
 
@@ -265,18 +267,55 @@ def register_with_snapshot(state, df, market_info):
     return registered
 
 
+def current_shadow_call(state, df, market_info):
+    """Recompute a paper-only call for the current phase without touching pending."""
+    if not market_info:
+        return None
+    price = float(df.close.iloc[-1])
+    specialists = legacy.run_specialists_core(
+        df,
+        legacy.aggregate_trades(),
+        legacy.futures_snapshot(),
+        legacy.kalshi_context(market_info, price),
+    )
+    forecast = forecast_path_core(legacy.rows_for_forecast(df), market_info.get("target"), state.get("forecast"))
+    if not forecast:
+        return None
+    call = {
+        "ticker": market_info.get("ticker"),
+        "opened_at": time.time(),
+        "expires_at": market_info.get("expires_at"),
+        "predicted_direction": forecast.get("predicted_direction"),
+        "specialists": specialists,
+    }
+    confidence, base_score = v3.weighted_master_confidence(call, state)
+    call["master_confidence"] = confidence
+    call["master_base_score"] = base_score
+    wait = state.get("wait_policy", {})
+    would_wait = bool(
+        abs(base_score) < safe_float(wait.get("minimum_edge_score"), 0.18)
+        or confidence < safe_float(wait.get("minimum_calibrated_confidence"), 0.58)
+    )
+    call["master_action"] = "WAIT" if would_wait else ("SCALP UP" if base_score > 0 else "SCALP DOWN")
+    return call
+
+
 def main():
     state = ensure_v31(load_previous_state())
     before_samples = int(state.get("forecast", {}).get("samples", 0))
     df = legacy.history()
     market_info = legacy.market()
     graded = strict_grade(state, df)
+    research_resolved = resolve_shadows(state, legacy.official_result)
     official_resolved = legacy.resolve_official_results(state)
     registered = register_with_snapshot(state, df, market_info)
+    shadow_call = state.get("pending") if registered else current_shadow_call(state, df, market_info)
+    research_registered = register_shadow(state, shadow_call, market_info)
     v3.update_rolling(state)
     state["validation"] = v3.walk_forward_validate(df, state)
     champion_challenger(state, df)
     update_wait_counterfactual(state)
+    update_lifecycles(state)
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
     current_regime = detect_regime(df)
     state["status"].update({
@@ -287,6 +326,9 @@ def main():
         "graded_this_run": graded,
         "official_results_resolved": official_resolved,
         "registered_this_run": registered,
+        "research_lab_ok": True,
+        "research_resolved_this_run": research_resolved,
+        "research_registered_this_run": research_registered,
         "champion_promoted": state.get("champion_challenger", {}).get("promoted", False),
         "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),
         "samples_before_run": before_samples,

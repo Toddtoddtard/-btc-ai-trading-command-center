@@ -7,7 +7,8 @@ A paper-trading-only Bitcoin and Kalshi prediction dashboard built with Streamli
 - `app.py` — Streamlit dashboard, paper account, risk engine, prediction journal, Kalshi views, persistent live chart, backtesting, and UI.
 - `ai_core.py` — shared indicator, specialist-AI, and 15-minute forecast-path logic used by both the dashboard and the 24/7 learner.
 - `learner.py` — scheduled online learner. It grades completed windows, adapts specialist weights, measures final-price and 15-candle path error, and separately tracks official Kalshi YES/NO settlement accuracy.
-- `.github/workflows/learn.yml` — runs the learner every 5 minutes and publishes `learning_state.json` to the `learning-state` branch.
+- `research_lab.py` — paper-only multi-phase shadow calls, Kalshi-baseline Brier scoring, fee-aware policy trials, WAIT counterfactuals, and advisory specialist lifecycle states.
+- `.github/workflows/learn.yml` — runs the learner every 10 minutes and publishes `learning_state.json` to the `learning-state` branch.
 
 ## Data sources
 

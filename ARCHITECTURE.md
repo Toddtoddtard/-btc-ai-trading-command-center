@@ -28,7 +28,8 @@ Kalshi public BTC markets (KXBTC15M / hourly)
               │                   ├─ grade final-price error
               │                   ├─ grade 15-candle path error
               │                   ├─ adapt specialist weights
-              │                   └─ check official Kalshi result
+              │                   ├─ check official Kalshi result
+              │                   └─ grade shadow policies/phases vs market Brier
               │
               ▼
       Master 15-minute AI
@@ -44,7 +45,7 @@ Kalshi public BTC markets (KXBTC15M / hourly)
       prediction journal /
          walk-forward test
 
-24/7 learner ──every 5 min──> learning-state branch
+24/7 learner ──every 10 min──> learning-state branch
                                  │
                                  ▼
                          Streamlit reads state
@@ -68,7 +69,9 @@ The live BTC underlying is a Binance proxy. For learning, final-price/path error
 
 ## Learning state
 
-GitHub Actions runs `.github/workflows/learn.yml` every five minutes. The worker writes version-2 state to the `learning-state` branch. State includes bounded forecast weights, specialist adaptive weights, rolling history, real 15-candle path error for newly registered windows, and official Kalshi settlement accuracy.
+GitHub Actions runs `.github/workflows/learn.yml` every ten minutes. The worker writes version-31 state to the `learning-state` branch. State includes bounded forecast weights, specialist adaptive weights, rolling history, real 15-candle path error, official Kalshi settlement accuracy, and a paper-only research lab.
+
+The research lab can record one independent shadow call in each `OPEN`, `MIDDLE`, `FINAL 5`, and `FINAL 2` phase. It grades model Brier score against the contemporaneous Kalshi midpoint, counterfactual WAIT outcomes, fee-aware one-contract paper P/L, and simultaneous entry-policy candidates. Specialist lifecycle labels are advisory and never disable execution.
 
 ## Safety boundary
 

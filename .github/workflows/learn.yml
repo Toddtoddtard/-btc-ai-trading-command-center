@@ -19,6 +19,9 @@ on:
       - 'profitability_v5.py'
       - 'time_rewards_v1.py'
       - 'audit_scorecard_v7.py'
+      - 'research_lab.py'
+      - 'research_dashboard.py'
+      - 'tests/test_research_lab.py'
       - 'tests/test_audit_v6.py'
       - 'tests/test_market_research.py'
       - 'background_paper.py'
@@ -51,9 +54,9 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py research_lab.py research_dashboard.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_research_lab.py
       - name: Run audit v6 regression tests
-        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper -v
+        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_research_lab -v
       - name: Load previous private learning state and historical priors
         shell: bash
         run: |
@@ -145,6 +148,9 @@ jobs:
           assert data.get('champion_challenger', {}).get('required_streak') == 3
           assert 'prediction_snapshots' in data
           assert 'wait_counterfactual' in data
+          assert data.get('status', {}).get('research_lab_ok') is True
+          assert data.get('research_lab', {}).get('paper_only') is True
+          assert data.get('research_lab', {}).get('affects_execution') is False
           assert 'bot_intelligence_v4' in data
           assert data.get('background_paper', {}).get('paper_only') is True
           assert data.get('background_paper', {}).get('worker_ok') is True
