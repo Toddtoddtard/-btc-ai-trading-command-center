@@ -178,6 +178,29 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(markers[0]["kalshi_entry_pct"], 50.0)
         self.assertEqual(markers[0]["spot_entry_price"], 100000)
 
+    def test_chart_keeps_open_and_pending_entry_markers(self):
+        paper = bg.initial_state(now=1000)
+        paper["open_position"] = {
+            "status": "OPEN", "ticker": "ACTIVE", "side": "YES",
+            "strategy": "LOCK", "entry_price": .60, "last_mark": .70,
+            "contracts": 10, "entry_fee": .20, "amount": 6.20,
+            "opened_at": 1000, "spot_entry_price": 100000,
+        }
+        open_markers = bg.shared_paper_chart_entries(paper, "ACTIVE")
+        self.assertEqual(len(open_markers), 1)
+        self.assertEqual(open_markers[0]["spot_entry_price"], 100000)
+
+        ended = dict(paper["open_position"])
+        ended.update(
+            status="PENDING_SETTLEMENT", closed_at=1100,
+            exit_reason="AWAITING_OFFICIAL_SETTLEMENT",
+        )
+        paper["pending_settlements"] = [ended]
+        paper["open_position"] = None
+        pending_markers = bg.shared_paper_chart_entries(paper, "ACTIVE")
+        self.assertEqual(len(pending_markers), 1)
+        self.assertEqual(pending_markers[0]["spot_entry_price"], 100000)
+
     def test_invalid_159_pm_pre_guard_trade_is_voided_without_rewriting_truth(self):
         paper = bg.initial_state(now=1000)
         paper["trades"] = [{

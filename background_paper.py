@@ -378,8 +378,14 @@ def shared_paper_chart_entries(paper, ticker, limit=11):
         return []
     rows = [
         row for row in shared_paper_history(paper, limit=1000)
-        if row.get("ticker") == ticker and row.get("status") == "CLOSED"
+        if row.get("ticker") == ticker
+        and row.get("status") in {"OPEN", "PENDING_SETTLEMENT", "CLOSED"}
     ]
+    source_rows = (
+        list(paper.get("trades", []))
+        + ([paper.get("open_position")] if paper.get("open_position") else [])
+        + list(paper.get("pending_settlements", []))
+    )
     rows.sort(key=lambda row: row["opened_at"])
     return [
         {
@@ -390,10 +396,7 @@ def shared_paper_chart_entries(paper, ticker, limit=11):
             "spot_entry_price": next(
                 (
                     _f(source.get("spot_entry_price"))
-                    for source in (
-                        list(paper.get("trades", []))
-                        + ([paper.get("open_position")] if paper.get("open_position") else [])
-                    )
+                    for source in source_rows
                     if isinstance(source, dict)
                     and str(source.get("ticker", "")) == ticker
                     and _f(source.get("opened_at"), 0.0) == row["opened_at"]

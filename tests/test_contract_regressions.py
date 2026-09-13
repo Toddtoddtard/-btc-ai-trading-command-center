@@ -466,8 +466,11 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('_contract_history = shared_paper_history(_shared_paper', source)
         self.assertNotIn('auto_result = manage_auto_paper(', source)
         self.assertIn('persistent GitHub learning-state ledger', source)
-        self.assertIn('projected 10% gross return', source)
+        self.assertIn('projected 5% gross return', source)
         self.assertIn('15-point emergency adverse contract move', source)
+        self.assertIn('only from that ticker\'s official Kalshi settlement', source)
+        self.assertIn('if row["pnl"] is None', paper_tab)
+        self.assertNotIn('LOCK sells automatically at a 95%', source)
         self.assertIn('Kalshi Execution Validation', source)
         self.assertIn('Every specialist remains active', source)
         self.assertIn(

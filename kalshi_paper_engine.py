@@ -33,8 +33,8 @@ MAX_ENTRY_PRICE = 0.75
 # but allow more borderline bot calls to collect evidence. The 75% max entry
 # cap, fee checks, loss circuit breaker, and profitability gate remain intact.
 MIN_SCALP_MARKET_PROBABILITY = 0.15
-# 95% is the LOCK executable-bid TAKE-PROFIT target, not an entry-confidence gate.
-# Kept only as a legacy compatibility constant; do not use it to authorize LOCK entry.
+# Kept only as a legacy compatibility constant; do not use it as an entry
+# confidence gate or as an early-exit rule for current LOCK positions.
 LOCK_MIN_CONFIDENCE = 0.95
 MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
@@ -85,7 +85,7 @@ def kalshi_taker_fee(contracts, price):
 
 
 def lock_target_pnl(contracts, entry_price):
-    """Fee-aware P/L if a LOCK enters now and exits at its 95% bid target."""
+    """Legacy fee-aware P/L scenario at a 95% bid; not a current exit rule."""
     c = max(0, int(contracts or 0))
     entry = min(1.0, max(0.0, _f(entry_price, 0.0)))
     entry_cost = entry * c + kalshi_taker_fee(c, entry)

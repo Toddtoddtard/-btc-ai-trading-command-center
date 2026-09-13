@@ -4653,7 +4653,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             if (!m) return NaN;
             for (const key of ["yes_sub_title", "subtitle", "title"]) {{
                 const text = String(m[key] || "");
-                const hit = text.match(/Target\s*Price\s*:\s*\$?([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+                const hit = text.match(/Target\\s*Price\\s*:\\s*\\$?([0-9][0-9,]*(?:\\.[0-9]+)?)/i);
                 if (hit) {{
                     const explicitTarget = Number(hit[1].replace(/,/g, ""));
                     if (Number.isFinite(explicitTarget) && explicitTarget > 0) return explicitTarget;
@@ -5931,14 +5931,14 @@ def live_dashboard():
         st.caption(risk["reason"])
         st.caption(
             "Entry rule: automatic SCALP trades are rejected above a 75% "
-            "Kalshi contract price; final LOCK calls may enter above 75% only "
-            "when a 95% bid exit remains profitable after estimated Kalshi "
-            "fees. SCALP requires a projected 10% gross return on entry cost, "
+            "Kalshi contract price; final LOCK calls are not subject to that "
+            "SCALP entry cap. SCALP requires a projected 5% gross return on entry cost, "
             "has no maximum-spread filter, stops after a "
             "15-point emergency adverse contract move, can exit earlier on an "
             "AI-confirmed reversal, and must receive a fresh signal "
-            "before same-side re-entry. LOCK sells automatically at a 95% "
-            "executable bid."
+            "before same-side re-entry. LOCK keeps its original direction, "
+            "stays open through the exact 15-minute window, and is finalized "
+            "only from that ticker's official Kalshi settlement."
         )
 
         st.subheader("Automatic Kalshi Paper Trade Log")
@@ -5956,7 +5956,11 @@ def live_dashboard():
                         else f"{row['current_or_exit_pct']:.0f}%"
                     ),
                     "Result": row["result"],
-                    "P/L": f"${row['pnl']:+,.2f}",
+                    "P/L": (
+                        "PENDING"
+                        if row["pnl"] is None
+                        else f"${row['pnl']:+,.2f}"
+                    ),
                     "Opened": pd.to_datetime(
                         row["opened_at"], unit="s", utc=True
                     ).tz_convert("America/New_York").strftime("%Y-%m-%d %I:%M %p %Z"),

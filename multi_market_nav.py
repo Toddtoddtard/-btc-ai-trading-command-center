@@ -88,7 +88,7 @@ def _nav_css():
 def render_market_nav(active="btc"):
     """Five-link market switcher shared by every command center.
 
-    Uses plain browser links instead of st.switch_page/st.page_link so Streamlit
+    Uses plain browser links instead of Streamlit's page-switch helpers so
     Community Cloud cannot reject valid multipage routes during startup.
     """
     active = active if active in MARKETS else "btc"
