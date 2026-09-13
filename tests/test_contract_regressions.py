@@ -175,21 +175,21 @@ class ContractRegressionTests(unittest.TestCase):
         )
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
-        self.assertIn('below the 20% lottery floor', skipped['message'])
+        self.assertIn('below the 15% lottery floor', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
         self.assertIsNone(
             engine.open_position(self.db, 500, self.decision, self.risk, 100)
         )
 
-    def test_scalp_requires_projected_ten_percent_gross_return(self):
-        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.54)
+    def test_scalp_requires_projected_five_percent_gross_return(self):
+        self.decision.update(action='SCALP UP', scalp_projected_exit_price=.52)
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
-        self.assertIn('10% gross-return target', skipped['message'])
+        self.assertIn('5% gross-return target', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-        # At a 50% entry, a 55% forecast is exactly a 10% gross return.
-        self.decision['scalp_projected_exit_price'] = .55
+        # At a 50% entry, a 53% forecast clears the 5% gross-return floor.
+        self.decision['scalp_projected_exit_price'] = .53
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['entry_price'], .50)

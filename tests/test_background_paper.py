@@ -10,7 +10,7 @@ except ModuleNotFoundError:  # Allows this isolated test artifact to run locally
     stub.LOCK_MIN_CONFIDENCE = .95
     stub.LOCK_TAKE_PROFIT_PRICE = .95
     stub.MAX_ENTRY_PRICE = .75
-    stub.MIN_SCALP_MARKET_PROBABILITY = .20
+    stub.MIN_SCALP_MARKET_PROBABILITY = .15
     stub.MAX_LOCKS_PER_MARKET = 1
     stub.MAX_SCALP_LOSSES_PER_MARKET = 2
     stub.MAX_SCALPS_PER_MARKET = 10
@@ -18,7 +18,7 @@ except ModuleNotFoundError:  # Allows this isolated test artifact to run locally
     stub.POST_FIX_MAX_DRAWDOWN_PCT = .10
     stub.POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
     stub.POST_FIX_VALIDATION_TRADES = 100
-    stub.SCALP_MIN_GROSS_RETURN = .10
+    stub.SCALP_MIN_GROSS_RETURN = .05
     stub.SCALP_MIN_REMAINING_EDGE = .01
     stub.SCALP_STOP_LOSS_POINTS = .15
     stub.UNPROVEN_POSITION_CAP = .02
@@ -101,7 +101,7 @@ class BackgroundPaperTests(unittest.TestCase):
             now=1000,
         )
         self.assertIsNone(paper["open_position"])
-        self.assertIn("below the 20% lottery floor", paper["last_message"])
+        self.assertIn("below the 15% lottery floor", paper["last_message"])
         self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
 
     def test_qualifying_scalp_opens_and_takes_profit(self):

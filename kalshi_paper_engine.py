@@ -29,9 +29,10 @@ def fetch_settled_result(ticker):
 
 GENERAL_TAKER_FEE_RATE = 0.07
 MAX_ENTRY_PRICE = 0.75
-# Match the master decision's extreme-opposing-odds veto. A selected side
-# priced below 20% is a lottery-style thesis, not an approved SCALP setup.
-MIN_SCALP_MARKET_PROBABILITY = 0.20
+# Paper-trading exploration gate: still reject extreme lottery-style odds,
+# but allow more borderline bot calls to collect evidence. The 75% max entry
+# cap, fee checks, loss circuit breaker, and profitability gate remain intact.
+MIN_SCALP_MARKET_PROBABILITY = 0.15
 # 95% is the LOCK executable-bid TAKE-PROFIT target, not an entry-confidence gate.
 # Kept only as a legacy compatibility constant; do not use it to authorize LOCK entry.
 LOCK_MIN_CONFIDENCE = 0.95
@@ -50,12 +51,10 @@ POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
 POST_FIX_MAX_DRAWDOWN_PCT = 0.10
 UNPROVEN_POSITION_CAP = 0.02
 
-# SCALP positions require a forecast and realized move worth at least a 10%
-# gross return on entry cost (for example, 50% to 55%), before fees. This is
-# deliberately lower than the original 20% gate so moderate, correctly-priced
-# Kalshi opportunities can enter while the 75% entry cap and fee accounting
-# continue to prevent expensive or negative-value fills.
-SCALP_MIN_GROSS_RETURN = 0.10
+# Paper SCALPs only need a 5% projected gross move before fees. This is
+# intentionally looser so the paper trader can follow more of the bot's calls
+# while the 75% max entry, fee accounting, drawdown gate and stop rules stay on.
+SCALP_MIN_GROSS_RETURN = 0.05
 # After the minimum return is reached, hold only when the live forecast still
 # shows meaningful additional upside beyond the executable exit bid.
 SCALP_MIN_REMAINING_EDGE = 0.01
