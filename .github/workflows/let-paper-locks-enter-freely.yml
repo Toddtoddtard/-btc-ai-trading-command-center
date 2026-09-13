@@ -31,6 +31,8 @@ jobs:
           if old in s:
               s = s.replace(old, new, 1)
           s = s.replace('        if strategy == "LOCK" and lock_target_pnl(contracts, entry) <= 1e-12:\n            return None\n', '', 1)
+          manage_gate = '''        if strategy == "LOCK" and entry_price is not None:\n            performance = paper_performance_since_update(db_path, starting_cash)\n            exposure_cap = (\n                UNPROVEN_POSITION_CAP\n                if performance["samples"] < POST_FIX_VALIDATION_TRADES\n                else 0.25\n            )\n            summary = paper_summary(db_path, starting_cash)\n            cash = float(summary["cash"])\n            pct = min(\n                exposure_cap,\n                max(0.0, _f(risk.get("position_pct"), 0.0)),\n            )\n            budget = cash * pct\n            contracts = int(budget // max(entry_price, 0.01))\n            while (\n                contracts > 0\n                and entry_price * contracts\n                + kalshi_taker_fee(contracts, entry_price)\n                > min(cash, budget)\n            ):\n                contracts -= 1\n            expected_pnl = lock_target_pnl(contracts, entry_price)\n            if contracts > 0 and expected_pnl <= 1e-12:\n                return {\n                    "event": False,\n                    "message": (\n                        f"Skipped PAPER LOCK at {entry_price * 100:.0f}%: "\n                        "selling at the 95% bid target would return "\n                        f"{expected_pnl:+.2f} after estimated Kalshi fees."\n                    ),\n                }\n\n'''
+          s = s.replace(manage_gate, '', 1)
           p.write_text(s)
 
           p = Path('background_paper.py')
