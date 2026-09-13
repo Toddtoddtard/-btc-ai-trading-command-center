@@ -83,9 +83,10 @@ def _fetch_private(token):
     return json.loads(raw)
 
 
-def _fetch_public():
+def _fetch_public(cache_key=None):
+    url = RAW_URL + (f"?v={int(cache_key)}" if cache_key is not None else "")
     req = Request(
-        RAW_URL,
+        url,
         headers={
             "Accept": "application/json",
             "User-Agent": "BTC-AI-Command-Center/shared-learning",
@@ -104,7 +105,8 @@ def fetch_shared_learning_state(ttl=20.0):
 
     token = _secret_token()
     try:
-        payload = _fetch_private(token) if token else _fetch_public()
+        public_key = int(time.time() // max(float(ttl), 1.0))
+        payload = _fetch_private(token) if token else _fetch_public(public_key)
         if isinstance(payload, dict):
             payload.setdefault("data_quality", {})
             payload["data_quality"]["shared_learning_source"] = "private-github" if token else "github-raw"
