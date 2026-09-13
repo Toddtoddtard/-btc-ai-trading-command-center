@@ -80,6 +80,7 @@ def initial_state(now=None):
         "legacy_realized_pnl": LEGACY_REALIZED_PNL,
         "cash": SEED_CASH,
         "open_position": None,
+        "pending_settlements": [],
         "trades": [],
         "rearm": {},
         "last_cycle_at": _now_iso(now),
@@ -244,16 +245,20 @@ def shared_paper_summary(paper):
     open_position = paper.get("open_position")
     open_position = dict(open_position) if isinstance(open_position, dict) else None
     unrealized = 0.0
-    if open_position:
-        entry = _f(open_position.get("entry_price"), 0.0)
-        mark = _f(open_position.get("last_mark"), entry)
-        contracts = max(0, int(_f(open_position.get("contracts"), 0)))
+    valuation_rows = ([open_position] if open_position else []) + [
+        dict(row) for row in paper.get("pending_settlements", []) if isinstance(row, dict)
+    ]
+    for valuation in valuation_rows:
+        entry = _f(valuation.get("entry_price"), 0.0)
+        mark = _f(valuation.get("last_mark"), entry)
+        contracts = max(0, int(_f(valuation.get("contracts"), 0)))
         amount = _f(
-            open_position.get("amount"),
-            contracts * entry + _f(open_position.get("entry_fee"), 0.0),
+            valuation.get("amount"),
+            contracts * entry + _f(valuation.get("entry_fee"), 0.0),
         )
-        unrealized = contracts * mark - kalshi_taker_fee(contracts, mark) - amount
-        open_position["amount_down"] = amount
+        unrealized += contracts * mark - kalshi_taker_fee(contracts, mark) - amount
+        if valuation is open_position:
+            open_position["amount_down"] = amount
 
     all_known_pnls = ([legacy_pnl] if legacy_pnl else []) + trade_pnls
     wins = [pnl for pnl in all_known_pnls if pnl > 0]
@@ -279,6 +284,7 @@ def shared_paper_summary(paper):
             if losses else (math.inf if wins else None)
         ),
         "open_position": open_position,
+        "pending_settlements": len(paper.get("pending_settlements", [])),
         "ledger_source": "github-learning-state",
     }
 
@@ -298,6 +304,9 @@ def shared_paper_history(paper, limit=100):
     ]
     if isinstance(paper.get("open_position"), dict):
         positions.append(paper["open_position"])
+    positions.extend(
+        row for row in paper.get("pending_settlements", []) if isinstance(row, dict)
+    )
     positions.sort(
         key=lambda row: (_f(row.get("opened_at"), 0.0), str(row.get("ticker", ""))),
         reverse=True,
@@ -306,6 +315,7 @@ def shared_paper_history(paper, limit=100):
     for row in positions[:max(1, min(1000, int(limit)))]:
         status = str(row.get("status", "OPEN")).upper()
         is_open = status == "OPEN"
+        is_pending = status == "PENDING_SETTLEMENT"
         is_void = status == "VOID"
         is_archived = status == "ARCHIVED"
         entry = _f(row.get("entry_price"), 0.0)
@@ -316,7 +326,7 @@ def shared_paper_history(paper, limit=100):
         )
         current_or_exit = (
             _f(row.get("last_mark"), entry)
-            if is_open else _f(row.get("exit_price"))
+            if (is_open or is_pending) else _f(row.get("exit_price"))
         )
         if is_void:
             pnl = 0.0
@@ -331,13 +341,16 @@ def shared_paper_history(paper, limit=100):
                 - amount
             )
             result = "OPEN"
+        elif is_pending:
+            pnl = None
+            result = "PENDING"
         else:
             pnl = _f(row.get("pnl"), 0.0)
             result = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "EVEN")
         history.append({
             "status": (
                 status
-                if status in {"OPEN", "CLOSED", "VOID", "ARCHIVED"}
+                if status in {"OPEN", "PENDING_SETTLEMENT", "CLOSED", "VOID", "ARCHIVED"}
                 else "CLOSED"
             ),
             "direction": "UP" if row.get("side") == "YES" else "DOWN",
@@ -399,12 +412,31 @@ def _close(paper, position, exit_price, reason, now, charge_fee=True):
     pnl = proceeds - position["amount"]
     paper["cash"] = _f(paper.get("cash"), SEED_CASH) + proceeds
     trade = dict(position)
-    trade.update(status="CLOSED", closed_at=now, exit_price=exit_price, exit_fee=exit_fee, pnl=pnl, result="WIN" if pnl > 0 else "LOSS", exit_reason=reason)
+    trade.update(
+        status="CLOSED",
+        closed_at=_f(position.get("closed_at"), now),
+        settled_at=now,
+        exit_price=exit_price,
+        exit_fee=exit_fee,
+        pnl=pnl,
+        result="WIN" if pnl > 0 else "LOSS",
+        exit_reason=reason,
+    )
     paper.setdefault("trades", []).append(trade)
-    paper["open_position"] = None
+    current = paper.get("open_position")
+    if isinstance(current, dict) and (
+        current is position
+        or (
+            str(current.get("ticker")) == str(position.get("ticker"))
+            and _f(current.get("opened_at"), -1) == _f(position.get("opened_at"), -2)
+        )
+    ):
+        paper["open_position"] = None
     paper.setdefault("rearm", {})[position["ticker"] + ":" + position["side"]] = False
-    paper["last_message"] = f"Closed PAPER {position['strategy']} {position['side']} @ {exit_price*100:.0f}% | P/L ${pnl:+.2f}"
-
+    paper["last_message"] = (
+        f"Settled PAPER {position['strategy']} {position['side']} "
+        f"@ {exit_price*100:.0f}% | P/L ${pnl:+.2f}"
+    )
 
 def _recompute_cash(paper):
     """Rebuild cash from the authoritative paper ledger after a correction."""
@@ -427,6 +459,9 @@ def _recompute_cash(paper):
     position = paper.get("open_position")
     if isinstance(position, dict):
         cash -= _f(position.get("amount"), 0.0)
+    for pending in paper.get("pending_settlements", []):
+        if isinstance(pending, dict):
+            cash -= _f(pending.get("amount"), 0.0)
     paper["cash"] = cash
     return cash
 
@@ -670,6 +705,33 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if corrected:
         _repair_master_learning_credit(learning_state, corrected)
 
+    # Ended calls wait here for their OWN official Kalshi result while the next
+    # 15-minute window is free to trade. Multiple pending windows are supported.
+    pending_rows = paper.setdefault("pending_settlements", [])
+    for ended in list(pending_rows):
+        if not isinstance(ended, dict):
+            pending_rows.remove(ended)
+            continue
+        ended_ticker = str(ended.get("ticker") or "")
+        if not ended_ticker:
+            continue
+        try:
+            ended_market = market_reader(ended_ticker)
+        except Exception:
+            continue
+        if str(ended_market.get("ticker") or ended_ticker) != ended_ticker:
+            continue
+        result = str(ended_market.get("result") or "").lower()
+        status = str(ended_market.get("status") or "").lower()
+        if result in {"yes", "no"} and status in {"settled", "finalized"}:
+            _close(
+                paper, ended,
+                1.0 if ended["side"].lower() == result else 0.0,
+                "OFFICIAL_SETTLEMENT:" + result, now, False,
+            )
+            pending_rows.remove(ended)
+            _repair_master_learning_credit(learning_state, [ended_ticker])
+
     pending = learning_state.get("pending") or {}
     position = paper.get("open_position")
     pending_ticker = str(pending.get("ticker") or "")
@@ -703,7 +765,16 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 )
                 _repair_master_learning_credit(learning_state, [ticker])
             else:
-                paper["last_message"] = "Awaiting official Kalshi settlement: " + ticker
+                boundary = _f(position.get("expires_at"), now) if expired else now
+                ended = dict(position)
+                ended.update(
+                    status="PENDING_SETTLEMENT",
+                    closed_at=boundary,
+                    exit_reason="AWAITING_OFFICIAL_SETTLEMENT",
+                )
+                paper.setdefault("pending_settlements", []).append(ended)
+                paper["open_position"] = None
+                paper["last_message"] = "Window ended — settlement pending: " + ticker
             paper["metrics"] = _post_fix_metrics(paper)
             paper["gate"] = _gate(paper["metrics"])
             return paper
@@ -809,10 +880,11 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             )
             return paper
     same_market = [
-        t for t in paper.get("trades", [])
-        if t.get("ticker") == ticker
+        t for t in (list(paper.get("trades", [])) + list(paper.get("pending_settlements", [])))
+        if isinstance(t, dict)
+        and t.get("ticker") == ticker
         and t.get("strategy") == strategy
-        and str(t.get("status", "CLOSED")).upper() == "CLOSED"
+        and str(t.get("status", "CLOSED")).upper() in {"CLOSED", "PENDING_SETTLEMENT"}
     ]
     if len(same_market) >= (MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET):
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: per-market limit reached.", "BLOCKED", now)

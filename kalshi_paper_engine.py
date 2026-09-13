@@ -145,6 +145,10 @@ def _connect(db_path, starting_cash=500.0):
         conn.execute(
             "ALTER TABLE kalshi_paper_positions ADD COLUMN spot_entry_price REAL"
         )
+    if "settled_at" not in columns:
+        conn.execute(
+            "ALTER TABLE kalshi_paper_positions ADD COLUMN settled_at REAL"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS kalshi_paper_rearm (
@@ -510,10 +514,17 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
 
 
 def _close(conn, row, exit_price, reason, charge_exit_fee=True):
+    """Finalize an OPEN or PENDING_SETTLEMENT paper position exactly once.
+
+    For a pending settlement, ``closed_at`` already represents the exact
+    15-minute window boundary. Finalization preserves that timestamp and stores
+    ``settled_at`` separately so UI timing never implies the call stayed open.
+    """
     if not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
     row = conn.execute(
-        "SELECT * FROM kalshi_paper_positions WHERE id=? AND status='OPEN'",
+        "SELECT * FROM kalshi_paper_positions WHERE id=? "
+        "AND status IN ('OPEN','PENDING_SETTLEMENT')",
         (int(row["id"]),),
     ).fetchone()
     if row is None:
@@ -526,11 +537,10 @@ def _close(conn, row, exit_price, reason, charge_exit_fee=True):
     basis = float(row["entry_price"]) * contracts + float(row["entry_fee"])
     pnl = proceeds - basis
     cash = float(
-        conn.execute("SELECT cash FROM kalshi_paper_account WHERE id=1").fetchone()[
-            "cash"
-        ]
+        conn.execute("SELECT cash FROM kalshi_paper_account WHERE id=1").fetchone()["cash"]
     )
     now = time.time()
+    closed_at = _f(row["closed_at"], now)
     conn.execute(
         "UPDATE kalshi_paper_account SET cash=?,updated_at=? WHERE id=1",
         (cash + proceeds, now),
@@ -538,29 +548,35 @@ def _close(conn, row, exit_price, reason, charge_exit_fee=True):
     conn.execute(
         """
         UPDATE kalshi_paper_positions
-        SET status='CLOSED',closed_at=?,exit_price=?,exit_fee=?,pnl=?,exit_reason=?,last_mark=?
+        SET status='CLOSED',closed_at=?,settled_at=?,exit_price=?,exit_fee=?,
+            pnl=?,exit_reason=?,last_mark=?
         WHERE id=?
         """,
-        (now, exit_price, exit_fee, pnl, reason, exit_price, int(row["id"])),
+        (
+            closed_at,
+            now,
+            exit_price,
+            exit_fee,
+            pnl,
+            reason,
+            exit_price,
+            int(row["id"]),
+        ),
     )
     if str(row["strategy"]).upper() == "SCALP":
         _set_scalp_armed(conn, row["ticker"], row["side"], False)
     conn.commit()
+    label = "Settled" if str(reason).startswith("OFFICIAL_SETTLEMENT:") else "Closed"
     return {
         "event": True,
         "message": (
-            f"Closed PAPER {row['strategy']} {row['side']} {row['ticker']} "
+            f"{label} PAPER {row['strategy']} {row['side']} {row['ticker']} "
             f"@ {exit_price:.2f} | P/L {pnl:+.2f}"
         ),
     }
 
-
 def _settle_from_official_result(conn, row, settlement_reader=None):
-    """Close an open paper contract only from an official binary Kalshi result.
-
-    Returns a close event when the market is officially settled/finalized and
-    None while the result is not yet available. BTC spot is never used here.
-    """
+    """Finalize one position only from its own official Kalshi result."""
     result = (settlement_reader or fetch_settled_result)(str(row["ticker"]))
     if result not in {"yes", "no"}:
         return None
@@ -573,6 +589,40 @@ def _settle_from_official_result(conn, row, settlement_reader=None):
         charge_exit_fee=False,
     )
 
+
+def _settle_pending_positions(conn, settlement_reader=None):
+    """Try every expired call independently; never use the current ticker."""
+    rows = conn.execute(
+        "SELECT * FROM kalshi_paper_positions "
+        "WHERE status='PENDING_SETTLEMENT' ORDER BY closed_at ASC,id ASC"
+    ).fetchall()
+    settled = []
+    for row in rows:
+        result = _settle_from_official_result(
+            conn, row, settlement_reader=settlement_reader
+        )
+        if result is not None and result.get("event"):
+            settled.append(str(row["ticker"]))
+    return settled
+
+
+def _mark_window_ended_pending(conn, row, boundary_ts):
+    """End exposure at the window boundary without inventing a settlement."""
+    boundary = _f(boundary_ts, time.time())
+    conn.execute(
+        """UPDATE kalshi_paper_positions
+           SET status='PENDING_SETTLEMENT',closed_at=?,
+               exit_reason='AWAITING_OFFICIAL_SETTLEMENT',opposite_since=NULL
+           WHERE id=? AND status='OPEN'""",
+        (boundary, int(row["id"])),
+    )
+    conn.commit()
+    return {
+        "event": True,
+        "message": (
+            "Window ended — Awaiting official Kalshi settlement: " + str(row["ticker"])
+        ),
+    }
 
 def register_decision_lock(db_path, ticker, side, expires_at, starting_cash=500.0):
     """Atomically establish one immutable direction for a Kalshi window."""
@@ -666,6 +716,10 @@ def manage_kalshi_paper_cycle(
 ):
     conn = _connect(db_path, starting_cash)
     try:
+        # Settlement is asynchronous. Resolve any prior ended windows by each
+        # trade's own ticker, but never let them block the new 15-minute market.
+        _settle_pending_positions(conn, settlement_reader=settlement_reader)
+
         row = conn.execute(
             "SELECT * FROM kalshi_paper_positions "
             "WHERE status='OPEN' ORDER BY id DESC LIMIT 1"
@@ -684,31 +738,22 @@ def manage_kalshi_paper_cycle(
                 conn.commit()
 
             now = time.time()
-            expired = row["expires_at"] is not None and now >= float(
-                row["expires_at"]
-            )
-            # The current Kalshi ticker is a second authoritative lifecycle
-            # signal. If the app has rolled to another non-empty market, check
-            # the old ticker's official result even when its stored expires_at
-            # is stale or accidentally in the future.
+            expires_at = _f(row["expires_at"])
+            expired = expires_at is not None and now >= expires_at
             if expired or rolled_to_new_market:
+                # If Kalshi has already finalized, settle immediately. Otherwise
+                # the CALL still ends now and becomes PENDING_SETTLEMENT. This
+                # frees the next 15-minute window without fabricating P/L.
                 settlement = _settle_from_official_result(
                     conn, row, settlement_reader=settlement_reader
                 )
                 if settlement is not None:
                     return settlement
-                return {
-                    "event": False,
-                    "message": (
-                        "Awaiting official Kalshi settlement: " + str(row["ticker"])
-                    ),
-                }
+                boundary = expires_at if expired and expires_at is not None else now
+                return _mark_window_ended_pending(conn, row, boundary)
 
-            # LOCK is an immutable 15-minute call. Once opened, it is never
-            # sold early from price movement or an opposite signal; settlement
-            # begins only when this exact Kalshi window expires.
-
-            # Opposite master/whale signals remain learning inputs for LOCK.
+            # LOCK is immutable through the exact window. It cannot take profit,
+            # reverse, or downgrade before the timer ends.
             if row["strategy"] == "SCALP" and mark is not None:
                 action_side = _side_from_action(decision.get("action"))
                 entry_price = float(row["entry_price"])
@@ -724,10 +769,7 @@ def manage_kalshi_paper_cycle(
                     and not sees_more_upside
                 ):
                     return _close(
-                        conn,
-                        row,
-                        mark,
-                        "TAKE_PROFIT_AI_UPSIDE_EXHAUSTED",
+                        conn, row, mark, "TAKE_PROFIT_AI_UPSIDE_EXHAUSTED"
                     )
                 price_loss = entry_price - mark
                 if price_loss >= SCALP_STOP_LOSS_POINTS - 1e-12:
@@ -742,21 +784,16 @@ def manage_kalshi_paper_cycle(
                         )
                         conn.commit()
                     elif now - opposite_since >= OPPOSITE_SIGNAL_CONFIRM_SECONDS:
-                        return _close(
-                            conn, row, mark, "CONFIRMED_OPPOSITE_SIGNAL"
-                        )
+                        return _close(conn, row, mark, "CONFIRMED_OPPOSITE_SIGNAL")
                 elif opposite_since is not None:
                     conn.execute(
-                        "UPDATE kalshi_paper_positions "
-                        "SET opposite_since=NULL WHERE id=?",
+                        "UPDATE kalshi_paper_positions SET opposite_since=NULL WHERE id=?",
                         (int(row["id"]),),
                     )
                     conn.commit()
             return {
                 "event": False,
-                "message": (
-                    f"Holding PAPER {row['strategy']} {row['side']} {row['ticker']}"
-                ),
+                "message": f"Holding PAPER {row['strategy']} {row['side']} {row['ticker']}",
             }
     finally:
         conn.close()
@@ -917,17 +954,22 @@ def paper_summary(db_path, starting_cash=500.0):
             "SELECT * FROM kalshi_paper_positions "
             "WHERE status='OPEN' ORDER BY id DESC LIMIT 1"
         ).fetchone()
+        pending = conn.execute(
+            "SELECT * FROM kalshi_paper_positions "
+            "WHERE status='PENDING_SETTLEMENT' ORDER BY closed_at ASC,id ASC"
+        ).fetchall()
         pnls = [float(row["pnl"]) for row in closed]
         realized = sum(pnls)
         wins = [pnl for pnl in pnls if pnl > 0]
         losses = [pnl for pnl in pnls if pnl < 0]
         unrealized = 0.0
-        if opened:
-            mark = _f(opened["last_mark"], float(opened["entry_price"]))
-            contracts = int(opened["contracts"])
-            unrealized = mark * contracts - kalshi_taker_fee(contracts, mark) - (
-                float(opened["entry_price"]) * contracts
-                + float(opened["entry_fee"])
+        valuation_rows = ([opened] if opened else []) + list(pending)
+        for position in valuation_rows:
+            mark = _f(position["last_mark"], float(position["entry_price"]))
+            contracts = int(position["contracts"])
+            unrealized += mark * contracts - kalshi_taker_fee(contracts, mark) - (
+                float(position["entry_price"]) * contracts
+                + float(position["entry_fee"])
             )
         start = float(acct["starting_cash"])
         equity = start + realized + unrealized
@@ -952,17 +994,16 @@ def paper_summary(db_path, starting_cash=500.0):
             "win_rate": (len(wins) / len(pnls)) if pnls else None,
             "profit_factor": (
                 sum(wins) / abs(sum(losses))
-                if losses
-                else (math.inf if wins else None)
+                if losses else (math.inf if wins else None)
             ),
             "open_position": open_position,
+            "pending_settlements": len(pending),
         }
     finally:
         conn.close()
 
-
 def paper_history(db_path, starting_cash=500.0, limit=100):
-    """Return the automatic Kalshi trade ledger from its authoritative table."""
+    """Return the automatic Kalshi ledger without disguising pending rows."""
     conn = _connect(db_path, starting_cash)
     try:
         rows = conn.execute(
@@ -976,40 +1017,43 @@ def paper_history(db_path, starting_cash=500.0, limit=100):
             contracts = int(item["contracts"])
             entry = float(item["entry_price"])
             amount = entry * contracts + float(item["entry_fee"])
-            is_open = str(item["status"]).upper() == "OPEN"
-            if is_open:
+            status = str(item["status"]).upper()
+            if status == "OPEN":
                 mark = _f(item.get("last_mark"), entry)
                 pnl = mark * contracts - kalshi_taker_fee(contracts, mark) - amount
                 result = "OPEN"
+                current_or_exit = mark
+            elif status == "PENDING_SETTLEMENT":
+                mark = _f(item.get("last_mark"), entry)
+                pnl = None
+                result = "PENDING"
                 current_or_exit = mark
             else:
                 pnl = _f(item.get("pnl"), 0.0)
                 result = "WIN" if pnl > 0 else ("LOSS" if pnl < 0 else "EVEN")
                 current_or_exit = _f(item.get("exit_price"))
-
             history.append(
                 {
-                    "status": "OPEN" if is_open else "CLOSED",
+                    "status": status,
                     "direction": "UP" if item["side"] == "YES" else "DOWN",
                     "strategy": item["strategy"],
                     "amount": amount,
                     "kalshi_entry_pct": entry * 100.0,
                     "current_or_exit_pct": (
-                        current_or_exit * 100.0
-                        if current_or_exit is not None
-                        else None
+                        current_or_exit * 100.0 if current_or_exit is not None else None
                     ),
                     "result": result,
                     "pnl": pnl,
                     "opened_at": item["opened_at"],
                     "closed_at": item.get("closed_at"),
+                    "settled_at": item.get("settled_at"),
                     "expires_at": item.get("expires_at"),
+                    "exit_reason": item.get("exit_reason"),
                 }
             )
         return history
     finally:
         conn.close()
-
 
 def paper_chart_entries(db_path, ticker, starting_cash=500.0, limit=11):
     """Return plot-safe entry markers for one active 15-minute market."""

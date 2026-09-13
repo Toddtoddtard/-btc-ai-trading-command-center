@@ -81,23 +81,80 @@ class SettlementRolloverRegressionTests(unittest.TestCase):
         self.assertEqual(row["exit_reason"], "OFFICIAL_SETTLEMENT:no")
         self.assertEqual(row["exit_fee"], 0.0)
 
-    def test_rollover_waits_when_official_result_is_not_ready(self):
+    def test_rollover_ends_call_and_waits_as_pending_when_result_not_ready(self):
         self._open_down_scalp()
         self.decision["kalshi_ticker"] = self.new_ticker
 
         result = engine.manage_kalshi_paper_cycle(
-            self.db,
-            500.0,
-            self.decision,
-            self.risk,
-            1.0,
+            self.db, 500.0, self.decision, self.risk, 1.0,
             settlement_reader=lambda _: None,
         )
 
-        self.assertFalse(result["event"])
-        self.assertIn("Awaiting official Kalshi settlement", result["message"])
+        self.assertTrue(result["event"])
+        self.assertIn("Window ended", result["message"])
+        summary = engine.paper_summary(self.db)
+        self.assertIsNone(summary["open_position"])
+        self.assertEqual(summary["pending_settlements"], 1)
+        self.assertEqual(summary["samples"], 0)
+        row = engine.paper_history(self.db)[0]
+        self.assertEqual(row["status"], "PENDING_SETTLEMENT")
+        self.assertEqual(row["result"], "PENDING")
+        self.assertIsNone(row["pnl"])
+
+    def test_next_market_can_open_while_previous_market_is_pending(self):
+        self._open_down_scalp()
+        self.decision["kalshi_ticker"] = self.new_ticker
+        engine.manage_kalshi_paper_cycle(
+            self.db, 500.0, self.decision, self.risk, 1.0,
+            settlement_reader=lambda _: None,
+        )
+        next_decision = dict(self.decision)
+        next_decision.update({
+            "action": "SCALP UP",
+            "kalshi_ticker": self.new_ticker,
+            "kalshi_close_ts": time.time() + 900,
+            "yes_ask_dollars": 0.40,
+            "yes_bid_dollars": 0.38,
+            "no_ask_dollars": 0.62,
+            "no_bid_dollars": 0.60,
+            "scalp_projected_exit_price": 0.60,
+        })
+        opened = engine.manage_kalshi_paper_cycle(
+            self.db, 500.0, next_decision, self.risk, 100.0,
+            settlement_reader=lambda _: None,
+        )
+        self.assertTrue(opened["event"])
+        self.assertIn("Opened PAPER SCALP", opened["message"])
+        self.assertEqual(engine.paper_summary(self.db)["pending_settlements"], 1)
         self.assertIsNotNone(engine.paper_summary(self.db)["open_position"])
-        self.assertEqual(engine.paper_summary(self.db)["samples"], 0)
+
+    def test_pending_finalizes_by_its_own_ticker_and_preserves_window_close(self):
+        self._open_down_scalp()
+        with engine._connect(self.db) as conn:
+            expiry = time.time() - 1
+            conn.execute(
+                "UPDATE kalshi_paper_positions SET expires_at=? WHERE status='OPEN'",
+                (expiry,),
+            )
+            conn.commit()
+        engine.manage_kalshi_paper_cycle(
+            self.db, 500.0, self.decision, self.risk, 100.0,
+            settlement_reader=lambda _: None,
+        )
+        calls = []
+        def official(ticker):
+            calls.append(ticker)
+            return "no" if ticker == self.old_ticker else None
+        engine.manage_kalshi_paper_cycle(
+            self.db, 500.0, {"action": "WAIT", "kalshi_ticker": self.new_ticker},
+            self.risk, 100.0, settlement_reader=official,
+        )
+        self.assertIn(self.old_ticker, calls)
+        row = engine.paper_history(self.db)[0]
+        self.assertEqual(row["status"], "CLOSED")
+        self.assertEqual(row["result"], "WIN")
+        self.assertAlmostEqual(row["closed_at"], expiry, places=3)
+        self.assertIsNotNone(row["settled_at"])
 
 
 if __name__ == "__main__":
