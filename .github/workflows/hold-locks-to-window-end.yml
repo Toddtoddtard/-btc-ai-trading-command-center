@@ -1,0 +1,102 @@
+name: Hold LOCK calls to window end
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hold-locks-to-window-end.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Make LOCKs hold until market expiry
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # Streamlit-side authoritative paper engine: remove the 95% early exit.
+          p = Path('kalshi_paper_engine.py')
+          s = p.read_text()
+          old = '''            # LOCK direction remains immutable, but bank the position once its\n            # executable bid reaches 95% instead of risking the final five cents.\n            if (\n                row["strategy"] == "LOCK"\n                and mark is not None\n                and mark >= LOCK_TAKE_PROFIT_PRICE\n            ):\n                return _close(conn, row, mark, "LOCK_BID_95_PCT")\n\n'''
+          if old not in s:
+              raise SystemExit('authoritative LOCK 95% exit block not found')
+          s = s.replace(old, '''            # LOCK is an immutable 15-minute call. Once opened, it is never\n            # sold early from price movement or an opposite signal; settlement\n            # begins only when this exact Kalshi window expires.\n\n''', 1)
+          s = s.replace(
+              '# A LOCK keeps its original direction, but its paper position realizes the\n# near-certain payout early whenever its executable bid reaches 95%.\nLOCK_TAKE_PROFIT_PRICE = 0.95',
+              '# Legacy compatibility constant only. LOCK positions no longer exit early at 95%;\n# they hold through the exact 15-minute Kalshi window and settle afterward.\nLOCK_TAKE_PROFIT_PRICE = 0.95',
+              1,
+          )
+          p.write_text(s)
+
+          # Scheduled/persistent paper mirror: same rule.
+          p = Path('background_paper.py')
+          s = p.read_text()
+          old = '''            if position["strategy"] == "LOCK" and bid >= LOCK_TAKE_PROFIT_PRICE:\n                _close(paper, position, bid, "LOCK_BID_95_PCT", now)\n            elif position["strategy"] == "SCALP":\n'''
+          if old not in s:
+              raise SystemExit('background LOCK 95% exit block not found')
+          s = s.replace(old, '''            if position["strategy"] == "SCALP":\n''', 1)
+          p.write_text(s)
+
+          # UI language: describe the rule users actually get.
+          p = Path('app.py')
+          s = p.read_text()
+          s = s.replace(
+              'paper position sells at a 95% executable bid',
+              'paper position holds through the end of the current 15-minute Kalshi window',
+          )
+          s = s.replace(
+              'paper position sells at a 95% bid',
+              'paper position holds through the end of the 15-minute window',
+          )
+          p.write_text(s)
+
+          # Regression tests: LOCK must remain open even above 95% until expiry.
+          p = Path('tests/test_contract_regressions.py')
+          s = p.read_text()
+          old = '''    def test_lock_sells_when_its_bid_reaches_ninety_five_percent(self):\n        self.open()\n        self.decision['yes_bid_dollars'] = .94\n        self.assertFalse(self.cycle()['event'])\n        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])\n        self.decision['yes_bid_dollars'] = .95\n        closed = self.cycle()\n        self.assertTrue(closed['event'])\n        with engine._connect(self.db) as conn:\n            reason = conn.execute(\n                'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'\n            ).fetchone()['exit_reason']\n        self.assertEqual(reason, 'LOCK_BID_95_PCT')\n        self.assertIsNone(engine.paper_summary(self.db)['open_position'])\n'''
+          new = '''    def test_lock_holds_through_ninety_five_percent_until_window_expiry(self):\n        self.open()\n        self.decision['yes_bid_dollars'] = .95\n        held = self.cycle()\n        self.assertFalse(held['event'])\n        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])\n        self.decision['yes_bid_dollars'] = .99\n        held = self.cycle()\n        self.assertFalse(held['event'])\n        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])\n        self.expire()\n        closed = self.cycle('yes')\n        self.assertTrue(closed['event'])\n        with engine._connect(self.db) as conn:\n            reason = conn.execute(\n                'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'\n            ).fetchone()['exit_reason']\n        self.assertEqual(reason, 'OFFICIAL_SETTLEMENT:yes')\n        self.assertIsNone(engine.paper_summary(self.db)['open_position'])\n'''
+          if old not in s:
+              raise SystemExit('LOCK 95% regression test not found')
+          s = s.replace(old, new, 1)
+
+          old = '''    def test_only_one_lock_entry_is_allowed_per_market(self):\n        self.open()\n        self.decision['yes_bid_dollars'] = .95\n        self.assertTrue(self.cycle()['event'])\n        self.decision['yes_bid_dollars'] = .48\n        skipped = self.cycle()\n        self.assertFalse(skipped['event'])\n        self.assertIn('1 LOCK already entered', skipped['message'])\n        self.assertIsNone(engine.paper_summary(self.db)['open_position'])\n'''
+          new = '''    def test_only_one_lock_entry_is_allowed_per_market(self):\n        self.open()\n        self.decision['yes_bid_dollars'] = .99\n        self.assertFalse(self.cycle()['event'])\n        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])\n        self.expire()\n        self.assertTrue(self.cycle('yes')['event'])\n        self.decision['yes_bid_dollars'] = .48\n        skipped = self.cycle()\n        self.assertFalse(skipped['event'])\n        self.assertIn('1 LOCK already entered', skipped['message'])\n        self.assertIsNone(engine.paper_summary(self.db)['open_position'])\n'''
+          if old not in s:
+              raise SystemExit('one-lock regression test not found')
+          s = s.replace(old, new, 1)
+
+          s = s.replace(
+              "        self.assertNotIn('hold this call until Kalshi market expiration', source)\n        self.assertNotIn('to the end of the current Kalshi 15-minute market', source)\n        self.assertIn('paper position sells at a 95% executable bid', source)\n        self.assertIn('paper position sells at a 95% bid', source)",
+              "        self.assertIn('paper position holds through the end of the current 15-minute Kalshi window', source)\n        self.assertIn('paper position holds through the end of the 15-minute window', source)",
+              1,
+          )
+          p.write_text(s)
+          PY
+
+      - name: Install test runner
+        run: python -m pip install pytest
+
+      - name: Run focused regressions
+        run: python -m pytest -q tests/test_contract_regressions.py tests/test_background_paper.py
+
+      - name: Commit source changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add kalshi_paper_engine.py background_paper.py app.py tests/test_contract_regressions.py
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Hold LOCK calls until 15-minute window ends'
+          git push origin main
