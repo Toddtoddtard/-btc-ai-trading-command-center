@@ -389,17 +389,19 @@ def scalp_profitability_gate(db_path, starting_cash=500.0):
 
 
 def open_position(db_path, starting_cash, decision, risk, spot_price):
-    side = _side_from_action(decision.get("action"))
-    if side is None or not bool(risk.get("approved")):
+    action = str(decision.get("action", "")).upper()
+    side = _side_from_action(action)
+    if side is None:
+        return None
+    strategy = "LOCK" if action.startswith("LOCK") else "SCALP"
+    # Explicit LOCK calls are authoritative in PAPER mode. They bypass the
+    # ordinary risk-approval/SCALP qualification gates so we can measure the
+    # bot's actual LOCK decisions. Hard execution constraints still apply.
+    if strategy == "SCALP" and not bool(risk.get("approved")):
         return None
     ticker = str(decision.get("kalshi_ticker") or "")
     if not ticker:
         return None
-    strategy = (
-        "LOCK"
-        if str(decision.get("action", "")).upper().startswith("LOCK")
-        else "SCALP"
-    )
     if strategy == "SCALP" and not scalp_profitability_gate(
         db_path, starting_cash
     )["approved"]:
@@ -468,8 +470,6 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
             return None
         fee = kalshi_taker_fee(contracts, entry)
         total_cost = entry * contracts + fee
-        if strategy == "LOCK" and lock_target_pnl(contracts, entry) <= 1e-12:
-            return None
         conn.execute(
             "UPDATE kalshi_paper_account SET cash=?,updated_at=? WHERE id=1",
             (cash - total_cost, now),
@@ -827,39 +827,6 @@ def manage_kalshi_paper_cycle(
                     "message": (
                         "Skipped PAPER SCALP: post-fix Kalshi profitability "
                         "gate is active — " + profitability_gate["reason"] + "."
-                    ),
-                }
-
-        if strategy == "LOCK" and entry_price is not None:
-            performance = paper_performance_since_update(db_path, starting_cash)
-            exposure_cap = (
-                UNPROVEN_POSITION_CAP
-                if performance["samples"] < POST_FIX_VALIDATION_TRADES
-                else 0.25
-            )
-            summary = paper_summary(db_path, starting_cash)
-            cash = float(summary["cash"])
-            pct = min(
-                exposure_cap,
-                max(0.0, _f(risk.get("position_pct"), 0.0)),
-            )
-            budget = cash * pct
-            contracts = int(budget // max(entry_price, 0.01))
-            while (
-                contracts > 0
-                and entry_price * contracts
-                + kalshi_taker_fee(contracts, entry_price)
-                > min(cash, budget)
-            ):
-                contracts -= 1
-            expected_pnl = lock_target_pnl(contracts, entry_price)
-            if contracts > 0 and expected_pnl <= 1e-12:
-                return {
-                    "event": False,
-                    "message": (
-                        f"Skipped PAPER LOCK at {entry_price * 100:.0f}%: "
-                        "selling at the 95% bid target would return "
-                        f"{expected_pnl:+.2f} after estimated Kalshi fees."
                     ),
                 }
 

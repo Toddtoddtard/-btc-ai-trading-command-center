@@ -78,15 +78,16 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(paper["open_position"]["entry_price"], .85)
         self.assertEqual(paper["last_signal"]["outcome"], "OPENED")
 
-    def test_lock_rejects_fee_loss_at_95_exit(self):
+    def test_lock_may_enter_at_95_without_profit_gate(self):
         state = self.pending(master_confidence=.60, master_action="LOCK UP")
         paper = bg.run_cycle(
             state,
             lambda _: self.market(yes_bid_dollars=.94, yes_ask_dollars=.95),
             now=1000,
         )
-        self.assertIsNone(paper["open_position"])
-        self.assertIn("after estimated Kalshi fees", paper["last_message"])
+        self.assertIsNotNone(paper["open_position"])
+        self.assertEqual(paper["open_position"]["strategy"], "LOCK")
+        self.assertEqual(paper["open_position"]["entry_price"], .95)
 
     def test_lottery_style_low_probability_scalp_is_rejected(self):
         state = self.pending()

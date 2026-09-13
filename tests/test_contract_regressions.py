@@ -534,20 +534,19 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(position['strategy'], 'LOCK')
         self.assertEqual(position['entry_price'], .85)
 
-    def test_lock_rejects_fee_loss_at_ninety_five_percent_exit(self):
+    def test_lock_may_enter_at_ninety_five_percent_without_profit_gate(self):
         self.decision.update(
             action='LOCK UP',
-            confidence=.95,
+            confidence=.40,
             yes_ask_dollars=.95,
             yes_bid_dollars=.94,
         )
-        skipped = self.cycle()
-        self.assertFalse(skipped['event'])
-        self.assertIn('after estimated Kalshi fees', skipped['message'])
-        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
-        self.assertIsNone(
-            engine.open_position(self.db, 500, self.decision, self.risk, 100)
-        )
+        opened = self.cycle()
+        self.assertTrue(opened['event'])
+        position = engine.paper_summary(self.db)['open_position']
+        self.assertIsNotNone(position)
+        self.assertEqual(position['strategy'], 'LOCK')
+        self.assertEqual(position['entry_price'], .95)
 
     def test_lock_accepts_profitable_fee_aware_price(self):
         self.decision.update(
@@ -634,3 +633,22 @@ def test_background_paper_follows_explicit_master_action_source():
     assert "signal_side = _action_side(master_action)" in src
     assert "position[\"strategy\"] = \"LOCK\"" in src
     assert "if bool(pending.get(\"would_wait\", True))" not in src[src.index("metrics = _post_fix_metrics(paper)"):src.index("confidence = _f(pending.get(\"master_confidence\"), 0.0)")]
+
+
+
+def test_lock_can_enter_without_risk_approval_at_99_percent():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = tmp + "/paper-lock-free.db"
+        decision = dict(
+            action="LOCK UP", kalshi_ticker="KXBTC15M-LOCK-FREE",
+            kalshi_close_ts=time.time()+900, target_price=100,
+            yes_ask_dollars=.99, yes_bid_dollars=.98,
+            no_ask_dollars=.02, no_bid_dollars=.01, confidence=.40,
+        )
+        risk = dict(approved=False, position_pct=.10)
+        opened = engine.open_position(db, 500, decision, risk, 100)
+        assert opened and opened["event"]
+        position = engine.paper_summary(db)["open_position"]
+        assert position is not None
+        assert position["strategy"] == "LOCK"
+        assert position["entry_price"] == .99
