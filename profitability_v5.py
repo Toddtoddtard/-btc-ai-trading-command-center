@@ -160,24 +160,42 @@ def _install_dashboard_adapter():
         from streamlit.delta_generator import DeltaGenerator
     except Exception:
         return
-    if getattr(DeltaGenerator, "_btc_profitability_dashboard_adapter", False): return
-    original_metric = DeltaGenerator.metric; original_markdown = DeltaGenerator.markdown
+
+    # Version the adapter so Streamlit hot reload cannot leave an older monkeypatch
+    # installed in the long-running process.  The previous implementation used a
+    # boolean flag, which caused the new plain-"24h" rule to be skipped after a
+    # code-only redeploy even though the earlier Spot-feed rule remained active.
+    adapter_version = 3
+    installed_version = int(getattr(DeltaGenerator, "_btc_profitability_dashboard_adapter_version", 0) or 0)
+    if installed_version >= adapter_version:
+        return
+
+    # If an older adapter is installed, unwrap it back to the original methods
+    # before installing this version.  This avoids stacking wrappers forever.
+    original_metric = getattr(DeltaGenerator, "_btc_profitability_original_metric", DeltaGenerator.metric)
+    original_markdown = getattr(DeltaGenerator, "_btc_profitability_original_markdown", DeltaGenerator.markdown)
+    DeltaGenerator._btc_profitability_original_metric = original_metric
+    DeltaGenerator._btc_profitability_original_markdown = original_markdown
 
     def metric_adapter(self, label, value, *args, **kwargs):
         label_text = str(label or "")
-        if label_text.strip().lower() == "spot feed":
+        normalized = label_text.strip().lower().replace("-", " ")
+
+        if normalized == "spot feed":
             entry, side = latest_kalshi_call_entry()
-            if entry is None: return original_metric(self, "Kalshi Call Entry", "N/A", *args, **kwargs)
+            if entry is None:
+                return original_metric(self, "Kalshi Call Entry", "N/A", *args, **kwargs)
             side_text = f" {side}" if side else ""
             return original_metric(self, "Kalshi Call Entry", f"{entry * 100:.0f}% / {entry * 100:.0f}c{side_text}", *args, **kwargs)
-        normalized = label_text.strip().lower().replace("-", " ")
-        # The visible main-page box is literally labeled "24h" in app.py.
+
+        # The main-page BTC change box is literally labeled "24h" in app.py.
         if normalized in {"24h", "24 h", "24h quote volume", "24 h quote volume", "24h volume"}:
             accuracy, wins, losses = lifetime_directional_accuracy()
             shown = "N/A" if accuracy is None else f"{accuracy * 100:.1f}%"
             if kwargs.get("help") is None:
                 kwargs["help"] = f"Lifetime resolved directional calls: {wins} wins, {losses} losses. HOLD/WAIT excluded from win/loss accuracy."
             return original_metric(self, "Lifetime Accuracy", shown, *args, **kwargs)
+
         return original_metric(self, label, value, *args, **kwargs)
 
     def markdown_adapter(self, body, *args, **kwargs):
@@ -186,8 +204,9 @@ def _install_dashboard_adapter():
             rendered = rendered.replace(">SCALP UP<", ">HOLD SCALP UP<").replace(">SCALP DOWN<", ">HOLD SCALP DOWN<")
         return original_markdown(self, rendered, *args, **kwargs)
 
-    DeltaGenerator.metric = metric_adapter; DeltaGenerator.markdown = markdown_adapter
-    DeltaGenerator._btc_profitability_dashboard_adapter = True
+    DeltaGenerator.metric = metric_adapter
+    DeltaGenerator.markdown = markdown_adapter
+    DeltaGenerator._btc_profitability_dashboard_adapter_version = adapter_version
 
 
 _install_dashboard_adapter()
