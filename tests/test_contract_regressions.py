@@ -251,19 +251,24 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertFalse(result['event'])
         self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
 
-    def test_lock_sells_when_its_bid_reaches_ninety_five_percent(self):
+    def test_lock_holds_through_ninety_five_percent_until_window_expiry(self):
         self.open()
-        self.decision['yes_bid_dollars'] = .94
-        self.assertFalse(self.cycle()['event'])
-        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
         self.decision['yes_bid_dollars'] = .95
-        closed = self.cycle()
+        held = self.cycle()
+        self.assertFalse(held['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+        self.decision['yes_bid_dollars'] = .99
+        held = self.cycle()
+        self.assertFalse(held['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+        self.expire()
+        closed = self.cycle('yes')
         self.assertTrue(closed['event'])
         with engine._connect(self.db) as conn:
             reason = conn.execute(
                 'SELECT exit_reason FROM kalshi_paper_positions ORDER BY id DESC LIMIT 1'
             ).fetchone()['exit_reason']
-        self.assertEqual(reason, 'LOCK_BID_95_PCT')
+        self.assertEqual(reason, 'OFFICIAL_SETTLEMENT:yes')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_does_not_require_ninety_five_percent_confidence(self):
@@ -274,8 +279,11 @@ class ContractRegressionTests(unittest.TestCase):
 
     def test_only_one_lock_entry_is_allowed_per_market(self):
         self.open()
-        self.decision['yes_bid_dollars'] = .95
-        self.assertTrue(self.cycle()['event'])
+        self.decision['yes_bid_dollars'] = .99
+        self.assertFalse(self.cycle()['event'])
+        self.assertIsNotNone(engine.paper_summary(self.db)['open_position'])
+        self.expire()
+        self.assertTrue(self.cycle('yes')['event'])
         self.decision['yes_bid_dollars'] = .48
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
@@ -435,10 +443,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('if _lock_was_already_persisted:', source)
         self.assertIn('def _register_window_lock(', source)
         self.assertIn('_persistent_window_lock_side(current_ticker)', source)
-        self.assertNotIn('hold this call until Kalshi market expiration', source)
-        self.assertNotIn('to the end of the current Kalshi 15-minute market', source)
-        self.assertIn('paper position sells at a 95% executable bid', source)
-        self.assertIn('paper position sells at a 95% bid', source)
+        self.assertIn('paper position holds through the end of the current 15-minute Kalshi window', source)
+        self.assertIn('paper position holds through the end of the 15-minute window', source)
         self.assertIn('[data-testid="stAlert"] [data-testid="stMarkdownContainer"] p', source)
         self.assertIn('a[aria-label="Link to heading"]', source)
         self.assertIn('with ThreadPoolExecutor(max_workers=6', source)

@@ -63,8 +63,8 @@ SCALP_MIN_REMAINING_EDGE = 0.01
 SCALP_STOP_LOSS_POINTS = 0.15
 OPPOSITE_SIGNAL_CONFIRM_SECONDS = 10.0
 
-# A LOCK keeps its original direction, but its paper position realizes the
-# near-certain payout early whenever its executable bid reaches 95%.
+# Legacy compatibility constant only. LOCK positions no longer exit early at 95%;
+# they hold through the exact 15-minute Kalshi window and settle afterward.
 LOCK_TAKE_PROFIT_PRICE = 0.95
 
 
@@ -704,14 +704,9 @@ def manage_kalshi_paper_cycle(
                     ),
                 }
 
-            # LOCK direction remains immutable, but bank the position once its
-            # executable bid reaches 95% instead of risking the final five cents.
-            if (
-                row["strategy"] == "LOCK"
-                and mark is not None
-                and mark >= LOCK_TAKE_PROFIT_PRICE
-            ):
-                return _close(conn, row, mark, "LOCK_BID_95_PCT")
+            # LOCK is an immutable 15-minute call. Once opened, it is never
+            # sold early from price movement or an opposite signal; settlement
+            # begins only when this exact Kalshi window expires.
 
             # Opposite master/whale signals remain learning inputs for LOCK.
             if row["strategy"] == "SCALP" and mark is not None:

@@ -5416,7 +5416,7 @@ def live_dashboard():
             elif decision["action"] in {"LOCK UP", "LOCK DOWN"}:
                 st.warning(
                     f"LOCK {decision['locked_side']} → direction stays fixed; "
-                    "the paper position sells at a 95% executable bid or settles at expiry."
+                    "the paper position holds through the end of the current 15-minute Kalshi window or settles at expiry."
                 )
             else:
                 st.info("HOLD → no Kalshi side has enough edge yet.")
@@ -5548,7 +5548,7 @@ def live_dashboard():
             st.markdown(directional_badge_html(decision["action"]), unsafe_allow_html=True)
             st.warning(
                 f"LOCKED SIDE: {decision['locked_side']} — direction cannot reverse; "
-                "paper position sells at a 95% bid or settles at expiry."
+                "paper position holds through the end of the 15-minute window or settles at expiry."
             )
         st.info(decision["reason"])
 

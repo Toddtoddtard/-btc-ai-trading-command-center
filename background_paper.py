@@ -709,9 +709,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             return paper
         if bid is not None:
             position["last_mark"] = bid
-            if position["strategy"] == "LOCK" and bid >= LOCK_TAKE_PROFIT_PRICE:
-                _close(paper, position, bid, "LOCK_BID_95_PCT", now)
-            elif position["strategy"] == "SCALP":
+            if position["strategy"] == "SCALP":
                 entry_price = position["entry_price"]
                 gain = bid - entry_price
                 master_action = _resolved_master_action(pending)
