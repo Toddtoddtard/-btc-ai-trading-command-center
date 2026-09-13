@@ -58,6 +58,9 @@ jobs:
               t.write_text(ts)
           PY
 
+      - name: Install test runner
+        run: python -m pip install pytest
+
       - name: Run focused tests
         run: |
           python -m pytest -q tests/test_background_paper.py tests/test_contract_regressions.py
