@@ -1,6 +1,6 @@
 name: BTC Full Audit v17
 
-# Manual rerun requested 2026-09-13
+# Immediate full audit requested 2026-09-13; includes journal grading repair.
 on:
   pull_request:
     paths:
@@ -82,6 +82,39 @@ jobs:
         run: pip install -r requirements.txt
       - name: Apply audited BTC decision policy safely
         run: python tools/apply_btc_audit_v16.py
+      - name: Repair prediction journal directional grading
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''            strike = safe_float(row["target_price"])
+
+            if action in {"SCALP UP", "LOCK UP"}:
+                correct = int(resolved_price >= strike) if pd.notna(strike) else int(resolved_price > start_price)
+            elif action in {"SCALP DOWN", "LOCK DOWN"}:
+                correct = int(resolved_price < strike) if pd.notna(strike) else int(resolved_price < start_price)
+            else:
+                correct = None
+'''
+          new = '''            # Grade the prediction journal by BTC direction from the call price.
+            # Kalshi contract settlement is authoritative only in the paper ledger.
+            if action in {"SCALP UP", "LOCK UP"}:
+                correct = int(resolved_price > start_price)
+            elif action in {"SCALP DOWN", "LOCK DOWN"}:
+                correct = int(resolved_price < start_price)
+            else:
+                correct = None
+'''
+          if old in s:
+              s = s.replace(old, new, 1)
+              p.write_text(s, encoding='utf-8')
+              print('Repaired journal grading.')
+          elif 'correct = int(resolved_price > start_price)' in s and 'correct = int(resolved_price < start_price)' in s:
+              print('Journal grading already repaired.')
+          else:
+              raise SystemExit('Unexpected journal grading block; refusing blind edit.')
+          PY
       - name: Compile every Python file
         run: python -m compileall -q .
       - name: Run regression tests
@@ -108,5 +141,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py
-          git commit -m 'Install BTC audit v17 decision fixes'
+          git commit -m 'Fix prediction journal directional grading'
           git push origin main
