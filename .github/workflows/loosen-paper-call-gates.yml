@@ -1,0 +1,69 @@
+name: Loosen paper trader call gates
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/loosen-paper-call-gates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Loosen paper-only scalp entry gates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('kalshi_paper_engine.py')
+          s = p.read_text()
+          s = s.replace(
+              '# Match the master decision\'s extreme-opposing-odds veto. A selected side\n# priced below 20% is a lottery-style thesis, not an approved SCALP setup.\nMIN_SCALP_MARKET_PROBABILITY = 0.20',
+              '# Paper-trading exploration gate: still reject extreme lottery-style odds,\n# but allow more borderline bot calls to collect evidence. The 75% max entry\n# cap, fee checks, loss circuit breaker, and profitability gate remain intact.\nMIN_SCALP_MARKET_PROBABILITY = 0.15'
+          )
+          s = s.replace(
+              '# SCALP positions require a forecast and realized move worth at least a 10%\n# gross return on entry cost (for example, 50% to 55%), before fees. This is\n# deliberately lower than the original 20% gate so moderate, correctly-priced\n# Kalshi opportunities can enter while the 75% entry cap and fee accounting\n# continue to prevent expensive or negative-value fills.\nSCALP_MIN_GROSS_RETURN = 0.10',
+              '# Paper SCALPs only need a 5% projected gross move before fees. This is\n# intentionally looser so the paper trader can follow more of the bot\'s calls\n# while the 75% max entry, fee accounting, drawdown gate and stop rules stay on.\nSCALP_MIN_GROSS_RETURN = 0.05'
+          )
+          p.write_text(s)
+
+          t = Path('tests/test_background_paper.py')
+          ts = t.read_text().replace('stub.MIN_SCALP_MARKET_PROBABILITY = .20', 'stub.MIN_SCALP_MARKET_PROBABILITY = .15')
+          ts = ts.replace('stub.SCALP_MIN_GROSS_RETURN = .10', 'stub.SCALP_MIN_GROSS_RETURN = .05')
+          t.write_text(ts)
+
+          t = Path('tests/test_contract_regressions.py')
+          ts = t.read_text()
+          ts = ts.replace("'below the 20% lottery floor'", "'below the 15% lottery floor'")
+          ts = ts.replace('def test_scalp_requires_projected_ten_percent_gross_return(self):', 'def test_scalp_requires_projected_five_percent_gross_return(self):')
+          ts = ts.replace("self.decision.update(action='SCALP UP', scalp_projected_exit_price=.54)\n        skipped = self.cycle()\n        self.assertFalse(skipped['event'])\n        self.assertIn('10% gross-return target', skipped['message'])", "self.decision.update(action='SCALP UP', scalp_projected_exit_price=.52)\n        skipped = self.cycle()\n        self.assertFalse(skipped['event'])\n        self.assertIn('5% gross-return target', skipped['message'])")
+          ts = ts.replace('# At a 50% entry, a 55% forecast is exactly a 10% gross return.\n        self.decision[\'scalp_projected_exit_price\'] = .55', '# At a 50% entry, a 53% forecast clears the 5% gross-return floor.\n        self.decision[\'scalp_projected_exit_price\'] = .53')
+          t.write_text(ts)
+          PY
+
+      - name: Install test runner
+        run: python -m pip install pytest
+
+      - name: Run focused regressions
+        run: python -m pytest -q tests/test_background_paper.py tests/test_contract_regressions.py
+
+      - name: Commit source changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add kalshi_paper_engine.py tests/test_background_paper.py tests/test_contract_regressions.py
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Loosen paper trader call requirements'
+          git push origin main
