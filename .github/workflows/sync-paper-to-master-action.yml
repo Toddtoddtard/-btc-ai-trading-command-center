@@ -42,7 +42,7 @@ jobs:
               raise SystemExit('manage block anchor not found')
 
           old_entry = '''    if bool(pending.get("would_wait", True)):\n        paper["last_message"] = "No paper action: learner selected WAIT."\n        return paper\n    explicit_action = str(pending.get("master_action") or pending.get("action") or "").upper().strip()\n    if explicit_action in {"WAIT", "HOLD"}:\n        paper["last_message"] = "No paper action: learner selected WAIT."\n        return paper\n    if explicit_action in {"LOCK UP", "SCALP UP"}:\n        side = "YES"\n    elif explicit_action in {"LOCK DOWN", "SCALP DOWN"}:\n        side = "NO"\n    else:\n        side = "YES" if int(pending.get("predicted_direction", 0)) > 0 else "NO"\n'''
-          new_entry = '''    explicit_action = _resolved_master_action(pending)\n    if explicit_action in {"WAIT", "HOLD"}:\n        paper["last_message"] = "No paper action: master selected WAIT."\n        return paper\n    side = _action_side(explicit_action)\n    if side is None:\n        paper["last_message"] = "No paper action: master action is not executable."\n        return paper\n'''
+          new_entry = '''    explicit_action = _resolved_master_action(pending)\n    if explicit_action in {"WAIT", "HOLD"}:\n        paper["last_message"] = "No paper action: learner selected WAIT."\n        return paper\n    side = _action_side(explicit_action)\n    if side is None:\n        paper["last_message"] = "No paper action: master action is not executable."\n        return paper\n'''
           if old_entry in s:
               s = s.replace(old_entry, new_entry, 1)
           elif 'explicit_action = _resolved_master_action(pending)' not in s:
