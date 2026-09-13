@@ -3,10 +3,25 @@
 Uses resolved prediction/paper outcomes to measure expectancy, profit factor,
 precision, drawdown proxy, and confidence-bucket performance. Evaluation only;
 no live order execution is implemented here.
+
+This module also installs a deliberately narrow Streamlit presentation adapter.
+The adapter does not place trades or alter the trading engine. It keeps the main
+BTC dashboard aligned with the authoritative paper-trading state by:
+
+* replacing the old ``Spot feed`` metric with the latest Kalshi call entry;
+* replacing ``24h quote volume`` with lifetime directional-call accuracy; and
+* rendering ``HOLD SCALP UP/DOWN`` when the existing paper engine says that a
+  fresh scalp no longer meets its profitability / projected-return target.
+
+The HOLD display is intentionally independent of the separate 75% automatic
+entry cap. That cap can still protect execution, but it does not decide whether
+the directional recommendation is shown as HOLD SCALP.
 """
 from __future__ import annotations
 
 import math
+import os
+import sqlite3
 from collections import defaultdict
 
 import numpy as np
@@ -115,3 +130,176 @@ def profitability_gate(metrics, min_samples=30):
     if _f(wr, 0.0) < 0.58:
         return False, f"WAIT — trade win rate {_f(wr):.1%} < 58%"
     return True, "PROFITABILITY GATE PASSED"
+
+
+# ---------------------------------------------------------------------------
+# Main-dashboard presentation helpers
+# ---------------------------------------------------------------------------
+
+_DEFAULT_DB_PATH = "btc_ai_command_center.db"
+_DIRECTIONAL_ACTIONS = ("SCALP UP", "SCALP DOWN", "LOCK UP", "LOCK DOWN")
+
+
+def _db_path():
+    """Use the app's normal local database path without changing persistence."""
+    return os.environ.get("BTC_AI_DB_PATH", _DEFAULT_DB_PATH)
+
+
+def lifetime_directional_accuracy(db_path=None):
+    """Return lifetime W/L accuracy for resolved directional calls only.
+
+    HOLD and WAIT remain in the learning journal but are deliberately excluded
+    from the public win/loss rate, matching the dashboard's established rule.
+    """
+    path = db_path or _db_path()
+    if not os.path.exists(path):
+        return None, 0, 0
+    try:
+        with sqlite3.connect(path, timeout=1.0) as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN correct=1 THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN correct=0 THEN 1 ELSE 0 END) AS losses
+                FROM predictions
+                WHERE resolved=1
+                  AND correct IS NOT NULL
+                  AND UPPER(TRIM(action)) IN ('SCALP UP','SCALP DOWN','LOCK UP','LOCK DOWN')
+                """
+            ).fetchone()
+        wins = int((row[0] if row else 0) or 0)
+        losses = int((row[1] if row else 0) or 0)
+        total = wins + losses
+        return ((wins / total) if total else None), wins, losses
+    except Exception:
+        return None, 0, 0
+
+
+def latest_kalshi_call_entry(db_path=None):
+    """Return the most recent real paper-contract entry price and side.
+
+    The paper ledger is the source of truth. ``entry_price`` is stored as a
+    0..1 Kalshi contract price, so 0.63 is displayed as 63% / 63c.
+    """
+    path = db_path or _db_path()
+    if not os.path.exists(path):
+        return None, None
+    try:
+        with sqlite3.connect(path, timeout=1.0) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT side, entry_price
+                FROM kalshi_paper_positions
+                WHERE entry_price IS NOT NULL
+                ORDER BY opened_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if not row:
+            return None, None
+        price = float(row["entry_price"])
+        if not math.isfinite(price):
+            return None, None
+        # Be tolerant if an old ledger stored cents rather than a 0..1 price.
+        if price > 1.0:
+            price /= 100.0
+        return max(0.0, min(1.0, price)), str(row["side"] or "").upper().strip() or None
+    except Exception:
+        return None, None
+
+
+def _walk_values(value, depth=0):
+    """Yield nested Streamlit-session values without depending on key names."""
+    if depth > 5:
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            yield item
+            yield from _walk_values(item, depth + 1)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield item
+            yield from _walk_values(item, depth + 1)
+
+
+def _profitability_hold_active(st_module):
+    """True only when the existing engine rejected a fresh scalp for economics.
+
+    This intentionally ignores messages about the separate 75% entry cap. The
+    trigger is the engine's projected-exit / gross-return profitability check.
+    """
+    try:
+        values = []
+        for value in st_module.session_state.values():
+            values.append(value)
+            values.extend(_walk_values(value))
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            text = value.upper()
+            if (
+                "SKIPPED PAPER SCALP" in text
+                and "PROJECTED EXIT" in text
+                and "GROSS-RETURN TARGET" in text
+            ):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _install_dashboard_adapter():
+    """Install a narrow display adapter for the three requested UI changes."""
+    try:
+        import streamlit as st
+        from streamlit.delta_generator import DeltaGenerator
+    except Exception:
+        return
+
+    if getattr(DeltaGenerator, "_btc_profitability_dashboard_adapter", False):
+        return
+
+    original_metric = DeltaGenerator.metric
+    original_markdown = DeltaGenerator.markdown
+
+    def metric_adapter(self, label, value, *args, **kwargs):
+        label_text = str(label or "")
+
+        if label_text.strip().lower() == "spot feed":
+            entry, side = latest_kalshi_call_entry()
+            if entry is None:
+                return original_metric(self, "Kalshi Call Entry", "N/A", *args, **kwargs)
+            side_text = f" {side}" if side else ""
+            shown = f"{entry * 100:.0f}% / {entry * 100:.0f}c{side_text}"
+            return original_metric(self, "Kalshi Call Entry", shown, *args, **kwargs)
+
+        normalized = label_text.strip().lower().replace("-", " ")
+        if normalized in {"24h quote volume", "24 h quote volume", "24h volume"}:
+            accuracy, wins, losses = lifetime_directional_accuracy()
+            shown = "N/A" if accuracy is None else f"{accuracy * 100:.1f}%"
+            help_text = kwargs.pop("help", None)
+            if help_text is None:
+                kwargs["help"] = (
+                    f"Lifetime resolved directional calls only: {wins} wins, {losses} losses. "
+                    "HOLD/WAIT remain tracked for learning but are excluded from this accuracy."
+                )
+            return original_metric(self, "Lifetime Accuracy", shown, *args, **kwargs)
+
+        return original_metric(self, label, value, *args, **kwargs)
+
+    def markdown_adapter(self, body, *args, **kwargs):
+        rendered = body
+        if isinstance(rendered, str) and _profitability_hold_active(st):
+            # Presentation only. Preserve direction while saying that a fresh
+            # buy is no longer economically justified by the engine's own gate.
+            rendered = rendered.replace(">SCALP UP<", ">HOLD SCALP UP<")
+            rendered = rendered.replace(">SCALP DOWN<", ">HOLD SCALP DOWN<")
+        return original_markdown(self, rendered, *args, **kwargs)
+
+    DeltaGenerator.metric = metric_adapter
+    DeltaGenerator.markdown = markdown_adapter
+    DeltaGenerator._btc_profitability_dashboard_adapter = True
+
+
+_install_dashboard_adapter()
