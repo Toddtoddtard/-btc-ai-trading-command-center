@@ -1,0 +1,75 @@
+name: Sync paper trader to master action
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-paper-to-master-action.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch background paper execution
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('background_paper.py')
+          s = p.read_text()
+
+          helper_anchor = '''def _projected_side_value(pending, market, side):\n'''
+          helper = '''def _resolved_master_action(pending):\n    """Return the bot's explicit master action; only fall back for legacy rows."""\n    action = str(pending.get("master_action") or pending.get("action") or "").upper().strip()\n    valid = {"SCALP UP", "SCALP DOWN", "LOCK UP", "LOCK DOWN", "WAIT", "HOLD"}\n    if action in valid:\n        return action\n    if bool(pending.get("would_wait", True)):\n        return "WAIT"\n    return "SCALP UP" if int(pending.get("predicted_direction", 0)) > 0 else "SCALP DOWN"\n\n\ndef _action_side(action):\n    action = str(action or "").upper().strip()\n    if action in {"SCALP UP", "LOCK UP"}:\n        return "YES"\n    if action in {"SCALP DOWN", "LOCK DOWN"}:\n        return "NO"\n    return None\n\n\n'''
+          if '_resolved_master_action' not in s:
+              if helper_anchor not in s:
+                  raise SystemExit('helper anchor not found')
+              s = s.replace(helper_anchor, helper + helper_anchor, 1)
+
+          old_manage = '''                signal_side = (\n                    "YES"\n                    if int(pending.get("predicted_direction", 0)) > 0\n                    else "NO"\n                )\n                projected_exit = _projected_side_value(\n                    pending, market, position["side"]\n                )\n                sees_more_upside = (\n                    not bool(pending.get("would_wait", True))\n                    and signal_side == position["side"]\n                    and projected_exit is not None\n                    and projected_exit >= bid + SCALP_MIN_REMAINING_EDGE\n                )\n                confirmed_reversal = (\n                    not bool(pending.get("would_wait", True))\n                    and signal_side != position["side"]\n                )\n'''
+          new_manage = '''                master_action = _resolved_master_action(pending)\n                signal_side = _action_side(master_action)\n                # If the master upgrades a same-side SCALP to LOCK, mirror that\n                # decision immediately. LOCK can never be downgraded or reversed.\n                if (\n                    position["strategy"] == "SCALP"\n                    and master_action.startswith("LOCK")\n                    and signal_side == position["side"]\n                ):\n                    position["strategy"] = "LOCK"\n                    position["promoted_to_lock_at"] = now\n                    paper["last_message"] = (\n                        f"Promoted PAPER position to LOCK {position['side']} {ticker}"\n                    )\n                    paper["metrics"] = _post_fix_metrics(paper)\n                    paper["gate"] = _gate(paper["metrics"])\n                    return paper\n                projected_exit = _projected_side_value(\n                    pending, market, position["side"]\n                )\n                sees_more_upside = (\n                    signal_side == position["side"]\n                    and projected_exit is not None\n                    and projected_exit >= bid + SCALP_MIN_REMAINING_EDGE\n                )\n                confirmed_reversal = (\n                    signal_side is not None\n                    and signal_side != position["side"]\n                )\n'''
+          if old_manage in s:
+              s = s.replace(old_manage, new_manage, 1)
+          elif 'master_action = _resolved_master_action(pending)' not in s:
+              raise SystemExit('manage block anchor not found')
+
+          old_entry = '''    if bool(pending.get("would_wait", True)):\n        paper["last_message"] = "No paper action: learner selected WAIT."\n        return paper\n    explicit_action = str(pending.get("master_action") or pending.get("action") or "").upper().strip()\n    if explicit_action in {"WAIT", "HOLD"}:\n        paper["last_message"] = "No paper action: learner selected WAIT."\n        return paper\n    if explicit_action in {"LOCK UP", "SCALP UP"}:\n        side = "YES"\n    elif explicit_action in {"LOCK DOWN", "SCALP DOWN"}:\n        side = "NO"\n    else:\n        side = "YES" if int(pending.get("predicted_direction", 0)) > 0 else "NO"\n'''
+          new_entry = '''    explicit_action = _resolved_master_action(pending)\n    if explicit_action in {"WAIT", "HOLD"}:\n        paper["last_message"] = "No paper action: master selected WAIT."\n        return paper\n    side = _action_side(explicit_action)\n    if side is None:\n        paper["last_message"] = "No paper action: master action is not executable."\n        return paper\n'''
+          if old_entry in s:
+              s = s.replace(old_entry, new_entry, 1)
+          elif 'explicit_action = _resolved_master_action(pending)' not in s:
+              raise SystemExit('entry block anchor not found')
+
+          p.write_text(s)
+
+          t = Path('tests/test_contract_regressions.py')
+          ts = t.read_text()
+          marker = 'def test_background_paper_follows_explicit_master_action_source():'
+          if marker not in ts:
+              ts += '''\n\n\ndef test_background_paper_follows_explicit_master_action_source():\n    from pathlib import Path\n    src = Path("background_paper.py").read_text()\n    assert "def _resolved_master_action(pending):" in src\n    assert "explicit_action = _resolved_master_action(pending)" in src\n    assert "master_action = _resolved_master_action(pending)" in src\n    assert "signal_side = _action_side(master_action)" in src\n    assert "position[\\"strategy\\"] = \\"LOCK\\"" in src\n    assert "if bool(pending.get(\\"would_wait\\", True))" not in src[src.index("metrics = _post_fix_metrics(paper)"):src.index("confidence = _f(pending.get(\\"master_confidence\\"), 0.0)")]\n'''
+              t.write_text(ts)
+          PY
+
+      - name: Run focused tests
+        run: |
+          python -m pytest -q tests/test_background_paper.py tests/test_contract_regressions.py
+
+      - name: Commit source changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add background_paper.py tests/test_contract_regressions.py
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Make paper trader mirror master actions'
+          git push origin main
