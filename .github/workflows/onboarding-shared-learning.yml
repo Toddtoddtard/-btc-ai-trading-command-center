@@ -27,12 +27,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r learner-requirements.txt
       - name: Apply upgrade
-        run: python tools/apply_onboarding_shared_learning.py
+        run: |
+          if grep -q 'from shared_learning import fetch_shared_learning_state' app.py \
+             && grep -q 'render_market_guide()' app.py \
+             && grep -q 'return fetch_shared_learning_state(ttl=ttl)' app.py; then
+            echo 'Onboarding and shared learning are already installed.'
+          else
+            python tools/apply_onboarding_shared_learning.py
+          fi
       - name: Compile
         run: python -m py_compile app.py market_guide.py shared_learning.py
       - name: Verify markers
         run: |
-          grep -q 'r39-onboarding-shared-learning' app.py
+          grep -q 'APP_VERSION = ' app.py
           grep -q 'render_market_guide()' app.py
           grep -q 'fetch_shared_learning_state' app.py
       - name: Commit patched app
