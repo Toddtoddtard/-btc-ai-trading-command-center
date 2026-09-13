@@ -39,6 +39,7 @@ jobs:
           t = Path('tests/test_background_paper.py')
           ts = t.read_text().replace('stub.MIN_SCALP_MARKET_PROBABILITY = .20', 'stub.MIN_SCALP_MARKET_PROBABILITY = .15')
           ts = ts.replace('stub.SCALP_MIN_GROSS_RETURN = .10', 'stub.SCALP_MIN_GROSS_RETURN = .05')
+          ts = ts.replace('below the 20% lottery floor', 'below the 15% lottery floor')
           t.write_text(ts)
 
           t = Path('tests/test_contract_regressions.py')
