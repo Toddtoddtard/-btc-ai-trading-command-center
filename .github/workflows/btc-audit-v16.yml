@@ -1,67 +1,26 @@
 name: BTC Full Audit v17
 
-# Immediate full audit requested 2026-09-13; includes journal grading repair.
 on:
   pull_request:
     paths:
       - 'app.py'
       - 'ai_core.py'
-      - 'council_v4.py'
-      - 'reliability_v31.py'
-      - 'specialist_knowledge_v5.py'
-      - 'historical_specialist_backtest_v7.py'
-      - 'historical_backtest.py'
+      - 'kalshi_paper_engine.py'
+      - 'background_paper.py'
       - 'learner.py'
-      - 'learner_v3.py'
-      - 'learner_v31.py'
-      - 'shared_learning.py'
-      - 'profitability_v5.py'
-      - 'bot_intelligence_dashboard.py'
-      - 'bot_intelligence_report.py'
-      - 'multi_asset_command_center.py'
-      - 'multi_asset_theme.py'
-      - 'multi_market_nav.py'
-      - 'market_command_center_shell.py'
-      - 'market_guide.py'
-      - 'political_event_monitor.py'
-      - 'political_event_watch.py'
-      - 'requirements.txt'
-      - 'learner-requirements.txt'
-      - 'pages/**'
       - 'tests/**'
       - 'tools/**'
-      - 'scripts/**'
       - '.github/workflows/btc-audit-v16.yml'
   push:
     branches: [main]
     paths:
       - 'app.py'
       - 'ai_core.py'
-      - 'council_v4.py'
-      - 'reliability_v31.py'
-      - 'specialist_knowledge_v5.py'
-      - 'historical_specialist_backtest_v7.py'
-      - 'historical_backtest.py'
+      - 'kalshi_paper_engine.py'
+      - 'background_paper.py'
       - 'learner.py'
-      - 'learner_v3.py'
-      - 'learner_v31.py'
-      - 'shared_learning.py'
-      - 'profitability_v5.py'
-      - 'bot_intelligence_dashboard.py'
-      - 'bot_intelligence_report.py'
-      - 'multi_asset_command_center.py'
-      - 'multi_asset_theme.py'
-      - 'multi_market_nav.py'
-      - 'market_command_center_shell.py'
-      - 'market_guide.py'
-      - 'political_event_monitor.py'
-      - 'political_event_watch.py'
-      - 'requirements.txt'
-      - 'learner-requirements.txt'
-      - 'pages/**'
       - 'tests/**'
       - 'tools/**'
-      - 'scripts/**'
       - '.github/workflows/btc-audit-v16.yml'
   workflow_dispatch:
 
@@ -83,38 +42,7 @@ jobs:
       - name: Apply audited BTC decision policy safely
         run: python tools/apply_btc_audit_v16.py
       - name: Repair prediction journal directional grading
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('app.py')
-          s = p.read_text(encoding='utf-8')
-          old = '''            strike = safe_float(row["target_price"])
-
-            if action in {"SCALP UP", "LOCK UP"}:
-                correct = int(resolved_price >= strike) if pd.notna(strike) else int(resolved_price > start_price)
-            elif action in {"SCALP DOWN", "LOCK DOWN"}:
-                correct = int(resolved_price < strike) if pd.notna(strike) else int(resolved_price < start_price)
-            else:
-                correct = None
-'''
-          new = '''            # Grade the prediction journal by BTC direction from the call price.
-            # Kalshi contract settlement is authoritative only in the paper ledger.
-            if action in {"SCALP UP", "LOCK UP"}:
-                correct = int(resolved_price > start_price)
-            elif action in {"SCALP DOWN", "LOCK DOWN"}:
-                correct = int(resolved_price < start_price)
-            else:
-                correct = None
-'''
-          if old in s:
-              s = s.replace(old, new, 1)
-              p.write_text(s, encoding='utf-8')
-              print('Repaired journal grading.')
-          elif 'correct = int(resolved_price > start_price)' in s and 'correct = int(resolved_price < start_price)' in s:
-              print('Journal grading already repaired.')
-          else:
-              raise SystemExit('Unexpected journal grading block; refusing blind edit.')
-          PY
+        run: python tools/fix_journal_grading_now.py
       - name: Compile every Python file
         run: python -m compileall -q .
       - name: Run regression tests
