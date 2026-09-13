@@ -145,6 +145,26 @@ def _quotes(market, side):
     return (yes_bid, yes_ask) if side == "YES" else (no_bid, no_ask)
 
 
+def _resolved_master_action(pending):
+    """Return the bot's explicit master action; only fall back for legacy rows."""
+    action = str(pending.get("master_action") or pending.get("action") or "").upper().strip()
+    valid = {"SCALP UP", "SCALP DOWN", "LOCK UP", "LOCK DOWN", "WAIT", "HOLD"}
+    if action in valid:
+        return action
+    if bool(pending.get("would_wait", True)):
+        return "WAIT"
+    return "SCALP UP" if int(pending.get("predicted_direction", 0)) > 0 else "SCALP DOWN"
+
+
+def _action_side(action):
+    action = str(action or "").upper().strip()
+    if action in {"SCALP UP", "LOCK UP"}:
+        return "YES"
+    if action in {"SCALP DOWN", "LOCK DOWN"}:
+        return "NO"
+    return None
+
+
 def _projected_side_value(pending, market, side):
     yes_bid, yes_ask = _quotes(market, "YES")
     if yes_bid is None or yes_ask is None:
@@ -694,22 +714,33 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             elif position["strategy"] == "SCALP":
                 entry_price = position["entry_price"]
                 gain = bid - entry_price
-                signal_side = (
-                    "YES"
-                    if int(pending.get("predicted_direction", 0)) > 0
-                    else "NO"
-                )
+                master_action = _resolved_master_action(pending)
+                signal_side = _action_side(master_action)
+                # If the master upgrades a same-side SCALP to LOCK, mirror that
+                # decision immediately. LOCK can never be downgraded or reversed.
+                if (
+                    position["strategy"] == "SCALP"
+                    and master_action.startswith("LOCK")
+                    and signal_side == position["side"]
+                ):
+                    position["strategy"] = "LOCK"
+                    position["promoted_to_lock_at"] = now
+                    paper["last_message"] = (
+                        f"Promoted PAPER position to LOCK {position['side']} {ticker}"
+                    )
+                    paper["metrics"] = _post_fix_metrics(paper)
+                    paper["gate"] = _gate(paper["metrics"])
+                    return paper
                 projected_exit = _projected_side_value(
                     pending, market, position["side"]
                 )
                 sees_more_upside = (
-                    not bool(pending.get("would_wait", True))
-                    and signal_side == position["side"]
+                    signal_side == position["side"]
                     and projected_exit is not None
                     and projected_exit >= bid + SCALP_MIN_REMAINING_EDGE
                 )
                 confirmed_reversal = (
-                    not bool(pending.get("would_wait", True))
+                    signal_side is not None
                     and signal_side != position["side"]
                 )
                 if (
@@ -748,19 +779,14 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     metrics = _post_fix_metrics(paper)
     gate = _gate(metrics)
     paper["metrics"], paper["gate"] = metrics, gate
-    if bool(pending.get("would_wait", True)):
-        paper["last_message"] = "No paper action: learner selected WAIT."
-        return paper
-    explicit_action = str(pending.get("master_action") or pending.get("action") or "").upper().strip()
+    explicit_action = _resolved_master_action(pending)
     if explicit_action in {"WAIT", "HOLD"}:
         paper["last_message"] = "No paper action: learner selected WAIT."
         return paper
-    if explicit_action in {"LOCK UP", "SCALP UP"}:
-        side = "YES"
-    elif explicit_action in {"LOCK DOWN", "SCALP DOWN"}:
-        side = "NO"
-    else:
-        side = "YES" if int(pending.get("predicted_direction", 0)) > 0 else "NO"
+    side = _action_side(explicit_action)
+    if side is None:
+        paper["last_message"] = "No paper action: master action is not executable."
+        return paper
     confidence = _f(pending.get("master_confidence"), 0.0)
     # LOCK is an explicit master action. 95% belongs only to the exit bid target.
     strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"

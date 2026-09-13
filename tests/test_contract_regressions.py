@@ -622,3 +622,15 @@ def test_lock_95_is_exit_target_not_entry_confidence_gate():
     assert 'strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"' not in background
     assert 'strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"' in background
     assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine_src
+
+
+
+def test_background_paper_follows_explicit_master_action_source():
+    from pathlib import Path
+    src = Path("background_paper.py").read_text()
+    assert "def _resolved_master_action(pending):" in src
+    assert "explicit_action = _resolved_master_action(pending)" in src
+    assert "master_action = _resolved_master_action(pending)" in src
+    assert "signal_side = _action_side(master_action)" in src
+    assert "position[\"strategy\"] = \"LOCK\"" in src
+    assert "if bool(pending.get(\"would_wait\", True))" not in src[src.index("metrics = _post_fix_metrics(paper)"):src.index("confidence = _f(pending.get(\"master_confidence\"), 0.0)")]
