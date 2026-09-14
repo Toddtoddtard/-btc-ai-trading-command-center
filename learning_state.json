@@ -52,14 +52,14 @@
     },
     "baseline_total_samples": 15,
     "current_post_audit": {
-      "avg_abs_error": 62.70811720316147,
-      "avg_confidence": 0.5411000750007362,
-      "avg_path_error": 49.288211245383586,
-      "direction_accuracy": 0.566003616636528,
-      "kalshi_accuracy": 0.7106690777576854,
-      "samples": 553
+      "avg_abs_error": 62.85536496458172,
+      "avg_confidence": 0.5412598506252272,
+      "avg_path_error": 49.39411500106941,
+      "direction_accuracy": 0.5667870036101083,
+      "kalshi_accuracy": 0.7111913357400722,
+      "samples": 554
     },
-    "generated_at": "2026-09-14T21:00:25.452540+00:00",
+    "generated_at": "2026-09-14T21:19:59.383220+00:00",
     "milestones": [
       25,
       50,
@@ -69,7 +69,7 @@
       1000
     ],
     "next_milestone": 1000,
-    "post_audit_live_samples": 553
+    "post_audit_live_samples": 554
   },
   "background_paper": {
     "balance_reset": {
@@ -80,15 +80,15 @@
       "reason": "CLEAN_POST_FIX_PAPER_BASELINE",
       "starting_cash": 500.0
     },
-    "cash": 512.145,
+    "cash": 530.145,
     "enabled": true,
     "gate": {
       "approved": true,
       "reason": "Kalshi safeguards satisfied",
       "status": "COLLECTING EVIDENCE"
     },
-    "last_cycle_at": "2026-09-14T21:00:25.812587+00:00",
-    "last_message": "Opened PAPER SCALP DOWN \u2022 Amount: $10.22 \u2022 Kalshi entry: 55%",
+    "last_cycle_at": "2026-09-14T21:19:59.647517+00:00",
+    "last_message": "Settled PAPER SCALP NO @ 100% | P/L $+7.78",
     "last_signal": {
       "at": "2026-09-14T21:00:25.812587+00:00",
       "confidence": 0.6296157709687067,
@@ -104,34 +104,20 @@
     "last_signal_message": "Opened PAPER SCALP DOWN \u2022 Amount: $10.22 \u2022 Kalshi entry: 55%",
     "legacy_realized_pnl": 0.0,
     "metrics": {
-      "expectancy": 2.7956250000000002,
-      "fees": 2.23,
+      "expectancy": 3.3494444444444444,
+      "fees": 2.55,
       "gate_sample_target": 50,
       "losses": 2,
-      "markets": 8,
+      "markets": 9,
       "max_drawdown_pct": 0.038449624409509824,
-      "profit_factor": 2.126132930513595,
-      "samples": 8,
-      "total_pnl": 22.365000000000002,
+      "profit_factor": 2.5178751258811682,
+      "samples": 9,
+      "total_pnl": 30.145,
       "validation_sample_target": 100,
-      "win_rate": 0.75,
-      "wins": 6
+      "win_rate": 0.7777777777777778,
+      "wins": 7
     },
-    "open_position": {
-      "amount": 10.22,
-      "contracts": 18,
-      "direction": "DOWN",
-      "entry_fee": 0.32,
-      "entry_price": 0.55,
-      "expires_at": 1789420500.0,
-      "last_mark": 0.54,
-      "opened_at": 1789419625.8125875,
-      "side": "NO",
-      "spot_entry_price": 79092.13,
-      "status": "OPEN",
-      "strategy": "SCALP",
-      "ticker": "KXBTC15M-26SEP141715-15"
-    },
+    "open_position": null,
     "paper_only": true,
     "pending_settlements": [],
     "rearm": {
@@ -143,7 +129,8 @@
       "KXBTC15M-26SEP120300-00:YES": false,
       "KXBTC15M-26SEP131000-00:YES": false,
       "KXBTC15M-26SEP132230-30:YES": false,
-      "KXBTC15M-26SEP141330-30:YES": false
+      "KXBTC15M-26SEP141330-30:YES": false,
+      "KXBTC15M-26SEP141715-15:NO": false
     },
     "signal_attempts": [
       {
@@ -1258,6 +1245,28 @@
         "status": "CLOSED",
         "strategy": "SCALP",
         "ticker": "KXBTC15M-26SEP141330-30"
+      },
+      {
+        "amount": 10.22,
+        "closed_at": 1789420799.6475167,
+        "contracts": 18,
+        "direction": "DOWN",
+        "entry_fee": 0.32,
+        "entry_price": 0.55,
+        "exit_fee": 0.0,
+        "exit_price": 1.0,
+        "exit_reason": "OFFICIAL_SETTLEMENT:no",
+        "expires_at": 1789420500.0,
+        "last_mark": 0.54,
+        "opened_at": 1789419625.8125875,
+        "pnl": 7.779999999999999,
+        "result": "WIN",
+        "settled_at": 1789420799.6475167,
+        "side": "NO",
+        "spot_entry_price": 79092.13,
+        "status": "CLOSED",
+        "strategy": "SCALP",
+        "ticker": "KXBTC15M-26SEP141715-15"
       }
     ],
     "version": 1,
@@ -1265,54 +1274,41 @@
   },
   "bot_intelligence_v4": {
     "evaluated_snapshots": 499,
-    "generated_at": "2026-09-14T21:00:24.366317+00:00",
+    "generated_at": "2026-09-14T21:19:58.574223+00:00",
     "minimum_samples_for_verdict": 12,
     "ranking": [
       {
-        "avg_abs_score": 0.21225967138165017,
-        "contribution_score": 0.006913827655310626,
-        "full_council_accuracy": 0.40681362725450904,
+        "avg_abs_score": 0.3829275298503398,
+        "contribution_score": 0.003006012024048099,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.02004008016032064,
+        "marginal_accuracy": 0.004008016032064132,
+        "name": "Kalshi Context AI",
+        "samples": 499,
+        "standalone_accuracy": 0.47780126849894294,
+        "unique_save_rate": 0.02404809619238477,
+        "verdict": "USEFUL",
+        "without_bot_accuracy": 0.40080160320641284
+      },
+      {
+        "avg_abs_score": 0.2122599326967017,
+        "contribution_score": 0.0009018036072144294,
+        "full_council_accuracy": 0.40480961923847697,
         "harmful_flip_rate": 0.014028056112224449,
-        "marginal_accuracy": 0.006012024048096198,
+        "marginal_accuracy": 0.002004008016032066,
         "name": "Trend AI",
         "samples": 499,
         "standalone_accuracy": 0.4895591647331787,
-        "unique_save_rate": 0.02004008016032064,
+        "unique_save_rate": 0.01603206412825651,
         "verdict": "USEFUL",
-        "without_bot_accuracy": 0.40080160320641284
+        "without_bot_accuracy": 0.4028056112224449
       },
       {
-        "avg_abs_score": 0.3840633351597578,
-        "contribution_score": 0.006012024048096198,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.02004008016032064,
-        "marginal_accuracy": 0.006012024048096198,
-        "name": "Kalshi Context AI",
-        "samples": 499,
-        "standalone_accuracy": 0.47890295358649787,
-        "unique_save_rate": 0.026052104208416832,
-        "verdict": "USEFUL",
-        "without_bot_accuracy": 0.40080160320641284
-      },
-      {
-        "avg_abs_score": 0.07667397891989657,
-        "contribution_score": 0.005067567567567589,
-        "full_council_accuracy": 0.42905405405405406,
-        "harmful_flip_rate": 0.0,
-        "marginal_accuracy": 0.0033783783783783994,
-        "name": "Cross-Market Research AI",
-        "samples": 296,
-        "standalone_accuracy": 0.4497354497354497,
-        "unique_save_rate": 0.0033783783783783786,
-        "verdict": "REDUNDANT",
-        "without_bot_accuracy": 0.42567567567567566
-      },
-      {
-        "avg_abs_score": 0.26640764658339217,
-        "contribution_score": 0.0036072144288577194,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.01603206412825651,
-        "marginal_accuracy": 0.004008016032064132,
+        "avg_abs_score": 0.26578034791439425,
+        "contribution_score": 0.00030060120240481096,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.018036072144288578,
+        "marginal_accuracy": 0.002004008016032066,
         "name": "Volume AI",
         "samples": 499,
         "standalone_accuracy": 0.47815533980582525,
@@ -1321,11 +1317,37 @@
         "without_bot_accuracy": 0.4028056112224449
       },
       {
-        "avg_abs_score": 0.007416634490899151,
-        "contribution_score": 0.0030060120240480983,
-        "full_council_accuracy": 0.40681362725450904,
+        "avg_abs_score": 0.0,
+        "contribution_score": 0.0,
+        "full_council_accuracy": 0.40480961923847697,
         "harmful_flip_rate": 0.0,
-        "marginal_accuracy": 0.002004008016032066,
+        "marginal_accuracy": 0.0,
+        "name": "Political Event Watch AI",
+        "samples": 499,
+        "standalone_accuracy": null,
+        "unique_save_rate": 0.0,
+        "verdict": "REDUNDANT",
+        "without_bot_accuracy": 0.40480961923847697
+      },
+      {
+        "avg_abs_score": 0.07737289181996673,
+        "contribution_score": 0.0,
+        "full_council_accuracy": 0.43097643097643096,
+        "harmful_flip_rate": 0.0,
+        "marginal_accuracy": 0.0,
+        "name": "Cross-Market Research AI",
+        "samples": 297,
+        "standalone_accuracy": 0.45263157894736844,
+        "unique_save_rate": 0.0,
+        "verdict": "REDUNDANT",
+        "without_bot_accuracy": 0.43097643097643096
+      },
+      {
+        "avg_abs_score": 0.007416634490899151,
+        "contribution_score": -0.00030060120240480966,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.002004008016032064,
+        "marginal_accuracy": 0.0,
         "name": "Derivatives AI",
         "samples": 499,
         "standalone_accuracy": 0.5,
@@ -1335,10 +1357,10 @@
       },
       {
         "avg_abs_score": 0.008745602782738397,
-        "contribution_score": 0.0030060120240480983,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.0,
-        "marginal_accuracy": 0.002004008016032066,
+        "contribution_score": -0.00030060120240480966,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.002004008016032064,
+        "marginal_accuracy": 0.0,
         "name": "Liquidity AI",
         "samples": 499,
         "standalone_accuracy": 0.5,
@@ -1347,63 +1369,37 @@
         "without_bot_accuracy": 0.40480961923847697
       },
       {
-        "avg_abs_score": 0.24496605402858976,
-        "contribution_score": 0.0018036072144288597,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.008016032064128256,
-        "marginal_accuracy": 0.002004008016032066,
-        "name": "Momentum AI",
-        "samples": 499,
-        "standalone_accuracy": 0.4557522123893805,
-        "unique_save_rate": 0.01002004008016032,
-        "verdict": "USEFUL",
-        "without_bot_accuracy": 0.40480961923847697
-      },
-      {
-        "avg_abs_score": 0.21257972027778285,
-        "contribution_score": 0.0006012024048096219,
-        "full_council_accuracy": 0.40681362725450904,
+        "avg_abs_score": 0.21241322004373178,
+        "contribution_score": -0.0024048096192384773,
+        "full_council_accuracy": 0.40480961923847697,
         "harmful_flip_rate": 0.01603206412825651,
-        "marginal_accuracy": 0.002004008016032066,
+        "marginal_accuracy": 0.0,
         "name": "Market Regime AI",
         "samples": 499,
         "standalone_accuracy": 0.5,
-        "unique_save_rate": 0.018036072144288578,
+        "unique_save_rate": 0.01603206412825651,
         "verdict": "USEFUL",
         "without_bot_accuracy": 0.40480961923847697
       },
       {
         "avg_abs_score": 0.2515043132903506,
-        "contribution_score": 0.00030060120240481096,
-        "full_council_accuracy": 0.40681362725450904,
+        "contribution_score": -0.0027054108216432865,
+        "full_council_accuracy": 0.40480961923847697,
         "harmful_flip_rate": 0.018036072144288578,
-        "marginal_accuracy": 0.002004008016032066,
+        "marginal_accuracy": 0.0,
         "name": "Volatility AI",
         "samples": 499,
         "standalone_accuracy": 0.4789579158316633,
-        "unique_save_rate": 0.02004008016032064,
+        "unique_save_rate": 0.018036072144288578,
         "verdict": "USEFUL",
         "without_bot_accuracy": 0.40480961923847697
       },
       {
-        "avg_abs_score": 0.0,
-        "contribution_score": 0.0,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.0,
-        "marginal_accuracy": 0.0,
-        "name": "Political Event Watch AI",
-        "samples": 499,
-        "standalone_accuracy": null,
-        "unique_save_rate": 0.0,
-        "verdict": "REDUNDANT",
-        "without_bot_accuracy": 0.40681362725450904
-      },
-      {
-        "avg_abs_score": 0.09615613241852192,
-        "contribution_score": -0.00030060120240480966,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.002004008016032064,
-        "marginal_accuracy": 0.0,
+        "avg_abs_score": 0.09633032262926614,
+        "contribution_score": -0.0036072144288577176,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.004008016032064128,
+        "marginal_accuracy": -0.002004008016032066,
         "name": "Historical Pattern AI",
         "samples": 499,
         "standalone_accuracy": 0.45054945054945056,
@@ -1412,11 +1408,24 @@
         "without_bot_accuracy": 0.40681362725450904
       },
       {
-        "avg_abs_score": 0.41756945923184247,
-        "contribution_score": -0.003907815631262527,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.026052104208416832,
-        "marginal_accuracy": 0.0,
+        "avg_abs_score": 0.24549035152506155,
+        "contribution_score": -0.004509018036072146,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.01002004008016032,
+        "marginal_accuracy": -0.002004008016032066,
+        "name": "Momentum AI",
+        "samples": 499,
+        "standalone_accuracy": 0.4557522123893805,
+        "unique_save_rate": 0.008016032064128256,
+        "verdict": "REDUNDANT",
+        "without_bot_accuracy": 0.40681362725450904
+      },
+      {
+        "avg_abs_score": 0.41680412691225166,
+        "contribution_score": -0.007214428857715435,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.028056112224448898,
+        "marginal_accuracy": -0.002004008016032066,
         "name": "Pattern AI",
         "samples": 499,
         "standalone_accuracy": 0.47980997624703087,
@@ -1425,11 +1434,11 @@
         "without_bot_accuracy": 0.40681362725450904
       },
       {
-        "avg_abs_score": 0.37276545025406804,
-        "contribution_score": -0.0153306613226453,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.022044088176352707,
-        "marginal_accuracy": -0.008016032064128265,
+        "avg_abs_score": 0.37225271649612984,
+        "contribution_score": -0.018637274549098207,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.02404809619238477,
+        "marginal_accuracy": -0.01002004008016033,
         "name": "Support/Resistance AI",
         "samples": 499,
         "standalone_accuracy": 0.5145833333333333,
@@ -1438,46 +1447,46 @@
         "without_bot_accuracy": 0.4148296593186373
       },
       {
-        "avg_abs_score": 0.4235643531646606,
-        "contribution_score": -0.022845691382765487,
-        "full_council_accuracy": 0.40681362725450904,
+        "avg_abs_score": 0.4238281378675329,
+        "contribution_score": -0.025851703406813586,
+        "full_council_accuracy": 0.40480961923847697,
         "harmful_flip_rate": 0.03206412825651302,
-        "marginal_accuracy": -0.012024048096192341,
+        "marginal_accuracy": -0.014028056112224407,
         "name": "FVG / MACD AI",
         "samples": 499,
         "standalone_accuracy": 0.4435483870967742,
-        "unique_save_rate": 0.02004008016032064,
+        "unique_save_rate": 0.018036072144288578,
         "verdict": "HURTING COUNCIL",
         "without_bot_accuracy": 0.4188376753507014
       },
       {
-        "avg_abs_score": 0.42558643942358254,
-        "contribution_score": -0.0508016032064128,
-        "full_council_accuracy": 0.40681362725450904,
-        "harmful_flip_rate": 0.05811623246492986,
-        "marginal_accuracy": -0.02805611222444887,
+        "avg_abs_score": 0.427150478905335,
+        "contribution_score": -0.057414829659318614,
+        "full_council_accuracy": 0.40480961923847697,
+        "harmful_flip_rate": 0.06212424849699399,
+        "marginal_accuracy": -0.032064128256513,
         "name": "Whale AI",
         "samples": 499,
-        "standalone_accuracy": 0.45322245322245325,
+        "standalone_accuracy": 0.4553014553014553,
         "unique_save_rate": 0.03006012024048096,
         "verdict": "HURTING COUNCIL",
-        "without_bot_accuracy": 0.4348697394789579
+        "without_bot_accuracy": 0.43687374749499
       }
     ],
     "version": 4
   },
   "champion_challenger": {
     "best_challenger": {
-      "accuracy": 0.37037037037037035,
-      "median_error": 76.50481269138982,
+      "accuracy": 0.3333333333333333,
+      "median_error": 138.92063822261116,
       "samples": 27
     },
     "champion": {
       "accuracy": 0.3333333333333333,
-      "median_error": 70.80560086329933,
+      "median_error": 139.59299596538767,
       "samples": 27
     },
-    "evaluated_at": "2026-09-14T21:00:18.027944+00:00",
+    "evaluated_at": "2026-09-14T21:19:54.122288+00:00",
     "max_error_multiplier": 1.1,
     "minimum_margin": 0.05,
     "minimum_samples": 20,
@@ -1486,31 +1495,31 @@
     "required_streak": 3
   },
   "confidence_model": {
-    "brier_ewma": 0.27299287087444196,
-    "last_base_score": -0.248423689824386,
-    "last_confidence": 0.5642393067798688,
+    "brier_ewma": 0.2594082845334894,
+    "last_base_score": -0.278860104526741,
+    "last_confidence": 0.6296663565581488,
     "last_correct": 1,
-    "samples": 568
+    "samples": 569
   },
   "data_quality": {},
   "forecast": {
-    "avg_abs_error": 63.02420511757567,
-    "avg_path_error": 49.60454204474866,
-    "bias": 0.00023467750265497098,
-    "direction_hits": 319,
+    "avg_abs_error": 63.16701561302804,
+    "avg_path_error": 49.70709801988149,
+    "bias": 0.00021716475619729277,
+    "direction_hits": 320,
     "ewma_brier": 0.25,
-    "ewma_direction_accuracy": 0.6769450206464389,
-    "kalshi_hits": 403,
-    "kalshi_samples": 568,
+    "ewma_direction_accuracy": 0.7027798505197376,
+    "kalshi_hits": 404,
+    "kalshi_samples": 569,
     "learning_rate": 0.08,
-    "momentum_scale": 0.6144401559350239,
-    "robust_abs_error": 66.09540547757322,
-    "robust_path_error": 51.50086392487046,
-    "samples": 568,
+    "momentum_scale": 0.6393749461693725,
+    "robust_abs_error": 66.11541873826573,
+    "robust_path_error": 51.87367312195216,
+    "samples": 569,
     "target_influence": 0.18,
-    "w_ret15": 0.1786968457169182,
-    "w_ret3": 0.48305137751993943,
-    "w_ret8": 0.3382517767631423
+    "w_ret15": 0.1791283807806079,
+    "w_ret3": 0.482600269538923,
+    "w_ret8": 0.33827134968046907
   },
   "historical_specialist_knowledge_v7": {
     "actual_coverage_years": 9.040110717917244,
@@ -13147,6 +13156,28 @@
       "time_reward": 1.0352139812045626,
       "wait_cf_counted": true,
       "would_wait": false
+    },
+    {
+      "abs_error": 144.2833770299767,
+      "direction_correct": 1,
+      "earliness": 0.9803664906819661,
+      "expires_at": 1789420500.0,
+      "kalshi_correct": 1,
+      "kalshi_result": "no",
+      "lead_seconds": 882.3298416137695,
+      "master_base_score": -0.2787113233813228,
+      "master_confidence": 0.6296157709687067,
+      "paper_truth_repaired": true,
+      "path_error": 107.95889189532997,
+      "realized_return": -0.002543489472340621,
+      "regime": "LOW_VOL_RANGE",
+      "reward_correction": "OFFICIAL_KALSHI_PAPER_WIN",
+      "reward_magnitude": 1.9803664906819662,
+      "snapshot_available": true,
+      "ticker": "KXBTC15M-26SEP141715-15",
+      "time_reward": 1.9803664906819662,
+      "wait_cf_counted": true,
+      "would_wait": false
     }
   ],
   "official_pending": [],
@@ -13155,149 +13186,149 @@
       "exact_expiry_required": true,
       "spot_history_rows": 500
     },
-    "expires_at": 1789420500.0,
+    "expires_at": 1789421400.0,
     "forecast_path": [
       {
-        "close": 79098.80629495859,
-        "high": 79105.14895762525,
-        "low": 79085.78733733334,
-        "open": 79092.13,
+        "close": 78934.26862985644,
+        "high": 78945.27835652311,
+        "low": 78910.14027333332,
+        "open": 78921.15,
         "step": 1
       },
       {
-        "close": 79092.06300621538,
-        "high": 79105.33148029192,
-        "low": 79085.53782088205,
-        "open": 79098.80629495859,
+        "close": 78926.86821014696,
+        "high": 78945.59518318977,
+        "low": 78915.54165681363,
+        "open": 78934.26862985644,
         "step": 2
       },
       {
-        "close": 79080.37466389539,
-        "high": 79098.77071421538,
-        "low": 79073.66695589539,
-        "open": 79092.06300621538,
+        "close": 78913.23209312443,
+        "high": 78938.51159014695,
+        "low": 78901.58871312444,
+        "open": 78926.86821014696,
         "step": 3
       },
       {
-        "close": 79075.2755570988,
-        "high": 79087.26489456206,
-        "low": 79068.38532643212,
-        "open": 79080.37466389539,
+        "close": 78912.95482473957,
+        "high": 78925.1922997911,
+        "low": 78900.9946180729,
+        "open": 78913.23209312443,
         "step": 4
       },
       {
-        "close": 79077.39073253838,
-        "high": 79084.4634858717,
-        "low": 79068.20280376547,
-        "open": 79075.2755570988,
+        "close": 78926.69445957702,
+        "high": 78938.97149291035,
+        "low": 78900.67779140624,
+        "open": 78912.95482473957,
         "step": 5
       },
       {
-        "close": 79076.3697733768,
-        "high": 79084.64600853837,
-        "low": 79069.11449737681,
-        "open": 79077.39073253838,
+        "close": 78936.05761277433,
+        "high": 78948.65147277432,
+        "low": 78914.10059957702,
+        "open": 78926.69445957702,
         "step": 6
       },
       {
-        "close": 79067.2697003772,
-        "high": 79083.80757204347,
-        "low": 79059.83190171054,
-        "open": 79076.3697733768,
+        "close": 78932.037242883,
+        "high": 78948.968299441,
+        "low": 78919.12655621633,
+        "open": 78936.05761277433,
         "step": 7
       },
       {
-        "close": 79057.84688308816,
-        "high": 79074.89002171054,
-        "low": 79050.22656175483,
-        "open": 79067.2697003772,
+        "close": 78927.6701039898,
+        "high": 78945.26475621633,
+        "low": 78914.44259065647,
+        "open": 78932.037242883,
         "step": 8
       },
       {
-        "close": 79055.73784779535,
-        "high": 79065.64972708817,
-        "low": 79047.93500379534,
-        "open": 79057.84688308816,
+        "close": 78935.7849237362,
+        "high": 78949.32926373619,
+        "low": 78914.12576398981,
+        "open": 78927.6701039898,
         "step": 9
       },
       {
-        "close": 79056.0585956347,
-        "high": 79064.04396230137,
-        "low": 79047.75248112869,
-        "open": 79055.73784779535,
+        "close": 78947.47704003991,
+        "high": 78961.33820670658,
+        "low": 78921.92375706953,
+        "open": 78935.7849237362,
         "step": 10
       },
       {
-        "close": 79049.18351408385,
-        "high": 79064.22648496804,
-        "low": 79041.01562475052,
-        "open": 79056.0585956347,
+        "close": 78945.61119854514,
+        "high": 78961.65503337324,
+        "low": 78931.43320521181,
+        "open": 78947.47704003991,
         "step": 11
       },
       {
-        "close": 79036.63560866067,
-        "high": 79057.53392608385,
-        "low": 79028.28519666067,
-        "open": 79049.18351408385,
+        "close": 78932.40414953287,
+        "high": 78960.10601854514,
+        "low": 78917.90932953288,
+        "open": 78945.61119854514,
         "step": 12
       },
       {
-        "close": 79030.00006245013,
-        "high": 79045.16854332734,
-        "low": 79021.46712778346,
-        "open": 79036.63560866067,
+        "close": 78927.53878179828,
+        "high": 78947.21579619954,
+        "low": 78912.72713513162,
+        "open": 78932.40414953287,
         "step": 13
       },
       {
-        "close": 79034.07338527478,
-        "high": 79042.78884260812,
-        "low": 79021.28460511679,
-        "open": 79030.00006245013,
+        "close": 78938.91406293878,
+        "high": 78954.04253627211,
+        "low": 78912.41030846495,
+        "open": 78927.53878179828,
         "step": 14
       },
       {
-        "close": 79040.10775298178,
-        "high": 79049.00573298178,
-        "low": 79025.17540527479,
-        "open": 79034.07338527478,
+        "close": 78950.91842203055,
+        "high": 78966.36372203055,
+        "low": 78923.46876293878,
+        "open": 78938.91406293878,
         "step": 15
       }
     ],
-    "master_action": "SCALP DOWN",
-    "master_base_score": -0.2787113233813228,
-    "master_confidence": 0.6296157709687067,
-    "opened_at": 1789419617.6701584,
-    "predicted_direction": -1,
-    "predicted_end": 79035.24337702998,
-    "regime": "LOW_VOL_RANGE",
-    "ret15": -0.002923200680348792,
-    "ret3": -0.0005125568207020592,
-    "ret8": -0.001891295020317485,
+    "master_action": "WAIT",
+    "master_base_score": -0.11350106231625558,
+    "master_confidence": 0.5309158046941077,
+    "opened_at": 1789420793.8812144,
+    "predicted_direction": 1,
+    "predicted_end": 78942.47473639758,
+    "regime": "TREND_DOWN",
+    "ret15": 0.0001155717322187666,
+    "ret3": 0.0006159302277075618,
+    "ret8": 0.0001155717322187666,
     "snapshot": {
-      "master_base_score": -0.2787113233813228,
-      "master_confidence": 0.6296157709687067,
-      "regime": "LOW_VOL_RANGE",
+      "master_base_score": -0.11350106231625558,
+      "master_confidence": 0.5309158046941077,
+      "regime": "TREND_DOWN",
       "specialists": {
         "Combination AI": {
-          "confidence": 0.5752482199775572,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "Cross-specialist directional agreement 54%",
+          "confidence": 0.519963130700158,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "Cross-specialist directional agreement 38%",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Combination AI",
-          "reason": "Cross-specialist directional agreement 54%",
-          "score": -0.1984337916199107,
-          "signal": "BEARISH"
+          "reason": "Cross-specialist directional agreement 38%",
+          "score": -0.08325652229199583,
+          "signal": "NEUTRAL"
         },
         "Cross-Market Research AI": {
-          "confidence": 0.60527533307222,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "Independent 5m confirmation; Coinbase -0.179%, Kraken -0.215%",
+          "confidence": 0.5430396077398294,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "Independent 5m confirmation; Coinbase -0.006%, Kraken -0.120%",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Cross-Market Research AI",
-          "reason": "Independent 5m confirmation; Coinbase -0.179%, Kraken -0.215%",
+          "reason": "Independent 5m confirmation; Coinbase -0.006%, Kraken -0.120%",
           "research_status": "ACTIVE",
-          "score": -0.2842511102407335,
-          "signal": "BEARISH",
+          "score": -0.07679869246609793,
+          "signal": "NEUTRAL",
           "source_health": {
             "coinbase": "OK",
             "kraken": "OK"
@@ -13314,34 +13345,34 @@
           "signal": "NEUTRAL"
         },
         "FVG / MACD AI": {
-          "confidence": 0.7541952831102778,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "bearish FVG resistance $79,104-$79,130; age 1m; MACD bearish histogram; histogram -19.99; FVG score -0.61; MACD score -0.52",
+          "confidence": 0.7142694504850851,
+          "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+          "evidence": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "FVG / MACD AI",
-          "reason": "bearish FVG resistance $79,104-$79,130; age 1m; MACD bearish histogram; histogram -19.99; FVG score -0.61; MACD score -0.52",
-          "score": -0.5712401731464122,
-          "signal": "BEARISH"
+          "reason": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "score": 0.4880613551772605,
+          "signal": "BULLISH"
         },
         "Historical Pattern AI": {
-          "confidence": 0.5680059362376697,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "Multi-horizon move: 3m -0.051%, 15m -0.292%, 1h +0.137%",
+          "confidence": 0.5081618959895648,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "Multi-horizon move: 3m +0.062%, 15m +0.012%, 1h -0.588%",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Historical Pattern AI",
-          "reason": "Multi-horizon move: 3m -0.051%, 15m -0.292%, 1h +0.137%",
-          "score": -0.18334570049514518,
-          "signal": "BEARISH"
+          "reason": "Multi-horizon move: 3m +0.062%, 15m +0.012%, 1h -0.588%",
+          "score": -0.058670616644926815,
+          "signal": "NEUTRAL"
         },
         "Kalshi Context AI": {
-          "confidence": 0.48132912368399045,
-          "counterargument": "Aggressor flow -54.6%; large-trade flow -100.0%; large trades 4; evidence 75%",
-          "evidence": "Kalshi target $79,093.33; BTC -1.20 (-0.002%) vs target; UP market ~50.5%",
+          "confidence": 0.5872474517667318,
+          "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+          "evidence": "Kalshi target $78,878.65; BTC +42.50 (+0.054%) vs target; UP market ~61.5%",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Kalshi Context AI",
-          "reason": "Kalshi target $79,093.33; BTC -1.20 (-0.002%) vs target; UP market ~50.5%",
-          "score": 0.0027690076749801065,
-          "signal": "NEUTRAL"
+          "reason": "Kalshi target $78,878.65; BTC +42.50 (+0.054%) vs target; UP market ~61.5%",
+          "score": 0.22343219118069113,
+          "signal": "BULLISH"
         },
         "Liquidity AI": {
           "confidence": 0.48,
@@ -13354,33 +13385,33 @@
           "signal": "NEUTRAL"
         },
         "Market Regime AI": {
-          "confidence": 0.4955358087026691,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "Short regime -0.40; higher-timeframe regime +0.33; conflicting timeframes",
+          "confidence": 0.6856640914256822,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "Short regime -0.61; higher-timeframe regime -0.20; timeframes aligned/neutral",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Market Regime AI",
-          "reason": "Short regime -0.40; higher-timeframe regime +0.33; conflicting timeframes",
-          "score": -0.0323662681305607,
-          "signal": "NEUTRAL"
-        },
-        "Momentum AI": {
-          "confidence": 0.7877634099480564,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "RSI 27.4; MACD spread -19.99",
-          "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
-          "name": "Momentum AI",
-          "reason": "RSI 27.4; MACD spread -19.99",
-          "score": -0.6411737707251176,
+          "reason": "Short regime -0.61; higher-timeframe regime -0.20; timeframes aligned/neutral",
+          "score": -0.4284668571368381,
           "signal": "BEARISH"
         },
+        "Momentum AI": {
+          "confidence": 0.5097190226352291,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "RSI 41.0; MACD spread 8.99",
+          "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+          "name": "Momentum AI",
+          "reason": "RSI 41.0; MACD spread 8.99",
+          "score": -0.061914630490060685,
+          "signal": "NEUTRAL"
+        },
         "Pattern AI": {
-          "confidence": 0.5604990313831444,
-          "counterargument": "Support $78,979; resistance $79,600",
+          "confidence": 0.6029249999999954,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
           "evidence": "Candle body/engulfing structure",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Pattern AI",
           "reason": "Candle body/engulfing structure",
-          "score": -0.16770631538155095,
+          "score": -0.2560937499999905,
           "signal": "BEARISH"
         },
         "Political Event Watch AI": {
@@ -13397,81 +13428,81 @@
           "signal": "NEUTRAL"
         },
         "Support/Resistance AI": {
-          "confidence": 0.693190010298654,
-          "counterargument": "Aggressor flow -54.6%; large-trade flow -100.0%; large trades 4; evidence 75%",
-          "evidence": "Support $78,979; resistance $79,600",
+          "confidence": 0.6879023285205085,
+          "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+          "evidence": "Support $78,761; resistance $79,600",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Support/Resistance AI",
-          "reason": "Support $78,979; resistance $79,600",
-          "score": 0.44414585478886265,
+          "reason": "Support $78,761; resistance $79,600",
+          "score": 0.4331298510843927,
           "signal": "BULLISH"
         },
         "Trend AI": {
-          "confidence": 0.5406933089023247,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "EMA9 79156, EMA21 79227, EMA50 79257, EMA200 79108; 1h +0.22; 4h +0.34; short/long conflict damped",
+          "confidence": 0.7235694784875486,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "EMA9 78911, EMA21 78969, EMA50 79080, EMA200 79076; 1h -0.75; 4h +0.09; short/long aligned",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Trend AI",
-          "reason": "EMA9 79156, EMA21 79227, EMA50 79257, EMA200 79108; 1h +0.22; 4h +0.34; short/long conflict damped",
-          "score": -0.12644439354650994,
+          "reason": "EMA9 78911, EMA21 78969, EMA50 79080, EMA200 79076; 1h -0.75; 4h +0.09; short/long aligned",
+          "score": -0.5074364135157262,
           "signal": "BEARISH"
         },
         "Volatility AI": {
           "confidence": 0.6,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "ATR 0.041% of price; BB stretch -1.54",
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "ATR 0.057% of price; BB stretch -0.20",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Volatility AI",
-          "reason": "ATR 0.041% of price; BB stretch -1.54",
+          "reason": "ATR 0.057% of price; BB stretch -0.20",
           "score": -0.25,
           "signal": "BEARISH"
         },
         "Volume AI": {
-          "confidence": 0.4978802532673623,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "Volume z-score -0.09",
+          "confidence": 0.48575500057768395,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "Volume z-score -0.03",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Volume AI",
-          "reason": "Volume z-score -0.09",
-          "score": -0.03725052764033813,
+          "reason": "Volume z-score -0.03",
+          "score": -0.011989584536841548,
           "signal": "NEUTRAL"
         },
         "Whale AI": {
-          "confidence": 0.8879999999999999,
-          "counterargument": "Support $78,979; resistance $79,600",
-          "evidence": "Aggressor flow -54.6%; large-trade flow -100.0%; large trades 4; evidence 75%",
+          "confidence": 0.7971727329997762,
+          "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+          "evidence": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
           "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
           "name": "Whale AI",
-          "reason": "Aggressor flow -54.6%; large-trade flow -100.0%; large trades 4; evidence 75%",
-          "score": -0.85,
+          "reason": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+          "score": -0.6607765270828672,
           "signal": "BEARISH"
         }
       },
-      "start_price": 79092.13,
-      "target": 79093.33,
-      "would_wait": false
+      "start_price": 78921.15,
+      "target": 78878.65,
+      "would_wait": true
     },
     "specialists": {
       "Combination AI": {
-        "confidence": 0.5752482199775572,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "Cross-specialist directional agreement 54%",
+        "confidence": 0.519963130700158,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "Cross-specialist directional agreement 38%",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Combination AI",
-        "reason": "Cross-specialist directional agreement 54%",
-        "score": -0.1984337916199107,
-        "signal": "BEARISH"
+        "reason": "Cross-specialist directional agreement 38%",
+        "score": -0.08325652229199583,
+        "signal": "NEUTRAL"
       },
       "Cross-Market Research AI": {
-        "confidence": 0.60527533307222,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "Independent 5m confirmation; Coinbase -0.179%, Kraken -0.215%",
+        "confidence": 0.5430396077398294,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "Independent 5m confirmation; Coinbase -0.006%, Kraken -0.120%",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Cross-Market Research AI",
-        "reason": "Independent 5m confirmation; Coinbase -0.179%, Kraken -0.215%",
+        "reason": "Independent 5m confirmation; Coinbase -0.006%, Kraken -0.120%",
         "research_status": "ACTIVE",
-        "score": -0.2842511102407335,
-        "signal": "BEARISH",
+        "score": -0.07679869246609793,
+        "signal": "NEUTRAL",
         "source_health": {
           "coinbase": "OK",
           "kraken": "OK"
@@ -13488,34 +13519,34 @@
         "signal": "NEUTRAL"
       },
       "FVG / MACD AI": {
-        "confidence": 0.7541952831102778,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "bearish FVG resistance $79,104-$79,130; age 1m; MACD bearish histogram; histogram -19.99; FVG score -0.61; MACD score -0.52",
+        "confidence": 0.7142694504850851,
+        "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+        "evidence": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "FVG / MACD AI",
-        "reason": "bearish FVG resistance $79,104-$79,130; age 1m; MACD bearish histogram; histogram -19.99; FVG score -0.61; MACD score -0.52",
-        "score": -0.5712401731464122,
-        "signal": "BEARISH"
+        "reason": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "score": 0.4880613551772605,
+        "signal": "BULLISH"
       },
       "Historical Pattern AI": {
-        "confidence": 0.5680059362376697,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "Multi-horizon move: 3m -0.051%, 15m -0.292%, 1h +0.137%",
+        "confidence": 0.5081618959895648,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "Multi-horizon move: 3m +0.062%, 15m +0.012%, 1h -0.588%",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Historical Pattern AI",
-        "reason": "Multi-horizon move: 3m -0.051%, 15m -0.292%, 1h +0.137%",
-        "score": -0.18334570049514518,
-        "signal": "BEARISH"
+        "reason": "Multi-horizon move: 3m +0.062%, 15m +0.012%, 1h -0.588%",
+        "score": -0.058670616644926815,
+        "signal": "NEUTRAL"
       },
       "Kalshi Context AI": {
-        "confidence": 0.48132912368399045,
-        "counterargument": "Aggressor flow -54.6%; large-trade flow -100.0%; large trades 4; evidence 75%",
-        "evidence": "Kalshi target $79,093.33; BTC -1.20 (-0.002%) vs target; UP market ~50.5%",
+        "confidence": 0.5872474517667318,
+        "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+        "evidence": "Kalshi target $78,878.65; BTC +42.50 (+0.054%) vs target; UP market ~61.5%",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Kalshi Context AI",
-        "reason": "Kalshi target $79,093.33; BTC -1.20 (-0.002%) vs target; UP market ~50.5%",
-        "score": 0.0027690076749801065,
-        "signal": "NEUTRAL"
+        "reason": "Kalshi target $78,878.65; BTC +42.50 (+0.054%) vs target; UP market ~61.5%",
+        "score": 0.22343219118069113,
+        "signal": "BULLISH"
       },
       "Liquidity AI": {
         "confidence": 0.48,
@@ -13528,33 +13559,33 @@
         "signal": "NEUTRAL"
       },
       "Market Regime AI": {
-        "confidence": 0.4955358087026691,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "Short regime -0.40; higher-timeframe regime +0.33; conflicting timeframes",
+        "confidence": 0.6856640914256822,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "Short regime -0.61; higher-timeframe regime -0.20; timeframes aligned/neutral",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Market Regime AI",
-        "reason": "Short regime -0.40; higher-timeframe regime +0.33; conflicting timeframes",
-        "score": -0.0323662681305607,
-        "signal": "NEUTRAL"
-      },
-      "Momentum AI": {
-        "confidence": 0.7877634099480564,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "RSI 27.4; MACD spread -19.99",
-        "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
-        "name": "Momentum AI",
-        "reason": "RSI 27.4; MACD spread -19.99",
-        "score": -0.6411737707251176,
+        "reason": "Short regime -0.61; higher-timeframe regime -0.20; timeframes aligned/neutral",
+        "score": -0.4284668571368381,
         "signal": "BEARISH"
       },
+      "Momentum AI": {
+        "confidence": 0.5097190226352291,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "RSI 41.0; MACD spread 8.99",
+        "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+        "name": "Momentum AI",
+        "reason": "RSI 41.0; MACD spread 8.99",
+        "score": -0.061914630490060685,
+        "signal": "NEUTRAL"
+      },
       "Pattern AI": {
-        "confidence": 0.5604990313831444,
-        "counterargument": "Support $78,979; resistance $79,600",
+        "confidence": 0.6029249999999954,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
         "evidence": "Candle body/engulfing structure",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Pattern AI",
         "reason": "Candle body/engulfing structure",
-        "score": -0.16770631538155095,
+        "score": -0.2560937499999905,
         "signal": "BEARISH"
       },
       "Political Event Watch AI": {
@@ -13571,185 +13602,62 @@
         "signal": "NEUTRAL"
       },
       "Support/Resistance AI": {
-        "confidence": 0.693190010298654,
-        "counterargument": "Aggressor flow -54.6%; large-trade flow -100.0%; large trades 4; evidence 75%",
-        "evidence": "Support $78,979; resistance $79,600",
+        "confidence": 0.6879023285205085,
+        "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+        "evidence": "Support $78,761; resistance $79,600",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Support/Resistance AI",
-        "reason": "Support $78,979; resistance $79,600",
-        "score": 0.44414585478886265,
+        "reason": "Support $78,761; resistance $79,600",
+        "score": 0.4331298510843927,
         "signal": "BULLISH"
       },
       "Trend AI": {
-        "confidence": 0.5406933089023247,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "EMA9 79156, EMA21 79227, EMA50 79257, EMA200 79108; 1h +0.22; 4h +0.34; short/long conflict damped",
+        "confidence": 0.7235694784875486,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "EMA9 78911, EMA21 78969, EMA50 79080, EMA200 79076; 1h -0.75; 4h +0.09; short/long aligned",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Trend AI",
-        "reason": "EMA9 79156, EMA21 79227, EMA50 79257, EMA200 79108; 1h +0.22; 4h +0.34; short/long conflict damped",
-        "score": -0.12644439354650994,
+        "reason": "EMA9 78911, EMA21 78969, EMA50 79080, EMA200 79076; 1h -0.75; 4h +0.09; short/long aligned",
+        "score": -0.5074364135157262,
         "signal": "BEARISH"
       },
       "Volatility AI": {
         "confidence": 0.6,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "ATR 0.041% of price; BB stretch -1.54",
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "ATR 0.057% of price; BB stretch -0.20",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Volatility AI",
-        "reason": "ATR 0.041% of price; BB stretch -1.54",
+        "reason": "ATR 0.057% of price; BB stretch -0.20",
         "score": -0.25,
         "signal": "BEARISH"
       },
       "Volume AI": {
-        "confidence": 0.4978802532673623,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "Volume z-score -0.09",
+        "confidence": 0.48575500057768395,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "Volume z-score -0.03",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Volume AI",
-        "reason": "Volume z-score -0.09",
-        "score": -0.03725052764033813,
+        "reason": "Volume z-score -0.03",
+        "score": -0.011989584536841548,
         "signal": "NEUTRAL"
       },
       "Whale AI": {
-        "confidence": 0.8879999999999999,
-        "counterargument": "Support $78,979; resistance $79,600",
-        "evidence": "Aggressor flow -54.6%; large-trade flow -100.0%; large trades 4; evidence 75%",
+        "confidence": 0.7971727329997762,
+        "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+        "evidence": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
         "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
         "name": "Whale AI",
-        "reason": "Aggressor flow -54.6%; large-trade flow -100.0%; large trades 4; evidence 75%",
-        "score": -0.85,
+        "reason": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+        "score": -0.6607765270828672,
         "signal": "BEARISH"
       }
     },
-    "start_price": 79092.13,
-    "target": 79093.33,
-    "ticker": "KXBTC15M-26SEP141715-15",
-    "would_wait": false
+    "start_price": 78921.15,
+    "target": 78878.65,
+    "ticker": "KXBTC15M-26SEP141730-30",
+    "would_wait": true
   },
   "prediction_snapshots": [
-    {
-      "expires_at": 1788786000.0,
-      "opened_at": 1788785458.6361666,
-      "snapshot": {
-        "master_base_score": 0.21167335259391895,
-        "master_confidence": 0.604819679604496,
-        "regime": "LOW_VOL_RANGE",
-        "specialists": {
-          "Combination AI": {
-            "confidence": 0.5631915832534222,
-            "name": "Combination AI",
-            "reason": "Cross-specialist directional agreement 54%",
-            "score": 0.17331579844462966,
-            "signal": "BULLISH"
-          },
-          "Derivatives AI": {
-            "confidence": 0.48,
-            "name": "Derivatives AI",
-            "reason": "Funding 0.0000%; OI 0 BTC",
-            "score": 0.0,
-            "signal": "NEUTRAL"
-          },
-          "FVG / MACD AI": {
-            "confidence": 0.6910135710783133,
-            "name": "FVG / MACD AI",
-            "reason": "bullish FVG support $79,521-$79,524; age 1m; MACD bullish histogram; histogram +4.72; FVG score +0.61; MACD score +0.23",
-            "score": 0.4396116064131527,
-            "signal": "BULLISH"
-          },
-          "Historical Pattern AI": {
-            "confidence": 0.5262838969602153,
-            "name": "Historical Pattern AI",
-            "reason": "Recent 3-minute move +0.058%",
-            "score": 0.09642478533378185,
-            "signal": "NEUTRAL"
-          },
-          "Kalshi Context AI": {
-            "confidence": 0.7533772113958095,
-            "name": "Kalshi Context AI",
-            "reason": "Kalshi target $79,473.47; BTC +64.53 (+0.081%) vs target; UP market ~88.5%",
-            "score": 0.5695358570746032,
-            "signal": "BULLISH"
-          },
-          "Liquidity AI": {
-            "confidence": 0.48,
-            "name": "Liquidity AI",
-            "reason": "Futures top-book imbalance +0.0%",
-            "score": 0.0,
-            "signal": "NEUTRAL"
-          },
-          "Market Regime AI": {
-            "confidence": 0.5354159447625852,
-            "name": "Market Regime AI",
-            "reason": "Trend regime from EMA separation",
-            "score": 0.11544988492205265,
-            "signal": "NEUTRAL"
-          },
-          "Momentum AI": {
-            "confidence": 0.6621836735931395,
-            "name": "Momentum AI",
-            "reason": "RSI 67.8; MACD spread 4.72",
-            "score": 0.3795493199857073,
-            "signal": "BULLISH"
-          },
-          "Pattern AI": {
-            "confidence": 0.7438114285715274,
-            "name": "Pattern AI",
-            "reason": "Candle body/engulfing structure",
-            "score": 0.5496071428573487,
-            "signal": "BULLISH"
-          },
-          "Political Event Watch AI": {
-            "confidence": 0.0,
-            "event_status": "SOURCE UNAVAILABLE",
-            "events": [],
-            "impact_score": 0.0,
-            "name": "Political Event Watch AI",
-            "reason": "SOURCE UNAVAILABLE: Political watch state unavailable: HTTP Error 404: Not Found",
-            "score": 0.0,
-            "signal": "NEUTRAL"
-          },
-          "Support/Resistance AI": {
-            "confidence": 0.816,
-            "name": "Support/Resistance AI",
-            "reason": "Support $79,374; resistance $79,538",
-            "score": -0.7,
-            "signal": "BEARISH"
-          },
-          "Trend AI": {
-            "confidence": 0.5406307187211816,
-            "name": "Trend AI",
-            "reason": "EMA9 79506, EMA21 79495, EMA50 79479; spread strength +0.13",
-            "score": 0.12631399733579504,
-            "signal": "BULLISH"
-          },
-          "Volatility AI": {
-            "confidence": 0.6,
-            "name": "Volatility AI",
-            "reason": "ATR 0.015% of price; BB stretch 0.55",
-            "score": 0.25,
-            "signal": "BULLISH"
-          },
-          "Volume AI": {
-            "confidence": 0.6481308304657546,
-            "name": "Volume AI",
-            "reason": "Volume z-score -0.88",
-            "score": 0.3502725634703221,
-            "signal": "BULLISH"
-          },
-          "Whale AI": {
-            "confidence": 0.5133812633306589,
-            "name": "Whale AI",
-            "reason": "Aggressor flow -8.7%; large-trade flow -8.7%; large trades 0; evidence 0%",
-            "score": -0.06954429860553943,
-            "signal": "NEUTRAL"
-          }
-        },
-        "start_price": 79538.0,
-        "target": 79473.47,
-        "would_wait": false
-      },
-      "ticker": "KXBTC15M-26SEP070900-00"
-    },
     {
       "expires_at": 1788786900.0,
       "opened_at": 1788786544.4287376,
@@ -82386,6 +82294,189 @@
         "would_wait": false
       },
       "ticker": "KXBTC15M-26SEP141715-15"
+    },
+    {
+      "expires_at": 1789421400.0,
+      "opened_at": 1789420793.8812144,
+      "snapshot": {
+        "master_base_score": -0.11350106231625558,
+        "master_confidence": 0.5309158046941077,
+        "regime": "TREND_DOWN",
+        "specialists": {
+          "Combination AI": {
+            "confidence": 0.519963130700158,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "Cross-specialist directional agreement 38%",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Combination AI",
+            "reason": "Cross-specialist directional agreement 38%",
+            "score": -0.08325652229199583,
+            "signal": "NEUTRAL"
+          },
+          "Cross-Market Research AI": {
+            "confidence": 0.5430396077398294,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "Independent 5m confirmation; Coinbase -0.006%, Kraken -0.120%",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Cross-Market Research AI",
+            "reason": "Independent 5m confirmation; Coinbase -0.006%, Kraken -0.120%",
+            "research_status": "ACTIVE",
+            "score": -0.07679869246609793,
+            "signal": "NEUTRAL",
+            "source_health": {
+              "coinbase": "OK",
+              "kraken": "OK"
+            }
+          },
+          "Derivatives AI": {
+            "confidence": 0.48,
+            "counterargument": "No material opposing specialist signal in this snapshot",
+            "evidence": "Funding 0.0000%; OI 0 BTC",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Derivatives AI",
+            "reason": "Funding 0.0000%; OI 0 BTC",
+            "score": 0.0,
+            "signal": "NEUTRAL"
+          },
+          "FVG / MACD AI": {
+            "confidence": 0.7142694504850851,
+            "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+            "evidence": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "FVG / MACD AI",
+            "reason": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "score": 0.4880613551772605,
+            "signal": "BULLISH"
+          },
+          "Historical Pattern AI": {
+            "confidence": 0.5081618959895648,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "Multi-horizon move: 3m +0.062%, 15m +0.012%, 1h -0.588%",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Historical Pattern AI",
+            "reason": "Multi-horizon move: 3m +0.062%, 15m +0.012%, 1h -0.588%",
+            "score": -0.058670616644926815,
+            "signal": "NEUTRAL"
+          },
+          "Kalshi Context AI": {
+            "confidence": 0.5872474517667318,
+            "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+            "evidence": "Kalshi target $78,878.65; BTC +42.50 (+0.054%) vs target; UP market ~61.5%",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Kalshi Context AI",
+            "reason": "Kalshi target $78,878.65; BTC +42.50 (+0.054%) vs target; UP market ~61.5%",
+            "score": 0.22343219118069113,
+            "signal": "BULLISH"
+          },
+          "Liquidity AI": {
+            "confidence": 0.48,
+            "counterargument": "No material opposing specialist signal in this snapshot",
+            "evidence": "Futures top-book imbalance +0.0%",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Liquidity AI",
+            "reason": "Futures top-book imbalance +0.0%",
+            "score": 0.0,
+            "signal": "NEUTRAL"
+          },
+          "Market Regime AI": {
+            "confidence": 0.6856640914256822,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "Short regime -0.61; higher-timeframe regime -0.20; timeframes aligned/neutral",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Market Regime AI",
+            "reason": "Short regime -0.61; higher-timeframe regime -0.20; timeframes aligned/neutral",
+            "score": -0.4284668571368381,
+            "signal": "BEARISH"
+          },
+          "Momentum AI": {
+            "confidence": 0.5097190226352291,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "RSI 41.0; MACD spread 8.99",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Momentum AI",
+            "reason": "RSI 41.0; MACD spread 8.99",
+            "score": -0.061914630490060685,
+            "signal": "NEUTRAL"
+          },
+          "Pattern AI": {
+            "confidence": 0.6029249999999954,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "Candle body/engulfing structure",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Pattern AI",
+            "reason": "Candle body/engulfing structure",
+            "score": -0.2560937499999905,
+            "signal": "BEARISH"
+          },
+          "Political Event Watch AI": {
+            "confidence": 0.0,
+            "counterargument": "No material opposing specialist signal in this snapshot",
+            "event_status": "STALE",
+            "events": [],
+            "evidence": "STALE: No qualifying high-impact political/crypto event in the active window",
+            "impact_score": 0.0,
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Political Event Watch AI",
+            "reason": "STALE: No qualifying high-impact political/crypto event in the active window",
+            "score": 0.0,
+            "signal": "NEUTRAL"
+          },
+          "Support/Resistance AI": {
+            "confidence": 0.6879023285205085,
+            "counterargument": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+            "evidence": "Support $78,761; resistance $79,600",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Support/Resistance AI",
+            "reason": "Support $78,761; resistance $79,600",
+            "score": 0.4331298510843927,
+            "signal": "BULLISH"
+          },
+          "Trend AI": {
+            "confidence": 0.7235694784875486,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "EMA9 78911, EMA21 78969, EMA50 79080, EMA200 79076; 1h -0.75; 4h +0.09; short/long aligned",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Trend AI",
+            "reason": "EMA9 78911, EMA21 78969, EMA50 79080, EMA200 79076; 1h -0.75; 4h +0.09; short/long aligned",
+            "score": -0.5074364135157262,
+            "signal": "BEARISH"
+          },
+          "Volatility AI": {
+            "confidence": 0.6,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "ATR 0.057% of price; BB stretch -0.20",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Volatility AI",
+            "reason": "ATR 0.057% of price; BB stretch -0.20",
+            "score": -0.25,
+            "signal": "BEARISH"
+          },
+          "Volume AI": {
+            "confidence": 0.48575500057768395,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "Volume z-score -0.03",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Volume AI",
+            "reason": "Volume z-score -0.03",
+            "score": -0.011989584536841548,
+            "signal": "NEUTRAL"
+          },
+          "Whale AI": {
+            "confidence": 0.7971727329997762,
+            "counterargument": "bullish FVG support $78,873-$78,916; age 0m; MACD bullish histogram; histogram +8.99; FVG score +0.62; MACD score +0.33",
+            "evidence": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+            "invalidation": "Re-evaluate if the next market-data snapshot removes or reverses the cited evidence",
+            "name": "Whale AI",
+            "reason": "Aggressor flow -26.2%; large-trade flow -70.2%; large trades 6; evidence 88%",
+            "score": -0.6607765270828672,
+            "signal": "BEARISH"
+          }
+        },
+        "start_price": 78921.15,
+        "target": 78878.65,
+        "would_wait": true
+      },
+      "ticker": "KXBTC15M-26SEP141730-30"
     }
   ],
   "regimes": {
@@ -82396,10 +82487,10 @@
       "samples": 1
     },
     "LOW_VOL_RANGE": {
-      "avg_abs_return": 0.0006345520158295478,
-      "direction_hits": 238,
-      "ewma_accuracy": 0.5595561632141244,
-      "samples": 495
+      "avg_abs_return": 0.0006384006800563846,
+      "direction_hits": 239,
+      "ewma_accuracy": 0.6124094236284294,
+      "samples": 496
     },
     "RANGE": {
       "avg_abs_return": 0.0016129944796459043,
@@ -82423,10 +82514,10 @@
   "research_lab": {
     "affects_execution": false,
     "calibration": {
-      "market_brier": 0.16359827272727276,
-      "model_brier": 0.20043839933495144,
-      "model_edge_vs_market": -0.036840126607678686,
-      "samples": 77
+      "market_brier": 0.1647704102564103,
+      "model_brier": 0.19956204062515415,
+      "model_edge_vs_market": -0.03479163036874386,
+      "samples": 78
     },
     "history": [
       {
@@ -85123,21 +85214,21 @@
         "ticker": "KXBTC15M-26SEP141645-45",
         "won": true,
         "yes_ask": 0.001
-      }
-    ],
-    "paper_only": true,
-    "pending": [
+      },
       {
         "action": "SCALP DOWN",
         "confidence": 0.6296157709687067,
         "direction": "NO",
         "expires_at": 1789420500.0,
         "expires_at_utc": "2026-09-14T21:15:00+00:00",
+        "market_brier": 0.255025,
         "market_yes_probability": 0.505,
+        "model_brier": 0.1320824199707623,
         "model_yes_probability": 0.3634314515431518,
         "no_ask": 0.5,
         "opened_at": 1789419617.6701584,
         "opened_at_utc": "2026-09-14T21:00:17.670158+00:00",
+        "paper_pnl": 0.48,
         "phase": "OPEN",
         "policies": {
           "Current 75 / 5": {
@@ -85153,9 +85244,44 @@
             "eligible": true
           }
         },
+        "result": "no",
         "selected_ask": 0.5,
         "ticker": "KXBTC15M-26SEP141715-15",
+        "won": true,
         "yes_ask": 0.51
+      }
+    ],
+    "paper_only": true,
+    "pending": [
+      {
+        "action": "WAIT",
+        "confidence": 0.5309158046941077,
+        "direction": "NO",
+        "expires_at": 1789421400.0,
+        "expires_at_utc": "2026-09-14T21:30:00+00:00",
+        "market_yes_probability": 0.615,
+        "model_yes_probability": 0.4443844794650348,
+        "no_ask": 0.39,
+        "opened_at": 1789420793.8812144,
+        "opened_at_utc": "2026-09-14T21:19:53.881214+00:00",
+        "phase": "OPEN",
+        "policies": {
+          "Current 75 / 5": {
+            "eligible": false
+          },
+          "Explore 80 / 5": {
+            "eligible": false
+          },
+          "Selective 75 / 10": {
+            "eligible": false
+          },
+          "Value 70 / 5": {
+            "eligible": false
+          }
+        },
+        "selected_ask": 0.39,
+        "ticker": "KXBTC15M-26SEP141730-30",
+        "yes_ask": 0.62
       }
     ],
     "phases": {
@@ -85175,9 +85301,9 @@
         "wins": 25
       },
       "OPEN": {
-        "net_pnl": 2.14,
-        "samples": 22,
-        "wins": 16
+        "net_pnl": 2.62,
+        "samples": 23,
+        "wins": 17
       }
     },
     "policies": {
@@ -85186,18 +85312,18 @@
         "min_confidence": 0.58,
         "min_edge": 0.05,
         "name": "Current 75 / 5",
-        "net_pnl": 1.0,
-        "samples": 2,
-        "wins": 2
+        "net_pnl": 1.48,
+        "samples": 3,
+        "wins": 3
       },
       "Explore 80 / 5": {
         "max_entry": 0.8,
         "min_confidence": 0.58,
         "min_edge": 0.05,
         "name": "Explore 80 / 5",
-        "net_pnl": 1.0,
-        "samples": 2,
-        "wins": 2
+        "net_pnl": 1.48,
+        "samples": 3,
+        "wins": 3
       },
       "Selective 75 / 10": {
         "max_entry": 0.75,
@@ -85213,26 +85339,26 @@
         "min_confidence": 0.58,
         "min_edge": 0.05,
         "name": "Value 70 / 5",
-        "net_pnl": 1.0,
-        "samples": 2,
-        "wins": 2
+        "net_pnl": 1.48,
+        "samples": 3,
+        "wins": 3
       }
     },
     "specialist_lifecycle": {
       "Combination AI": {
-        "accuracy": 0.5346153846153846,
+        "accuracy": 0.5355086372360844,
         "affects_execution": false,
-        "brier": 0.2610051049215077,
+        "brier": 0.2529460018925803,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 520,
+        "samples": 521,
         "status": "LIVE"
       },
       "Cross-Market Research AI": {
-        "accuracy": 0.6931216931216931,
+        "accuracy": 0.6947368421052632,
         "affects_execution": false,
-        "brier": 0.2532383745844229,
+        "brier": 0.2434952933941053,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 189,
+        "samples": 190,
         "status": "LIVE"
       },
       "Derivatives AI": {
@@ -85244,19 +85370,19 @@
         "status": "BENCH"
       },
       "FVG / MACD AI": {
-        "accuracy": 0.5608856088560885,
+        "accuracy": 0.5616942909760589,
         "affects_execution": false,
-        "brier": 0.29114521377875996,
-        "reason": "Below live-quality threshold; continue shadow grading",
-        "samples": 542,
-        "status": "BENCH"
+        "brier": 0.2680726882854076,
+        "reason": "Meets minimum sample, accuracy and calibration checks",
+        "samples": 543,
+        "status": "LIVE"
       },
       "Historical Pattern AI": {
-        "accuracy": 0.4906832298136646,
+        "accuracy": 0.49173553719008267,
         "affects_execution": false,
-        "brier": 0.27122649513207653,
+        "brier": 0.2627657327314581,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 483,
+        "samples": 484,
         "status": "LIVE"
       },
       "Kalshi Context AI": {
@@ -85276,27 +85402,27 @@
         "status": "BENCH"
       },
       "Market Regime AI": {
-        "accuracy": 0.5244618395303327,
+        "accuracy": 0.525390625,
         "affects_execution": false,
-        "brier": 0.2626474009295372,
+        "brier": 0.2618310728667105,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 511,
+        "samples": 512,
         "status": "LIVE"
       },
       "Momentum AI": {
-        "accuracy": 0.5671641791044776,
+        "accuracy": 0.5679702048417132,
         "affects_execution": false,
-        "brier": 0.2899191679911736,
+        "brier": 0.265431688207744,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 536,
+        "samples": 537,
         "status": "LIVE"
       },
       "Pattern AI": {
-        "accuracy": 0.49803149606299213,
+        "accuracy": 0.49901768172888017,
         "affects_execution": false,
-        "brier": 0.28281006510020174,
+        "brier": 0.27384516873169695,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 508,
+        "samples": 509,
         "status": "LIVE"
       },
       "Political Event Watch AI": {
@@ -85308,43 +85434,43 @@
         "status": "BENCH"
       },
       "Support/Resistance AI": {
-        "accuracy": 0.4254937163375224,
+        "accuracy": 0.42473118279569894,
         "affects_execution": false,
-        "brier": 0.25681875964154255,
+        "brier": 0.2791881227151731,
         "reason": "Below live-quality threshold; continue shadow grading",
-        "samples": 557,
+        "samples": 558,
         "status": "BENCH"
       },
       "Trend AI": {
-        "accuracy": 0.541747572815534,
+        "accuracy": 0.5426356589147286,
         "affects_execution": false,
-        "brier": 0.2610258718873948,
+        "brier": 0.25601954834736484,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 515,
+        "samples": 516,
         "status": "LIVE"
       },
       "Volatility AI": {
-        "accuracy": 0.5669014084507042,
+        "accuracy": 0.5676625659050967,
         "affects_execution": false,
-        "brier": 0.2730086128520169,
+        "brier": 0.2617077515668152,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 568,
+        "samples": 569,
         "status": "LIVE"
       },
       "Volume AI": {
-        "accuracy": 0.5,
+        "accuracy": 0.5009940357852882,
         "affects_execution": false,
-        "brier": 0.2386919521698216,
+        "brier": 0.24003518095872425,
         "reason": "Meets minimum sample, accuracy and calibration checks",
-        "samples": 502,
+        "samples": 503,
         "status": "LIVE"
       },
       "Whale AI": {
-        "accuracy": 0.518850987432675,
+        "accuracy": 0.5197132616487455,
         "affects_execution": false,
-        "brier": 0.3780931653503712,
+        "brier": 0.34153824881533407,
         "reason": "Below live-quality threshold; continue shadow grading",
-        "samples": 557,
+        "samples": 558,
         "status": "BENCH"
       }
     },
@@ -85358,35 +85484,35 @@
   },
   "reward_system": {
     "last_master_reward": {
-      "earliness": 0.03521398120456272,
-      "lead_seconds": 31.692583084106445,
-      "magnitude": 1.0352139812045626,
-      "points": 1.0352139812045626
+      "earliness": 0.9803664906819661,
+      "lead_seconds": 882.3298416137695,
+      "magnitude": 1.9803664906819662,
+      "points": 1.9803664906819662
     },
-    "master_points": 108.89622152858308,
-    "paper_truth_repairs": 4,
+    "master_points": 110.87658801926506,
+    "paper_truth_repairs": 5,
     "specialists": {
       "Combination AI": {
-        "correct_calls": 180,
-        "directional_calls": 271,
+        "correct_calls": 181,
+        "directional_calls": 272,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 121.71491358942458
+        "points": 123.69528008010656
       },
       "Cross-Market Research AI": {
-        "correct_calls": 131,
-        "directional_calls": 189,
+        "correct_calls": 132,
+        "directional_calls": 190,
         "last_reward": {
-          "earliness": 0.0,
-          "lead_seconds": 0.0,
-          "magnitude": 0.0,
-          "points": 0.0
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 112.68349995904505
+        "points": 114.66386644972701
       },
       "Derivatives AI": {
         "correct_calls": 2,
@@ -85400,35 +85526,35 @@
         "points": 1.7715854472584196
       },
       "FVG / MACD AI": {
-        "correct_calls": 193,
-        "directional_calls": 317,
+        "correct_calls": 194,
+        "directional_calls": 318,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 101.69411356369656
+        "points": 103.67448005437853
       },
       "Historical Pattern AI": {
-        "correct_calls": 151,
-        "directional_calls": 234,
+        "correct_calls": 152,
+        "directional_calls": 235,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 96.52778586520091
+        "points": 98.50815235588288
       },
       "Kalshi Context AI": {
         "correct_calls": 215,
         "directional_calls": 299,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.0,
+          "lead_seconds": 0.0,
+          "magnitude": 0.0,
+          "points": 0.0
         },
         "points": 184.85153265582196
       },
@@ -85444,37 +85570,37 @@
         "points": 1.7715854472584196
       },
       "Market Regime AI": {
-        "correct_calls": 153,
-        "directional_calls": 262,
+        "correct_calls": 154,
+        "directional_calls": 263,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": -1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 58.918174910545346
+        "points": 60.89854140122731
       },
       "Momentum AI": {
-        "correct_calls": 197,
-        "directional_calls": 287,
+        "correct_calls": 198,
+        "directional_calls": 288,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 152.81232494354254
+        "points": 154.7926914342245
       },
       "Pattern AI": {
-        "correct_calls": 142,
-        "directional_calls": 259,
+        "correct_calls": 143,
+        "directional_calls": 260,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 32.49171120908526
+        "points": 34.472077699767226
       },
       "Political Event Watch AI": {
         "correct_calls": 0,
@@ -85489,58 +85615,58 @@
       },
       "Support/Resistance AI": {
         "correct_calls": 126,
-        "directional_calls": 308,
+        "directional_calls": 309,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": -1.9803664906819662
         },
-        "points": -80.82611904515161
+        "points": -82.80648553583359
       },
       "Trend AI": {
-        "correct_calls": 158,
-        "directional_calls": 266,
+        "correct_calls": 159,
+        "directional_calls": 267,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": -1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 67.33465630822711
+        "points": 69.31502279890907
       },
       "Volatility AI": {
-        "correct_calls": 197,
-        "directional_calls": 319,
+        "correct_calls": 198,
+        "directional_calls": 320,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": -1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 104.56915858321724
+        "points": 106.54952507389922
       },
       "Volume AI": {
-        "correct_calls": 140,
-        "directional_calls": 253,
+        "correct_calls": 141,
+        "directional_calls": 254,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 36.560549316671164
+        "points": 38.54091580735313
       },
       "Whale AI": {
-        "correct_calls": 171,
-        "directional_calls": 308,
+        "correct_calls": 172,
+        "directional_calls": 309,
         "last_reward": {
-          "earliness": 0.03521398120456272,
-          "lead_seconds": 31.692583084106445,
-          "magnitude": 1.0352139812045626,
-          "points": 1.0352139812045626
+          "earliness": 0.9803664906819661,
+          "lead_seconds": 882.3298416137695,
+          "magnitude": 1.9803664906819662,
+          "points": 1.9803664906819662
         },
-        "points": 45.98829294681551
+        "points": 47.96865943749748
       }
     },
     "version": 1
@@ -85554,14 +85680,14 @@
       "samples": 100
     },
     "25": {
-      "direction_accuracy": 0.68,
-      "kalshi_accuracy": 0.84,
+      "direction_accuracy": 0.72,
+      "kalshi_accuracy": 0.88,
       "median_abs_error": 96.7162289050757,
       "median_path_error": 79.02024072617351,
       "samples": 25
     },
     "250": {
-      "direction_accuracy": 0.64,
+      "direction_accuracy": 0.644,
       "kalshi_accuracy": 0.68,
       "median_abs_error": 33.43218878986954,
       "median_path_error": 26.446313070315227,
@@ -85569,9 +85695,9 @@
     },
     "50": {
       "direction_accuracy": 0.68,
-      "kalshi_accuracy": 0.8,
-      "median_abs_error": 64.96667664429697,
-      "median_path_error": 51.74477595838301,
+      "kalshi_accuracy": 0.82,
+      "median_abs_error": 68.44116810018022,
+      "median_path_error": 54.02731592238512,
       "samples": 50
     }
   },
@@ -91452,6 +91578,19 @@
         "signed_edge": 0.025211274864102372,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.05077249330637625,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Cross-Market Research AI": [
@@ -95302,6 +95441,19 @@
         "signed_edge": 0.0,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 0.0
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.07273024152898135,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Derivatives AI": [
@@ -101180,6 +101332,19 @@
         "signed_edge": 0.0,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 0.0
+      },
+      {
+        "direction_correct": null,
+        "directional_call": false,
+        "earliness": 0.0,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 0.0,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 0.0,
+        "signed_edge": 0.0,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 0.0
       }
     ],
     "FVG / MACD AI": [
@@ -106904,6 +107069,19 @@
         "signed_edge": 0.07426311175040645,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.14616103250682053,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Historical Pattern AI": [
@@ -112782,6 +112960,19 @@
         "signed_edge": 0.012396407539241639,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.046911961290208866,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Kalshi Context AI": [
@@ -118660,6 +118851,19 @@
         "signed_edge": 0.09773517966145497,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": null,
+        "directional_call": false,
+        "earliness": 0.0,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 0.0,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 0.0,
+        "signed_edge": 0.0,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 0.0
       }
     ],
     "Liquidity AI": [
@@ -124537,6 +124741,19 @@
         "reward_magnitude": 0.0,
         "signed_edge": 0.0,
         "ticker": "KXBTC15M-26SEP141645-45",
+        "time_reward": 0.0
+      },
+      {
+        "direction_correct": null,
+        "directional_call": false,
+        "earliness": 0.0,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 0.0,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 0.0,
+        "signed_edge": 0.0,
+        "ticker": "KXBTC15M-26SEP141715-15",
         "time_reward": 0.0
       }
     ],
@@ -130416,6 +130633,19 @@
         "signed_edge": -0.05768022496173726,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": -1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.008281432908155865,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Momentum AI": [
@@ -136294,6 +136524,19 @@
         "signed_edge": 0.027694121344515304,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.1640546739373931,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Pattern AI": [
@@ -142172,6 +142415,19 @@
         "signed_edge": 0.07370492116957159,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.042910371795226256,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Political Event Watch AI": [
@@ -147902,6 +148158,19 @@
         "reward_magnitude": 0.0,
         "signed_edge": 0.0,
         "ticker": "KXBTC15M-26SEP141645-45",
+        "time_reward": 0.0
+      },
+      {
+        "direction_correct": null,
+        "directional_call": false,
+        "earliness": 0.0,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 0.0,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 0.0,
+        "signed_edge": 0.0,
+        "ticker": "KXBTC15M-26SEP141715-15",
         "time_reward": 0.0
       }
     ],
@@ -153781,6 +154050,19 @@
         "signed_edge": 0.02211547867781926,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": 0,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": -0.11364189665093109,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": -1.9803664906819662
       }
     ],
     "Trend AI": [
@@ -159659,6 +159941,19 @@
         "signed_edge": -0.04663091820283229,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": -1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.03235284208682536,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Volatility AI": [
@@ -165537,6 +165832,19 @@
         "signed_edge": -0.033545465588005245,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": -1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.06396654129810239,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Volume AI": [
@@ -171415,6 +171723,19 @@
         "signed_edge": 0.043249719123967,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.009531149658727174,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ],
     "Whale AI": [
@@ -177293,254 +177614,267 @@
         "signed_edge": 0.11698491382926526,
         "ticker": "KXBTC15M-26SEP141645-45",
         "time_reward": 1.0352139812045626
+      },
+      {
+        "direction_correct": 1,
+        "directional_call": true,
+        "earliness": 0.9803664906819661,
+        "expires_at": 1789420500.0,
+        "lead_seconds": 882.3298416137695,
+        "opened_at": 1789419617.6701584,
+        "regime": "LOW_VOL_RANGE",
+        "reward_magnitude": 1.9803664906819662,
+        "signed_edge": 0.2174862404135481,
+        "ticker": "KXBTC15M-26SEP141715-15",
+        "time_reward": 1.9803664906819662
       }
     ]
   },
   "specialist_knowledge_v5": {
     "bots": {
       "Cross-Market Research AI": {
-        "avg_signed_edge": 0.006520323321075925,
-        "avg_time_reward": 0.5372779574319507,
+        "avg_signed_edge": 0.024210034064006427,
+        "avg_time_reward": 0.7974981351840644,
         "historical_accuracy": null,
-        "historical_regime": "LOW_VOL_RANGE",
+        "historical_regime": "TREND_DOWN",
         "historical_samples": 0,
-        "live_hits": 105,
-        "live_samples": 156,
-        "lower95_accuracy": 0.6125078649292028,
-        "mature": true,
+        "live_hits": 7,
+        "live_samples": 9,
+        "lower95_accuracy": 0.499882743310208,
+        "mature": false,
         "name": "Cross-Market Research AI",
-        "posterior_accuracy": 0.6712444828472424,
-        "reliability_multiplier": 1.2493346696502228
+        "posterior_accuracy": 0.7086393173266013,
+        "reliability_multiplier": 1.3184194096215271
       },
       "Derivatives AI": {
-        "avg_signed_edge": 0.0007822139155411003,
-        "avg_time_reward": -0.980812738198973,
+        "avg_signed_edge": 0.004484230324073401,
+        "avg_time_reward": -0.8444543191974545,
         "historical_accuracy": null,
-        "historical_regime": "LOW_VOL_RANGE",
+        "historical_regime": "TREND_DOWN",
         "historical_samples": 0,
-        "live_hits": 2,
-        "live_samples": 207,
-        "lower95_accuracy": 0.001838211692419791,
-        "mature": true,
+        "live_hits": 1,
+        "live_samples": 18,
+        "lower95_accuracy": 0.0169345243540745,
+        "mature": false,
         "name": "Derivatives AI",
-        "posterior_accuracy": 0.021170287883688913,
+        "posterior_accuracy": 0.16666017006798714,
         "reliability_multiplier": 0.55
       },
       "FVG / MACD AI": {
-        "avg_signed_edge": 0.010113687150410227,
-        "avg_time_reward": 0.1826100722892346,
-        "historical_accuracy": 0.49262068681205423,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 48514,
-        "live_hits": 263,
-        "live_samples": 470,
-        "lower95_accuracy": 0.5233139883066023,
+        "avg_signed_edge": 0.035467277903437955,
+        "avg_time_reward": 0.22059113690422638,
+        "historical_accuracy": 0.475915539425932,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 6062,
+        "live_hits": 19,
+        "live_samples": 32,
+        "lower95_accuracy": 0.4253223312177097,
         "mature": true,
         "name": "FVG / MACD AI",
-        "posterior_accuracy": 0.5599262749917371,
-        "reliability_multiplier": 1.0904918598344624
+        "posterior_accuracy": 0.5106435855171413,
+        "reliability_multiplier": 1.0443859580022965
       },
       "Historical Pattern AI": {
-        "avg_signed_edge": 0.004028639338276465,
-        "avg_time_reward": 0.043983005581045655,
-        "historical_accuracy": 0.484445679917111,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 39571,
-        "live_hits": 195,
-        "live_samples": 399,
-        "lower95_accuracy": 0.47221428435718993,
+        "avg_signed_edge": 0.036792981489956335,
+        "avg_time_reward": -0.10036101799284684,
+        "historical_accuracy": 0.45026356061894235,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 5881,
+        "live_hits": 15,
+        "live_samples": 31,
+        "lower95_accuracy": 0.36835720902571134,
         "mature": true,
         "name": "Historical Pattern AI",
-        "posterior_accuracy": 0.5125668934369688,
-        "reliability_multiplier": 1.020209220761502
+        "posterior_accuracy": 0.4538444664288089,
+        "reliability_multiplier": 0.9512082866690333
       },
       "Kalshi Context AI": {
-        "avg_signed_edge": 0.015066167659603096,
-        "avg_time_reward": 0.36103867930071115,
+        "avg_signed_edge": 0.0516083780877364,
+        "avg_time_reward": 0.1413287570918048,
         "historical_accuracy": null,
-        "historical_regime": "LOW_VOL_RANGE",
+        "historical_regime": "TREND_DOWN",
         "historical_samples": 0,
-        "live_hits": 292,
-        "live_samples": 464,
-        "lower95_accuracy": 0.6008488425564293,
+        "live_hits": 16,
+        "live_samples": 30,
+        "lower95_accuracy": 0.4011823166925442,
         "mature": true,
         "name": "Kalshi Context AI",
-        "posterior_accuracy": 0.6391867838020143,
-        "reliability_multiplier": 1.2013812857198287
+        "posterior_accuracy": 0.5520081683241268,
+        "reliability_multiplier": 1.094037792223954
       },
       "Liquidity AI": {
-        "avg_signed_edge": 0.0005447784090111026,
-        "avg_time_reward": -0.980812738198973,
+        "avg_signed_edge": 0.004484230324073401,
+        "avg_time_reward": -0.8444543191974545,
         "historical_accuracy": null,
-        "historical_regime": "LOW_VOL_RANGE",
+        "historical_regime": "TREND_DOWN",
         "historical_samples": 0,
-        "live_hits": 2,
-        "live_samples": 207,
-        "lower95_accuracy": 0.001838211692419791,
-        "mature": true,
+        "live_hits": 1,
+        "live_samples": 18,
+        "lower95_accuracy": 0.0169345243540745,
+        "mature": false,
         "name": "Liquidity AI",
-        "posterior_accuracy": 0.021170287883688913,
+        "posterior_accuracy": 0.16666017006798714,
         "reliability_multiplier": 0.55
       },
       "Market Regime AI": {
-        "avg_signed_edge": 0.0036729633535836958,
-        "avg_time_reward": 0.09320243946524227,
-        "historical_accuracy": 0.48176709562848175,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 41107,
-        "live_hits": 226,
-        "live_samples": 425,
-        "lower95_accuracy": 0.4898812400069919,
+        "avg_signed_edge": -0.018183394602489925,
+        "avg_time_reward": -0.29253860202928383,
+        "historical_accuracy": 0.44875801941108734,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 6079,
+        "live_hits": 12,
+        "live_samples": 32,
+        "lower95_accuracy": 0.3450112198540687,
         "mature": true,
         "name": "Market Regime AI",
-        "posterior_accuracy": 0.5287470012017931,
-        "reliability_multiplier": 1.0434120955272146
+        "posterior_accuracy": 0.42949920581050954,
+        "reliability_multiplier": 0.8850276663588205
       },
       "Momentum AI": {
-        "avg_signed_edge": 0.009716380384240395,
-        "avg_time_reward": 0.21430719348234406,
-        "historical_accuracy": 0.4834610685327113,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 45015,
-        "live_hits": 254,
-        "live_samples": 449,
-        "lower95_accuracy": 0.5323142527448864,
+        "avg_signed_edge": 0.043834616515608285,
+        "avg_time_reward": -0.17452422364718373,
+        "historical_accuracy": 0.4564102564102564,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 5850,
+        "live_hits": 13,
+        "live_samples": 32,
+        "lower95_accuracy": 0.3642173267716746,
         "mature": true,
         "name": "Momentum AI",
-        "posterior_accuracy": 0.5698334694230136,
-        "reliability_multiplier": 1.1047136267146294
+        "posterior_accuracy": 0.4491148237531229,
+        "reliability_multiplier": 0.9423948578943164
       },
       "Pattern AI": {
-        "avg_signed_edge": 0.005754879186621255,
-        "avg_time_reward": 0.03234628933030852,
-        "historical_accuracy": 0.5038390429581294,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 45975,
-        "live_hits": 216,
-        "live_samples": 424,
-        "lower95_accuracy": 0.47242928705576204,
+        "avg_signed_edge": 0.011642514178997303,
+        "avg_time_reward": 0.07934054684364931,
+        "historical_accuracy": 0.49533819291405323,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 5899,
+        "live_hits": 15,
+        "live_samples": 29,
+        "lower95_accuracy": 0.41890467653897057,
         "mature": true,
         "name": "Pattern AI",
-        "posterior_accuracy": 0.5114155092858014,
-        "reliability_multiplier": 1.0185874584183925
+        "posterior_accuracy": 0.5058465174929981,
+        "reliability_multiplier": 1.0180107939676777
       },
       "Political Event Watch AI": {
         "avg_signed_edge": 0.0,
         "avg_time_reward": -1.0,
         "historical_accuracy": null,
-        "historical_regime": "LOW_VOL_RANGE",
+        "historical_regime": "TREND_DOWN",
         "historical_samples": 0,
         "live_hits": 0,
-        "live_samples": 196,
+        "live_samples": 17,
         "lower95_accuracy": 0.0,
-        "mature": true,
+        "mature": false,
         "name": "Political Event Watch AI",
-        "posterior_accuracy": 0.01,
+        "posterior_accuracy": 0.09523809523809523,
         "reliability_multiplier": 0.55
       },
       "Support/Resistance AI": {
-        "avg_signed_edge": -0.01043160471196055,
-        "avg_time_reward": -0.22134906425656448,
-        "historical_accuracy": 0.5144891997355907,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 46897,
-        "live_hits": 195,
-        "live_samples": 470,
-        "lower95_accuracy": 0.39088777369392486,
+        "avg_signed_edge": -0.013285253251465496,
+        "avg_time_reward": 0.29253860202928383,
+        "historical_accuracy": 0.5521724818959842,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 6076,
+        "live_hits": 20,
+        "live_samples": 32,
+        "lower95_accuracy": 0.48665896232152983,
         "mature": true,
         "name": "Support/Resistance AI",
-        "posterior_accuracy": 0.4275139247699971,
-        "reliability_multiplier": 0.8912659872501514
+        "posterior_accuracy": 0.5711315452414357,
+        "reliability_multiplier": 1.1031595710931281
       },
       "Trend AI": {
-        "avg_signed_edge": 0.004763519132162644,
-        "avg_time_reward": 0.13379654226078327,
-        "historical_accuracy": 0.48034819308889476,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 41701,
-        "live_hits": 235,
-        "live_samples": 429,
-        "lower95_accuracy": 0.5036661249504711,
+        "avg_signed_edge": -0.00968836753320079,
+        "avg_time_reward": -0.29253860202928383,
+        "historical_accuracy": 0.4481911933213292,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 6109,
+        "live_hits": 12,
+        "live_samples": 32,
+        "lower95_accuracy": 0.34463635652521174,
         "mature": true,
         "name": "Trend AI",
-        "posterior_accuracy": 0.5423322873732855,
-        "reliability_multiplier": 1.0633793482851523
+        "posterior_accuracy": 0.4291149762025897,
+        "reliability_multiplier": 0.8879537418390776
       },
       "Volatility AI": {
-        "avg_signed_edge": 0.004312309982401904,
-        "avg_time_reward": 0.20190289275203965,
-        "historical_accuracy": 0.48375377581843415,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 48996,
-        "live_hits": 276,
-        "live_samples": 481,
-        "lower95_accuracy": 0.529455515480341,
+        "avg_signed_edge": 0.0016924474105967893,
+        "avg_time_reward": -0.29253860202928383,
+        "historical_accuracy": 0.4672927994727303,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 6069,
+        "live_hits": 12,
+        "live_samples": 32,
+        "lower95_accuracy": 0.35729748477119566,
         "mature": true,
         "name": "Volatility AI",
-        "posterior_accuracy": 0.5657109193428352,
-        "reliability_multiplier": 1.096633242370478
+        "posterior_accuracy": 0.4420632204256519,
+        "reliability_multiplier": 0.908042011667866
       },
       "Volume AI": {
-        "avg_signed_edge": 0.005709210639164035,
-        "avg_time_reward": 0.046106775002971424,
-        "historical_accuracy": 0.5045034851090794,
-        "historical_regime": "LOW_VOL_RANGE",
-        "historical_samples": 44188,
-        "live_hits": 215,
-        "live_samples": 419,
-        "lower95_accuracy": 0.47692658887274886,
+        "avg_signed_edge": 0.01883496178504884,
+        "avg_time_reward": 0.024298157056172665,
+        "historical_accuracy": 0.4932838458819371,
+        "historical_regime": "TREND_DOWN",
+        "historical_samples": 5658,
+        "live_hits": 15,
+        "live_samples": 30,
+        "lower95_accuracy": 0.41177304993543173,
         "mature": true,
         "name": "Volume AI",
-        "posterior_accuracy": 0.5161857793244087,
-        "reliability_multiplier": 1.0253936033063389
+        "posterior_accuracy": 0.4981872769906133,
+        "reliability_multiplier": 1.0072881774209494
       },
       "Whale AI": {
-        "avg_signed_edge": 0.005162597954538044,
-        "avg_time_reward": 0.10437433772673049,
+        "avg_signed_edge": -0.006722853329416132,
+        "avg_time_reward": -0.4063922520892487,
         "historical_accuracy": null,
-        "historical_regime": "LOW_VOL_RANGE",
+        "historical_regime": "TREND_DOWN",
         "historical_samples": 0,
-        "live_hits": 253,
-        "live_samples": 472,
-        "lower95_accuracy": 0.5006492514722566,
+        "live_hits": 11,
+        "live_samples": 32,
+        "lower95_accuracy": 0.21338220392578303,
         "mature": true,
         "name": "Whale AI",
-        "posterior_accuracy": 0.5399654882082452,
-        "reliability_multiplier": 1.0583598284119298
+        "posterior_accuracy": 0.3527489449207557,
+        "reliability_multiplier": 0.7888716462654614
       }
     },
-    "generated_at": "2026-09-14T21:00:25.101145+00:00",
+    "generated_at": "2026-09-14T21:19:59.095331+00:00",
     "historical_specialist_v7_loaded": true,
     "method": "Bayesian posterior from graded live history plus optional long-history regime-specific holdout priors",
     "ranking": [
       "Cross-Market Research AI",
+      "Support/Resistance AI",
+      "FVG / MACD AI",
+      "Pattern AI",
+      "Volume AI",
       "Kalshi Context AI",
+      "Historical Pattern AI",
       "Momentum AI",
       "Volatility AI",
-      "FVG / MACD AI",
+      "Market Regime AI",
       "Trend AI",
       "Whale AI",
-      "Market Regime AI",
-      "Volume AI",
-      "Pattern AI",
-      "Historical Pattern AI",
-      "Support/Resistance AI",
       "Liquidity AI",
       "Derivatives AI",
       "Political Event Watch AI"
     ],
-    "regime": "LOW_VOL_RANGE",
+    "regime": "TREND_DOWN",
     "target_precision": 0.9,
     "warning": "90% is a target, not a guaranteed or reported accuracy. Precision gate may abstain heavily."
   },
   "specialists": {
     "Combination AI": {
-      "adaptive_weight": 1.4634629328600295,
-      "brier_ewma": 0.2610051049215077,
-      "direction_hits": 278,
-      "ewma_accuracy": 0.9046774863376491,
-      "ewma_calibration": 0.4599290521036079,
-      "ewma_edge": 0.02683568420019052,
+      "adaptive_weight": 1.4740131085685044,
+      "brier_ewma": 0.2529460018925803,
+      "direction_hits": 279,
+      "ewma_accuracy": 0.9142097377038841,
+      "ewma_calibration": 0.47146096889100286,
+      "ewma_edge": 0.02922936511080909,
       "overconfident_misses": 0,
       "regimes": {
         "HIGH_VOL": {
@@ -177550,10 +177884,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 1.039241163298822,
-          "ewma_accuracy": 0.5343397821486183,
-          "hits": 195,
-          "samples": 495
+          "adaptive_weight": 1.046441132797347,
+          "ewma_accuracy": 0.5902190082907841,
+          "hits": 196,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9830248558614285,
@@ -177574,18 +177908,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": 1.0241731610213118,
-      "reward_points": 121.71491358942458,
-      "rewarded_correct_calls": 180,
-      "samples": 520
+      "reward_ewma": 1.1197924939873773,
+      "reward_points": 123.69528008010656,
+      "rewarded_correct_calls": 181,
+      "samples": 521
     },
     "Cross-Market Research AI": {
-      "adaptive_weight": 1.3515653670798127,
-      "brier_ewma": 0.2532383745844229,
-      "direction_hits": 131,
-      "ewma_accuracy": 0.8054940742989407,
-      "ewma_calibration": 0.35028030821798073,
-      "ewma_edge": 0.024026045234676288,
+      "adaptive_weight": 1.3643360136728848,
+      "brier_ewma": 0.2434952933941053,
+      "direction_hits": 132,
+      "ewma_accuracy": 0.8249446668690467,
+      "ewma_calibration": 0.37577981070340466,
+      "ewma_edge": 0.028896464864106793,
       "overconfident_misses": 0,
       "regimes": {
         "HIGH_VOL": {
@@ -177595,10 +177929,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 1.0080038724198543,
-          "ewma_accuracy": 0.4731404217185321,
-          "hits": 70,
-          "samples": 256
+          "adaptive_weight": 1.0118433991162965,
+          "ewma_accuracy": 0.5363635711123083,
+          "hits": 71,
+          "samples": 257
         },
         "RANGE": {
           "adaptive_weight": 0.9796080393031655,
@@ -177619,10 +177953,10 @@
           "samples": 17
         }
       },
-      "reward_ewma": 0.6809250017452471,
-      "reward_points": 112.68349995904505,
-      "rewarded_correct_calls": 131,
-      "samples": 189
+      "reward_ewma": 0.810869150638919,
+      "reward_points": 114.66386644972701,
+      "rewarded_correct_calls": 132,
+      "samples": 190
     },
     "Derivatives AI": {
       "adaptive_weight": 0.5894629375315126,
@@ -177640,10 +177974,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.45000000000026225,
-          "ewma_accuracy": 8.347848455409774e-15,
+          "adaptive_weight": 0.45000000000023177,
+          "ewma_accuracy": 7.346106640760601e-15,
           "hits": 3,
-          "samples": 495
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.908590898579271,
@@ -177664,18 +177998,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": -1.8682380271345966e-08,
+      "reward_ewma": -1.681414224421137e-08,
       "reward_points": 1.7715854472584196,
       "rewarded_correct_calls": 2,
       "samples": 252
     },
     "FVG / MACD AI": {
-      "adaptive_weight": 1.2955238765191526,
-      "brier_ewma": 0.29114521377875996,
-      "direction_hits": 304,
-      "ewma_accuracy": 0.7224135798531164,
-      "ewma_calibration": 0.3553107129052236,
-      "ewma_edge": 0.04689503916996099,
+      "adaptive_weight": 1.3094180045345722,
+      "brier_ewma": 0.2680726882854076,
+      "direction_hits": 305,
+      "ewma_accuracy": 0.7501722218678047,
+      "ewma_calibration": 0.395199169925729,
+      "ewma_edge": 0.05682163850364695,
       "overconfident_misses": 103,
       "regimes": {
         "HIGH_VOL": {
@@ -177685,10 +178019,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.995434696635572,
-          "ewma_accuracy": 0.5686961235673432,
-          "hits": 218,
-          "samples": 471
+          "adaptive_weight": 1.011882274752886,
+          "ewma_accuracy": 0.620452588739262,
+          "hits": 219,
+          "samples": 472
         },
         "RANGE": {
           "adaptive_weight": 0.9490581106710286,
@@ -177709,18 +178043,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.7288562360746924,
-      "reward_points": 101.69411356369656,
-      "rewarded_correct_calls": 193,
-      "samples": 542
+      "reward_ewma": 0.8540072615354198,
+      "reward_points": 103.67448005437853,
+      "rewarded_correct_calls": 194,
+      "samples": 543
     },
     "Historical Pattern AI": {
-      "adaptive_weight": 1.3448935424676636,
-      "brier_ewma": 0.27122649513207653,
-      "direction_hits": 237,
-      "ewma_accuracy": 0.8357421609368119,
-      "ewma_calibration": 0.3881556209717845,
-      "ewma_edge": 0.02427487192706015,
+      "adaptive_weight": 1.365486206371283,
+      "brier_ewma": 0.2627657327314581,
+      "direction_hits": 238,
+      "ewma_accuracy": 0.8521679448431306,
+      "ewma_calibration": 0.40614065249837306,
+      "ewma_edge": 0.026538580863375023,
       "overconfident_misses": 4,
       "regimes": {
         "HIGH_VOL": {
@@ -177730,10 +178064,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.933330612728063,
-          "ewma_accuracy": 0.49096671795435853,
-          "hits": 156,
-          "samples": 495
+          "adaptive_weight": 0.9482016331582737,
+          "ewma_accuracy": 0.5520507117998354,
+          "hits": 157,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9361178413217277,
@@ -177754,10 +178088,10 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.8705796098407752,
-      "reward_points": 96.52778586520091,
-      "rewarded_correct_calls": 151,
-      "samples": 483
+      "reward_ewma": 0.9815582979248944,
+      "reward_points": 98.50815235588288,
+      "rewarded_correct_calls": 152,
+      "samples": 484
     },
     "Kalshi Context AI": {
       "adaptive_weight": 1.485819597458976,
@@ -177775,10 +178109,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 1.0498239267879401,
-          "ewma_accuracy": 0.6264048956411487,
+          "adaptive_weight": 1.0506082482510632,
+          "ewma_accuracy": 0.5512363081642108,
           "hits": 237,
-          "samples": 495
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9830248558614285,
@@ -177799,7 +178133,7 @@
           "samples": 27
         }
       },
-      "reward_ewma": 1.1071155399476846,
+      "reward_ewma": 0.9964039859529162,
       "reward_points": 184.85153265582196,
       "rewarded_correct_calls": 215,
       "samples": 548
@@ -177820,10 +178154,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.45000000000026225,
-          "ewma_accuracy": 8.347848455409774e-15,
+          "adaptive_weight": 0.45000000000023177,
+          "ewma_accuracy": 7.346106640760601e-15,
           "hits": 3,
-          "samples": 495
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.908590898579271,
@@ -177844,18 +178178,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": -1.8682380271345966e-08,
+      "reward_ewma": -1.681414224421137e-08,
       "reward_points": 1.7715854472584196,
       "rewarded_correct_calls": 2,
       "samples": 252
     },
     "Market Regime AI": {
-      "adaptive_weight": 1.2138200792521179,
-      "brier_ewma": 0.2626474009295372,
-      "direction_hits": 268,
-      "ewma_accuracy": 0.6251890785592841,
-      "ewma_calibration": 0.19413678316324617,
-      "ewma_edge": 0.03907423556825311,
+      "adaptive_weight": 1.216198677981013,
+      "brier_ewma": 0.2618310728667105,
+      "direction_hits": 269,
+      "ewma_accuracy": 0.6626701707033557,
+      "ewma_calibration": 0.22427668571718845,
+      "ewma_edge": 0.035994955302243385,
       "overconfident_misses": 33,
       "regimes": {
         "HIGH_VOL": {
@@ -177865,10 +178199,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.9983133270989466,
-          "ewma_accuracy": 0.4391726371883192,
-          "hits": 209,
-          "samples": 495
+          "adaptive_weight": 0.9993700213828681,
+          "ewma_accuracy": 0.5064719207257209,
+          "hits": 210,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9551164753247741,
@@ -177889,18 +178223,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.30485198621730414,
-      "reward_points": 58.918174910545346,
-      "rewarded_correct_calls": 153,
-      "samples": 511
+      "reward_ewma": 0.4724034366637704,
+      "reward_points": 60.89854140122731,
+      "rewarded_correct_calls": 154,
+      "samples": 512
     },
     "Momentum AI": {
-      "adaptive_weight": 1.4441501287439575,
-      "brier_ewma": 0.2899191679911736,
-      "direction_hits": 304,
-      "ewma_accuracy": 0.8853060191904173,
-      "ewma_calibration": 0.48164707303421733,
-      "ewma_edge": 0.04403794256134908,
+      "adaptive_weight": 1.4591193593905707,
+      "brier_ewma": 0.265431688207744,
+      "direction_hits": 305,
+      "ewma_accuracy": 0.8967754172713756,
+      "ewma_calibration": 0.5122587067256013,
+      "ewma_edge": 0.05603961569895348,
       "overconfident_misses": 27,
       "regimes": {
         "HIGH_VOL": {
@@ -177910,10 +178244,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.9981677936773106,
-          "ewma_accuracy": 0.48453885783364803,
-          "hits": 204,
-          "samples": 495
+          "adaptive_weight": 1.0045116921619899,
+          "ewma_accuracy": 0.5463941948936102,
+          "hits": 205,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9926367943782821,
@@ -177934,18 +178268,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.9838717149441386,
-      "reward_points": 152.81232494354254,
-      "rewarded_correct_calls": 197,
-      "samples": 536
+      "reward_ewma": 1.0835211925179213,
+      "reward_points": 154.7926914342245,
+      "rewarded_correct_calls": 198,
+      "samples": 537
     },
     "Pattern AI": {
-      "adaptive_weight": 1.1011437063137852,
-      "brier_ewma": 0.28281006510020174,
-      "direction_hits": 253,
-      "ewma_accuracy": 0.5448684515497738,
-      "ewma_calibration": 0.10048301975710293,
-      "ewma_edge": 0.02011935087528586,
+      "adaptive_weight": 1.1073965679797448,
+      "brier_ewma": 0.27384516873169695,
+      "direction_hits": 254,
+      "ewma_accuracy": 0.5903816063947964,
+      "ewma_calibration": 0.1464846209197071,
+      "ewma_edge": 0.0223984529672799,
       "overconfident_misses": 153,
       "regimes": {
         "HIGH_VOL": {
@@ -177955,10 +178289,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 1.03689072642923,
-          "ewma_accuracy": 0.5337271159420294,
-          "hits": 208,
-          "samples": 495
+          "adaptive_weight": 1.0443015810455485,
+          "ewma_accuracy": 0.5896798620289858,
+          "hits": 209,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9752411935461505,
@@ -177979,10 +178313,10 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.1731898920571162,
-      "reward_points": 32.49171120908526,
-      "rewarded_correct_calls": 142,
-      "samples": 508
+      "reward_ewma": 0.3539075519196012,
+      "reward_points": 34.472077699767226,
+      "rewarded_correct_calls": 143,
+      "samples": 509
     },
     "Political Event Watch AI": {
       "adaptive_weight": 0.49070796463905075,
@@ -178001,9 +178335,9 @@
         },
         "LOW_VOL_RANGE": {
           "adaptive_weight": 0.4500000000000002,
-          "ewma_accuracy": 3.1245771986832597e-27,
+          "ewma_accuracy": 2.7496279348412687e-27,
           "hits": 0,
-          "samples": 472
+          "samples": 473
         },
         "RANGE": {
           "adaptive_weight": 0.908590898579271,
@@ -178030,12 +178364,12 @@
       "samples": 226
     },
     "Support/Resistance AI": {
-      "adaptive_weight": 0.6082577674148252,
-      "brier_ewma": 0.25681875964154255,
+      "adaptive_weight": 0.6151143532752242,
+      "brier_ewma": 0.2791881227151731,
       "direction_hits": 237,
-      "ewma_accuracy": 0.2759251426813456,
-      "ewma_calibration": -0.29764074676569324,
-      "ewma_edge": -0.028950007425953696,
+      "ewma_accuracy": 0.24833262841321105,
+      "ewma_calibration": -0.33719567311898935,
+      "ewma_edge": -0.037419196348451436,
       "overconfident_misses": 94,
       "regimes": {
         "HIGH_VOL": {
@@ -178045,10 +178379,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.9991741559670406,
-          "ewma_accuracy": 0.565383990829325,
+          "adaptive_weight": 0.9989482616257301,
+          "ewma_accuracy": 0.497537911929806,
           "hits": 236,
-          "samples": 495
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 1.0307782670545234,
@@ -178069,18 +178403,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": -0.6877926679969731,
-      "reward_points": -80.82611904515161,
+      "reward_ewma": -0.8170500502654725,
+      "reward_points": -82.80648553583359,
       "rewarded_correct_calls": 126,
-      "samples": 557
+      "samples": 558
     },
     "Trend AI": {
-      "adaptive_weight": 1.283564341794248,
-      "brier_ewma": 0.2610258718873948,
-      "direction_hits": 279,
-      "ewma_accuracy": 0.7085101285514008,
-      "ewma_calibration": 0.29521247652726035,
-      "ewma_edge": 0.04989056603798644,
+      "adaptive_weight": 1.2916154393084613,
+      "brier_ewma": 0.25601954834736484,
+      "direction_hits": 280,
+      "ewma_accuracy": 0.7376591156962607,
+      "ewma_calibration": 0.3197605597647668,
+      "ewma_edge": 0.04813679364287033,
       "overconfident_misses": 41,
       "regimes": {
         "HIGH_VOL": {
@@ -178090,10 +178424,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.9337362831497209,
-          "ewma_accuracy": 0.3502501804014898,
-          "hits": 213,
-          "samples": 495
+          "adaptive_weight": 0.9322129901271914,
+          "ewma_accuracy": 0.42822015875331104,
+          "hits": 214,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9504039780378626,
@@ -178114,18 +178448,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.4377802886142165,
-      "reward_points": 67.33465630822711,
-      "rewarded_correct_calls": 158,
-      "samples": 515
+      "reward_ewma": 0.5920389088209914,
+      "reward_points": 69.31502279890907,
+      "rewarded_correct_calls": 159,
+      "samples": 516
     },
     "Volatility AI": {
-      "adaptive_weight": 1.3341575407565986,
-      "brier_ewma": 0.2730086128520169,
-      "direction_hits": 322,
-      "ewma_accuracy": 0.7006444483877575,
-      "ewma_calibration": 0.24077333806535273,
-      "ewma_edge": 0.016938635704794362,
+      "adaptive_weight": 1.3264661693064188,
+      "brier_ewma": 0.2617077515668152,
+      "direction_hits": 323,
+      "ewma_accuracy": 0.7305800035489818,
+      "ewma_calibration": 0.27669600425881746,
+      "ewma_edge": 0.021641426264125165,
       "overconfident_misses": 1,
       "regimes": {
         "HIGH_VOL": {
@@ -178135,10 +178469,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.9908121090960875,
-          "ewma_accuracy": 0.40506377946586064,
-          "hits": 241,
-          "samples": 495
+          "adaptive_weight": 0.9888068646273114,
+          "ewma_accuracy": 0.47645612592995734,
+          "hits": 242,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 1.0265906031898495,
@@ -178159,18 +178493,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.6175587032152057,
-      "reward_points": 104.56915858321724,
-      "rewarded_correct_calls": 197,
-      "samples": 568
+      "reward_ewma": 0.7538394819618818,
+      "reward_points": 106.54952507389922,
+      "rewarded_correct_calls": 198,
+      "samples": 569
     },
     "Volume AI": {
-      "adaptive_weight": 1.099810166765734,
-      "brier_ewma": 0.2386919521698216,
-      "direction_hits": 251,
-      "ewma_accuracy": 0.5377017212034106,
-      "ewma_calibration": 0.0678884128241722,
-      "ewma_edge": 0.01598236205145535,
+      "adaptive_weight": 1.1059040862113574,
+      "brier_ewma": 0.24003518095872425,
+      "direction_hits": 252,
+      "ewma_accuracy": 0.5839315490830695,
+      "ewma_calibration": 0.11088759686849121,
+      "ewma_edge": 0.015337240812182532,
       "overconfident_misses": 31,
       "regimes": {
         "HIGH_VOL": {
@@ -178180,10 +178514,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 1.0453114694671315,
-          "ewma_accuracy": 0.5358312755543707,
-          "hits": 206,
-          "samples": 495
+          "adaptive_weight": 1.0519562540994714,
+          "ewma_accuracy": 0.5915315224878462,
+          "hits": 207,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9683771935461505,
@@ -178204,18 +178538,18 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.13970164803762494,
-      "reward_points": 36.560549316671164,
-      "rewarded_correct_calls": 140,
-      "samples": 502
+      "reward_ewma": 0.3237681323020591,
+      "reward_points": 38.54091580735313,
+      "rewarded_correct_calls": 141,
+      "samples": 503
     },
     "Whale AI": {
-      "adaptive_weight": 1.1405986848632348,
-      "brier_ewma": 0.3780931653503712,
-      "direction_hits": 289,
-      "ewma_accuracy": 0.5961361424211338,
-      "ewma_calibration": 0.16952399696982878,
-      "ewma_edge": -0.004576555606840024,
+      "adaptive_weight": 1.1429082788686882,
+      "brier_ewma": 0.34153824881533407,
+      "direction_hits": 290,
+      "ewma_accuracy": 0.6365225281790204,
+      "ewma_calibration": 0.2413715972728459,
+      "ewma_edge": 0.01762972399519879,
       "overconfident_misses": 121,
       "regimes": {
         "HIGH_VOL": {
@@ -178225,10 +178559,10 @@
           "samples": 1
         },
         "LOW_VOL_RANGE": {
-          "adaptive_weight": 0.9635653660868406,
-          "ewma_accuracy": 0.39435282192354515,
-          "hits": 229,
-          "samples": 495
+          "adaptive_weight": 0.9635855459510587,
+          "ewma_accuracy": 0.46703048329271973,
+          "hits": 230,
+          "samples": 496
         },
         "RANGE": {
           "adaptive_weight": 0.9739748248622381,
@@ -178249,10 +178583,10 @@
           "samples": 27
         }
       },
-      "reward_ewma": 0.260647841615367,
-      "reward_points": 45.98829294681551,
-      "rewarded_correct_calls": 171,
-      "samples": 557
+      "reward_ewma": 0.43261970652202697,
+      "reward_points": 47.96865943749748,
+      "rewarded_correct_calls": 172,
+      "samples": 558
     }
   },
   "status": {
@@ -178260,11 +178594,11 @@
     "bot_intelligence_v4_samples": 499,
     "challenger_streak": 0,
     "champion_promoted": false,
-    "current_regime": "LOW_VOL_RANGE",
+    "current_regime": "TREND_DOWN",
     "graded_this_run": true,
     "historical_specialist_v7_loaded": true,
     "intelligence_version": 10,
-    "last_graded_ticker": "KXBTC15M-26SEP141645-45",
+    "last_graded_ticker": "KXBTC15M-26SEP141715-15",
     "learning_version": 31,
     "loaded_from_private_branch": true,
     "official_results_resolved": 1,
@@ -178273,30 +178607,30 @@
     "research_lab_ok": true,
     "research_registered_this_run": true,
     "research_resolved_this_run": 1,
-    "samples_after_run": 568,
-    "samples_before_run": 567,
+    "samples_after_run": 569,
+    "samples_before_run": 568,
     "shared_core": true,
-    "specialist_knowledge_regime": "LOW_VOL_RANGE",
+    "specialist_knowledge_regime": "TREND_DOWN",
     "specialist_self_learning_v5": true,
     "strict_expiry_grading": true,
     "worker_ok": true
   },
-  "updated_at": "2026-09-14T21:00:18.028068+00:00",
+  "updated_at": "2026-09-14T21:19:54.122387+00:00",
   "validation": {
-    "direction_accuracy": 0.3076923076923077,
-    "evaluated_at": "2026-09-14T21:00:17.712062+00:00",
-    "mae": 116.14576992593244,
-    "median_abs_error": 52.04353592036932,
+    "direction_accuracy": 0.5384615384615384,
+    "evaluated_at": "2026-09-14T21:19:53.909446+00:00",
+    "mae": 142.318797842642,
+    "median_abs_error": 124.90358130652749,
     "regimes": {
       "LOW_VOL_RANGE": {
-        "direction_accuracy": 0.2727272727272727,
-        "median_abs_error": 46.29241093035671,
-        "samples": 11
+        "direction_accuracy": 0.6666666666666666,
+        "median_abs_error": 124.90358130652749,
+        "samples": 9
       },
       "TREND_UP": {
-        "direction_accuracy": 0.5,
-        "median_abs_error": 107.2359564045546,
-        "samples": 2
+        "direction_accuracy": 0.25,
+        "median_abs_error": 174.52848971268395,
+        "samples": 4
       }
     },
     "samples": 13
@@ -178309,8 +178643,8 @@
   },
   "wait_policy": {
     "minimum_calibrated_confidence": 0.56,
-    "minimum_edge_score": 0.226094951337613,
+    "minimum_edge_score": 0.22123846172072248,
     "minimum_samples": 40,
-    "overconfidence_penalty": 0.04014607898094308
+    "overconfidence_penalty": 0.032674556493419174
   }
 }
