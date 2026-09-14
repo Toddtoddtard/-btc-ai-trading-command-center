@@ -9,9 +9,10 @@ The adapter does not place trades or alter the trading engine. It keeps the main
 BTC dashboard aligned with the authoritative paper-trading state by:
 
 * replacing the old ``Spot feed`` metric with the latest Kalshi call entry;
-* replacing the main ``24h`` BTC-change metric with lifetime directional-call accuracy; and
+* replacing the main ``24h`` BTC-change metric with lifetime directional-call accuracy;
 * rendering ``HOLD SCALP UP/DOWN`` when the existing paper engine says that a
-  fresh scalp no longer meets its profitability / projected-return target.
+  fresh scalp no longer meets its profitability / projected-return target; and
+* restoring a runnable historical backtest control inside the Backtest tab.
 
 The HOLD display is intentionally independent of the separate 75% automatic
 entry cap. That cap can still protect execution, but it does not decide whether
@@ -161,21 +162,17 @@ def _install_dashboard_adapter():
     except Exception:
         return
 
-    # Version the adapter so Streamlit hot reload cannot leave an older monkeypatch
-    # installed in the long-running process.  The previous implementation used a
-    # boolean flag, which caused the new plain-"24h" rule to be skipped after a
-    # code-only redeploy even though the earlier Spot-feed rule remained active.
-    adapter_version = 3
+    adapter_version = 4
     installed_version = int(getattr(DeltaGenerator, "_btc_profitability_dashboard_adapter_version", 0) or 0)
     if installed_version >= adapter_version:
         return
 
-    # If an older adapter is installed, unwrap it back to the original methods
-    # before installing this version.  This avoids stacking wrappers forever.
     original_metric = getattr(DeltaGenerator, "_btc_profitability_original_metric", DeltaGenerator.metric)
     original_markdown = getattr(DeltaGenerator, "_btc_profitability_original_markdown", DeltaGenerator.markdown)
+    original_tabs = getattr(DeltaGenerator, "_btc_profitability_original_tabs", DeltaGenerator.tabs)
     DeltaGenerator._btc_profitability_original_metric = original_metric
     DeltaGenerator._btc_profitability_original_markdown = original_markdown
+    DeltaGenerator._btc_profitability_original_tabs = original_tabs
 
     def metric_adapter(self, label, value, *args, **kwargs):
         label_text = str(label or "")
@@ -188,7 +185,6 @@ def _install_dashboard_adapter():
             side_text = f" {side}" if side else ""
             return original_metric(self, "Kalshi Call Entry", f"{entry * 100:.0f}% / {entry * 100:.0f}c{side_text}", *args, **kwargs)
 
-        # The main-page BTC change box is literally labeled "24h" in app.py.
         if normalized in {"24h", "24 h", "24h quote volume", "24 h quote volume", "24h volume"}:
             accuracy, wins, losses = lifetime_directional_accuracy()
             shown = "N/A" if accuracy is None else f"{accuracy * 100:.1f}%"
@@ -204,8 +200,27 @@ def _install_dashboard_adapter():
             rendered = rendered.replace(">SCALP UP<", ">HOLD SCALP UP<").replace(">SCALP DOWN<", ">HOLD SCALP DOWN<")
         return original_markdown(self, rendered, *args, **kwargs)
 
+    def tabs_adapter(self, tabs, *args, **kwargs):
+        containers = original_tabs(self, tabs, *args, **kwargs)
+        try:
+            labels = list(tabs)
+            backtest_idx = next((i for i, label in enumerate(labels) if str(label).strip().lower() == "backtest"), None)
+            if backtest_idx is not None and backtest_idx < len(containers):
+                with containers[backtest_idx]:
+                    from dashboard_backtest import render_dashboard_backtest
+                    render_dashboard_backtest()
+        except Exception as exc:
+            # Never let the optional runner break the live dashboard.
+            try:
+                with containers[backtest_idx] if backtest_idx is not None else st.container():
+                    st.caption(f"Backtest runner unavailable: {exc}")
+            except Exception:
+                pass
+        return containers
+
     DeltaGenerator.metric = metric_adapter
     DeltaGenerator.markdown = markdown_adapter
+    DeltaGenerator.tabs = tabs_adapter
     DeltaGenerator._btc_profitability_dashboard_adapter_version = adapter_version
 
 
