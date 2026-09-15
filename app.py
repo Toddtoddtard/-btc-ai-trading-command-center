@@ -5304,14 +5304,25 @@ def live_dashboard():
         _macd_fig.add_trace(go.Scatter(
             x=_tv["time"], y=_tv["macd_signal"], mode="lines", name="Signal", line=dict(width=2)
         ))
-        _hist_colors = ["#00d6a3" if safe_float(v, 0.0) >= 0 else "#ff4d68" for v in _tv["macd_hist"]]
+        _macd_fig.add_trace(go.Scatter(
+            x=_tv["time"], y=_tv["macd_fast_hist"], mode="lines", name="Fast momentum",
+            line=dict(width=1.5, dash="dot", color="#ffd166")
+        ))
+        _hist_values = [safe_float(v, 0.0) for v in _tv["macd_hist"]]
+        _hist_colors = []
+        for _i, _value in enumerate(_hist_values):
+            _expanding = _i == 0 or abs(_value) >= abs(_hist_values[_i - 1])
+            if _value >= 0:
+                _hist_colors.append("#00d6a3" if _expanding else "#167d6c")
+            else:
+                _hist_colors.append("#ff4d68" if _expanding else "#8d3545")
         _macd_fig.add_trace(go.Bar(
             x=_tv["time"], y=_tv["macd_hist"], name="Histogram", marker_color=_hist_colors, opacity=0.72
         ))
         _macd_fig.add_hline(y=0, line_width=1, line_dash="dot")
         _macd_fig.update_layout(
             template="plotly_dark", height=300, margin=dict(l=10, r=10, t=35, b=10),
-            title="MACD (12, 26, 9)", paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
+            title="Adaptive MACD — standard 12/26/9 + fast 6/13/5", paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
             legend=dict(orientation="h"),
         )
         st.plotly_chart(_macd_fig, use_container_width=True, key="fvg_macd_chart")

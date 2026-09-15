@@ -14,6 +14,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
+from macd_engine import add_macd_features, score_macd
+
 
 def _safe_float(value, default=0.0):
     try:
@@ -67,28 +69,15 @@ def fvg_macd_specialist(hist: pd.DataFrame):
         }
 
     x = hist.copy()
-    close = x["close"].astype(float)
-    if "macd" not in x:
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        x["macd"] = ema12 - ema26
-    if "macd_signal" not in x:
-        x["macd_signal"] = x["macd"].ewm(span=9, adjust=False).mean()
-    x["macd_hist"] = x["macd"] - x["macd_signal"]
+    x = add_macd_features(x)
 
     last = x.iloc[-1]
-    prev = x.iloc[-2]
     px = float(last["close"])
-    hist_now = _safe_float(last["macd_hist"])
-    hist_prev = _safe_float(prev["macd_hist"])
-    spread_scale = max(px * 0.00035, 1.0)
-    macd_strength = _clamp(hist_now / spread_scale)
-    bullish_cross = _safe_float(prev["macd"]) <= _safe_float(prev["macd_signal"]) and _safe_float(last["macd"]) > _safe_float(last["macd_signal"])
-    bearish_cross = _safe_float(prev["macd"]) >= _safe_float(prev["macd_signal"]) and _safe_float(last["macd"]) < _safe_float(last["macd_signal"])
-    expanding = abs(hist_now) > abs(hist_prev)
-    cross_bonus = 0.35 if bullish_cross else (-0.35 if bearish_cross else 0.0)
-    expansion_bonus = (0.12 if hist_now > 0 else -0.12) if expanding else 0.0
-    macd_score = _clamp(0.62 * macd_strength + cross_bonus + expansion_bonus)
+    macd_view = score_macd(x)
+    hist_now = macd_view["standard_hist"]
+    macd_score = macd_view["score"]
+    bullish_cross = macd_view["cross"] == "bullish"
+    bearish_cross = macd_view["cross"] == "bearish"
 
     zones = detect_fvg_zones(x)
     active = [z for z in zones if not z["filled"]]
@@ -121,9 +110,13 @@ def fvg_macd_specialist(hist: pd.DataFrame):
     else:
         signal = "NEUTRAL"
     confidence = float(min(0.95, 0.48 + abs(combined) * 0.44))
-    macd_state = "BULLISH CROSS" if bullish_cross else "BEARISH CROSS" if bearish_cross else ("BULLISH" if hist_now > 0 else "BEARISH" if hist_now < 0 else "NEUTRAL")
+    macd_state = macd_view["state"].upper()
     zone_text = "no active FVG" if nearest is None else f"{nearest['side'].lower()} FVG ${nearest['low']:,.0f}-${nearest['high']:,.0f}"
-    reason = f"MACD {macd_state.lower()} (hist {hist_now:+.2f}); {zone_text}; combined {combined:+.2f}"
+    reason = (
+        f"Adaptive MACD {macd_state.lower()} (standard {hist_now:+.2f}, "
+        f"fast {macd_view['fast_hist']:+.2f}, {macd_view['agreement']}); "
+        f"{zone_text}; combined {combined:+.2f}"
+    )
     return {
         "name": "FVG / MACD AI",
         "signal": signal,
@@ -158,12 +151,7 @@ def render_tradingview_technical_panel(hist, agg=None, specialist_results=None):
 
     tech = (specialist_results or {}).get("FVG / MACD AI") or fvg_macd_specialist(hist)
     tail = hist.tail(160).copy()
-    if "macd" not in tail:
-        close = tail["close"].astype(float)
-        tail["macd"] = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
-    if "macd_signal" not in tail:
-        tail["macd_signal"] = tail["macd"].ewm(span=9, adjust=False).mean()
-    tail["macd_hist"] = tail["macd"] - tail["macd_signal"]
+    tail = add_macd_features(tail)
 
     st.subheader("TradingView-style BTC technicals — FVG + MACD")
     c1, c2, c3, c4 = st.columns(4)
@@ -184,6 +172,7 @@ def render_tradingview_technical_panel(hist, agg=None, specialist_results=None):
     fig.add_trace(go.Bar(x=tail["time"], y=tail["macd_hist"], name="MACD histogram"), row=2, col=1)
     fig.add_trace(go.Scatter(x=tail["time"], y=tail["macd"], mode="lines", name="MACD"), row=2, col=1)
     fig.add_trace(go.Scatter(x=tail["time"], y=tail["macd_signal"], mode="lines", name="Signal"), row=2, col=1)
+    fig.add_trace(go.Scatter(x=tail["time"], y=tail["macd_fast_hist"], mode="lines", name="Fast momentum", line=dict(dash="dot", width=1)), row=2, col=1)
     fig.update_layout(template="plotly_dark", height=620, margin=dict(l=8, r=8, t=32, b=8), xaxis_rangeslider_visible=False, legend_orientation="h")
     st.plotly_chart(fig, use_container_width=True, key="fvg_macd_tradingview_panel")
 

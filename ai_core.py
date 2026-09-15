@@ -2,6 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from macd_engine import add_macd_features, score_macd
 from research_lab import enrich_rationales
 
 from political_event_watch import political_specialist_result
@@ -58,11 +59,7 @@ def enrich_history_core(df):
     loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
     x["rsi"] = 100 - (100 / (1 + rs))
-    ema12 = c.ewm(span=12, adjust=False).mean()
-    ema26 = c.ewm(span=26, adjust=False).mean()
-    x["macd"] = ema12 - ema26
-    x["macd_signal"] = x["macd"].ewm(span=9, adjust=False).mean()
-    x["macd_hist"] = x["macd"] - x["macd_signal"]
+    x = add_macd_features(x)
 
     # Three-candle fair-value gaps (ICT-style imbalance zones).
     # Bullish FVG: current low is above the high from two candles ago.
@@ -142,9 +139,13 @@ def run_specialists_core(hist, agg, futures, kctx, research_snapshot=None):
     )
 
     rsi = safe_float(last["rsi"], 50.0)
-    macd_delta = safe_float(last["macd"] - last["macd_signal"], 0.0)
-    momentum = clamp(((rsi - 50) / 30) * 0.55 + np.sign(macd_delta) * min(abs(macd_delta) / max(px * 0.0005, 1), 1) * 0.45)
-    out["Momentum AI"] = _specialist("Momentum AI", momentum, f"RSI {rsi:.1f}; MACD spread {macd_delta:.2f}")
+    macd_view = score_macd(hist)
+    momentum = clamp(((rsi - 50) / 30) * 0.55 + macd_view["score"] * 0.45)
+    out["Momentum AI"] = _specialist(
+        "Momentum AI",
+        momentum,
+        f"RSI {rsi:.1f}; adaptive MACD {macd_view['score']:+.2f} ({macd_view['state']})",
+    )
 
     volume_z = safe_float(last["volume_z"], 0.0)
     candle_dir = np.sign(last["close"] - last["open"])
@@ -258,29 +259,10 @@ def run_specialists_core(hist, agg, futures, kctx, research_snapshot=None):
     # FVG / MACD Technical AI: combines price imbalance structure with
     # momentum confirmation. It is intentionally one council member rather
     # than a master override so live learning can raise/lower its influence.
-    macd_hist = safe_float(last.get("macd_hist"), safe_float(last["macd"] - last["macd_signal"], 0.0))
-    prev_macd = safe_float(prev["macd"], 0.0)
-    prev_signal = safe_float(prev["macd_signal"], 0.0)
-    now_macd = safe_float(last["macd"], 0.0)
-    now_signal = safe_float(last["macd_signal"], 0.0)
-    if now_macd > now_signal and prev_macd <= prev_signal:
-        macd_cross = 1.0
-        macd_state = "bullish cross"
-    elif now_macd < now_signal and prev_macd >= prev_signal:
-        macd_cross = -1.0
-        macd_state = "bearish cross"
-    elif macd_hist > 0:
-        macd_cross = 0.35
-        macd_state = "bullish histogram"
-    elif macd_hist < 0:
-        macd_cross = -0.35
-        macd_state = "bearish histogram"
-    else:
-        macd_cross = 0.0
-        macd_state = "flat"
-
-    macd_strength = math.tanh(macd_hist / max(px * 0.00035, 1e-9))
-    macd_score = clamp(0.65 * macd_strength + 0.35 * macd_cross)
+    macd_view = score_macd(hist)
+    macd_hist = macd_view["standard_hist"]
+    macd_score = macd_view["score"]
+    macd_state = macd_view["state"]
 
     fvg_score = 0.0
     fvg_state = "no fresh FVG"
@@ -323,7 +305,8 @@ def run_specialists_core(hist, agg, futures, kctx, research_snapshot=None):
 
     technical_score = clamp(0.55 * fvg_score + 0.45 * macd_score)
     technical_reason = (
-        f"{fvg_state}; MACD {macd_state}; histogram {macd_hist:+.2f}; "
+        f"{fvg_state}; adaptive MACD {macd_state}; standard hist {macd_hist:+.2f}; "
+        f"fast hist {macd_view['fast_hist']:+.2f}; {macd_view['agreement']}; "
         f"FVG score {fvg_score:+.2f}; MACD score {macd_score:+.2f}"
     )
     out["FVG / MACD AI"] = _specialist("FVG / MACD AI", technical_score, technical_reason)
