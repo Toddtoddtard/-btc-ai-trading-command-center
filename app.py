@@ -19,6 +19,7 @@ from market_guide import render_market_guide
 from shared_learning import fetch_shared_learning_state
 
 from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
+from macd_engine import project_macd_path
 from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
@@ -5259,16 +5260,16 @@ def live_dashboard():
         _tech_cols[3].metric("Fresh FVGs (60m)", f"{_bull_count} bull / {_bear_count} bear")
         st.caption(_tech.get("reason", "FVG/MACD specialist warming up"))
 
-        _tv = hist.tail(180).copy()
+        _price_tv = hist.tail(180).copy()
         _price_fig = go.Figure()
         _price_fig.add_trace(go.Candlestick(
-            x=_tv["time"], open=_tv["open"], high=_tv["high"],
-            low=_tv["low"], close=_tv["close"], name="BTCUSDT"
+            x=_price_tv["time"], open=_price_tv["open"], high=_price_tv["high"],
+            low=_price_tv["low"], close=_price_tv["close"], name="BTCUSDT"
         ))
 
         # Highlight the most recent bullish and bearish fair-value-gap zones.
         _zone_rows = []
-        for _idx, _row in _tv.iterrows():
+        for _idx, _row in _price_tv.iterrows():
             if bool(_row.get("bull_fvg", False)):
                 _zone_rows.append((
                     _row["time"], safe_float(_row.get("bull_fvg_lower")),
@@ -5283,7 +5284,7 @@ def live_dashboard():
             if not (pd.notna(_low) and pd.notna(_high)):
                 continue
             _price_fig.add_shape(
-                type="rect", x0=_x0, x1=_tv["time"].iloc[-1], y0=_low, y1=_high,
+                type="rect", x0=_x0, x1=_price_tv["time"].iloc[-1], y0=_low, y1=_high,
                 line=dict(width=1, color="#00d6a3" if _kind == "bull" else "#ff4d68"),
                 fillcolor="rgba(0,214,163,0.13)" if _kind == "bull" else "rgba(255,77,104,0.13)",
                 layer="below",
@@ -5297,6 +5298,25 @@ def live_dashboard():
         )
         st.plotly_chart(_price_fig, use_container_width=True, key="fvg_price_chart")
 
+        _macd_control_cols = st.columns(2)
+        with _macd_control_cols[0]:
+            _macd_history_minutes = st.select_slider(
+                "MACD history shown",
+                options=[30, 60, 120, 180],
+                value=180,
+                format_func=lambda value: f"{value} minutes",
+                key="macd_history_minutes",
+            )
+        with _macd_control_cols[1]:
+            _macd_projection_minutes = st.select_slider(
+                "MACD prediction horizon",
+                options=[1, 5, 15],
+                value=15,
+                format_func=lambda value: f"{value} minute" if value == 1 else f"{value} minutes",
+                key="macd_projection_minutes",
+            )
+
+        _tv = hist.tail(_macd_history_minutes).copy()
         _macd_fig = go.Figure()
         _macd_fig.add_trace(go.Scatter(
             x=_tv["time"], y=_tv["macd"], mode="lines", name="MACD", line=dict(width=2)
@@ -5319,11 +5339,62 @@ def live_dashboard():
         _macd_fig.add_trace(go.Bar(
             x=_tv["time"], y=_tv["macd_hist"], name="Histogram", marker_color=_hist_colors, opacity=0.72
         ))
+
+        # Display-only MACD projection.  It is derived from the exact same
+        # 15-minute price path used by the prediction chart, then MACD is
+        # recalculated over those projected closes.  Nothing here is written
+        # to the learner or passed to the trade engine.
+        _macd_price_projection = forecast_path_core(
+            hist.tail(60).to_dict("records"),
+            kctx.get("target", np.nan),
+            _learning_state,
+        )
+        _macd_projection = project_macd_path(
+            hist,
+            (_macd_price_projection or {}).get("forecast", []),
+            _macd_projection_minutes,
+        )
+        if not _macd_projection.empty:
+            _projection_end = pd.Timestamp(_macd_projection["time"].iloc[-1])
+            _projection_end_et = _projection_end.tz_convert(ZoneInfo("America/New_York"))
+            _projection_start = _macd_projection["time"].iloc[0]
+            _macd_fig.add_vrect(
+                x0=_projection_start,
+                x1=_projection_end,
+                fillcolor="rgba(46,168,255,0.08)",
+                line_width=0,
+                annotation_text="Projected",
+                annotation_position="top left",
+            )
+            _macd_fig.add_trace(go.Scatter(
+                x=_macd_projection["time"], y=_macd_projection["macd"],
+                mode="lines+markers", name=f"Projected MACD {_macd_projection_minutes}m",
+                line=dict(width=3, dash="dot", color="#2ea8ff"),
+                marker=dict(size=5, color="#2ea8ff"),
+                hovertemplate="%{x|%I:%M %p}<br>Projected MACD %{y:+.3f}<extra></extra>",
+            ))
+            _macd_fig.add_trace(go.Scatter(
+                x=_macd_projection["time"], y=_macd_projection["macd_signal"],
+                mode="lines", name="Projected signal",
+                line=dict(width=2, dash="dot", color="#ba68c8"),
+                hovertemplate="%{x|%I:%M %p}<br>Projected signal %{y:+.3f}<extra></extra>",
+            ))
+            _projected_hist = _macd_projection.iloc[1:]
+            _macd_fig.add_trace(go.Bar(
+                x=_projected_hist["time"], y=_projected_hist["macd_hist"],
+                name="Projected histogram", marker_color="rgba(46,168,255,0.42)",
+                hovertemplate="%{x|%I:%M %p}<br>Projected histogram %{y:+.3f}<extra></extra>",
+            ))
+            st.caption(
+                f"Projected through {_projection_end_et.strftime('%-I:%M %p ET')} • "
+                "blue shaded values are estimates from the bot's current price path, not completed candles."
+            )
         _macd_fig.add_hline(y=0, line_width=1, line_dash="dot")
         _macd_fig.update_layout(
             template="plotly_dark", height=300, margin=dict(l=10, r=10, t=35, b=10),
-            title="Adaptive MACD — standard 12/26/9 + fast 6/13/5", paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
+            title=f"Adaptive MACD — {_macd_projection_minutes}m projection", paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
             legend=dict(orientation="h"),
+            hovermode="x unified",
         )
         st.plotly_chart(_macd_fig, use_container_width=True, key="fvg_macd_chart")
 
