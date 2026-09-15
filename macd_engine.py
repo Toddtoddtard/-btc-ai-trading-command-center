@@ -47,6 +47,60 @@ def add_macd_features(frame: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
+def project_macd_path(hist: pd.DataFrame, price_forecast, horizon_minutes: int = 15) -> pd.DataFrame:
+    """Recalculate MACD over the existing presentation-only price forecast.
+
+    The returned frame includes the last real candle as an anchor followed by
+    one row per projected minute.  It is for chart display only and does not
+    feed the council, learning ledger, confidence, or trade execution.
+    """
+    columns = [
+        "time",
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "macd_fast_hist",
+        "is_projected",
+    ]
+    if hist is None or hist.empty or not price_forecast:
+        return pd.DataFrame(columns=columns)
+
+    horizon = int(max(1, min(15, horizon_minutes)))
+    forecast = list(price_forecast)[:horizon]
+    if not forecast:
+        return pd.DataFrame(columns=columns)
+
+    base = hist.copy()
+    last_time = pd.Timestamp(base["time"].iloc[-1])
+    if last_time.tzinfo is None:
+        last_time = last_time.tz_localize("UTC")
+    else:
+        last_time = last_time.tz_convert("UTC")
+    volume = base["volume"] if "volume" in base else pd.Series(0.0, index=base.index)
+    recent_volume = _finite(pd.to_numeric(volume, errors="coerce").tail(20).median(), 0.0)
+
+    future_rows = []
+    for index, row in enumerate(forecast, start=1):
+        step = int(max(1, _finite(row.get("step"), index)))
+        close = _finite(row.get("close"), _finite(base["close"].iloc[-1]))
+        open_ = _finite(row.get("open"), close)
+        future_rows.append(
+            {
+                "time": last_time + pd.Timedelta(minutes=step),
+                "open": open_,
+                "high": _finite(row.get("high"), max(open_, close)),
+                "low": _finite(row.get("low"), min(open_, close)),
+                "close": close,
+                "volume": recent_volume,
+            }
+        )
+
+    combined = pd.concat([base, pd.DataFrame(future_rows)], ignore_index=True, sort=False)
+    projected = add_macd_features(combined).tail(len(future_rows) + 1).copy()
+    projected["is_projected"] = [False] + [True] * len(future_rows)
+    return projected[columns].reset_index(drop=True)
+
+
 def score_macd(hist: pd.DataFrame) -> dict:
     """Score MACD from -1 (bearish) to +1 (bullish).
 

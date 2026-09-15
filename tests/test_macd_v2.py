@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from ai_core import enrich_history_core, run_specialists_core
-from macd_engine import score_macd
+from macd_engine import project_macd_path, score_macd
 
 
 def _candles(close):
@@ -55,6 +55,39 @@ class AdaptiveMacdTests(unittest.TestCase):
         technical_reason = results["FVG / MACD AI"]["reason"]
         self.assertIn("fast hist", technical_reason)
         self.assertIn("MACD score", technical_reason)
+
+    def test_projected_macd_has_adjustable_minute_timestamps(self):
+        hist = enrich_history_core(_candles(np.linspace(100_000, 101_000, 80)))
+        future = []
+        prior = float(hist["close"].iloc[-1])
+        for step in range(1, 16):
+            close = prior + 8.0
+            future.append(
+                {
+                    "step": step,
+                    "open": prior,
+                    "high": close + 3.0,
+                    "low": prior - 3.0,
+                    "close": close,
+                }
+            )
+            prior = close
+
+        five = project_macd_path(hist, future, 5)
+        fifteen = project_macd_path(hist, future, 15)
+
+        self.assertEqual(len(five), 6)  # last real anchor + five projected minutes
+        self.assertEqual(len(fifteen), 16)
+        self.assertFalse(bool(five["is_projected"].iloc[0]))
+        self.assertTrue(bool(five["is_projected"].iloc[-1]))
+        self.assertEqual(
+            pd.Timestamp(five["time"].iloc[-1]) - pd.Timestamp(five["time"].iloc[0]),
+            pd.Timedelta(minutes=5),
+        )
+        self.assertEqual(
+            pd.Timestamp(fifteen["time"].iloc[-1]) - pd.Timestamp(fifteen["time"].iloc[0]),
+            pd.Timedelta(minutes=15),
+        )
 
 
 if __name__ == "__main__":
