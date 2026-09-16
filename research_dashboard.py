@@ -30,27 +30,40 @@ def render_research_dashboard(learning_state):
     edge = calibration.get("model_edge_vs_market")
     c4.metric("Brier edge", "—" if edge is None else f"{edge:+.3f}", "positive beats market")
 
+    league = lab.get("strategy_league", {}) or {}
     policies = []
-    for name, row in (lab.get("policies") or {}).items():
-        n = int(row.get("samples") or 0)
+    for row in league.get("ranking") or []:
+        profit_factor = row.get("profit_factor")
         policies.append({
-            "Shadow policy": name,
-            "Samples": n,
-            "Win rate": (int(row.get("wins") or 0) / n * 100) if n else None,
+            "Rank": int(row.get("rank") or 0),
+            "Shadow strategy": row.get("name"),
+            "Status": row.get("status"),
+            "Samples": int(row.get("samples") or 0),
+            "Score": float(row.get("score") or 0.0),
+            "Win rate": None if row.get("win_rate") is None else float(row["win_rate"]) * 100,
+            "Bayesian win rate": float(row.get("bayesian_win_rate") or 0.0) * 100,
             "Net paper P/L": float(row.get("net_pnl") or 0.0),
-            "Max entry": float(row.get("max_entry") or 0.0) * 100,
-            "Minimum edge": float(row.get("min_edge") or 0.0) * 100,
-            "Confidence floor": float(row.get("min_confidence") or 0.0) * 100,
+            "Average trade": float(row.get("avg_pnl") or 0.0),
+            "Profit factor": None if profit_factor is None else (999.0 if profit_factor == float("inf") else float(profit_factor)),
+            "Max drawdown": float(row.get("max_drawdown") or 0.0),
+            "Recent average": float(row.get("recent_avg_pnl") or 0.0),
         })
     if policies:
-        st.markdown("#### Simultaneous policy trials")
+        st.markdown("#### Strategy League — simultaneous shadow trials")
+        st.caption(
+            "Eight virtual entry policies learn from each official settlement. "
+            "LEADER requires at least 40 fee-aware samples and positive net P/L; rankings never place trades."
+        )
         frame = pd.DataFrame(policies)
         st.dataframe(frame, use_container_width=True, hide_index=True, column_config={
+            "Score": st.column_config.NumberColumn(format="%.1f"),
             "Win rate": st.column_config.NumberColumn(format="%.1f%%"),
+            "Bayesian win rate": st.column_config.NumberColumn(format="%.1f%%"),
             "Net paper P/L": st.column_config.NumberColumn(format="$%.2f"),
-            "Max entry": st.column_config.NumberColumn(format="%.0f%%"),
-            "Minimum edge": st.column_config.NumberColumn(format="%.0f%%"),
-            "Confidence floor": st.column_config.NumberColumn(format="%.0f%%"),
+            "Average trade": st.column_config.NumberColumn(format="$%.3f"),
+            "Profit factor": st.column_config.NumberColumn(format="%.2f"),
+            "Max drawdown": st.column_config.NumberColumn(format="$%.2f"),
+            "Recent average": st.column_config.NumberColumn(format="$%.3f"),
         })
 
     phases = []

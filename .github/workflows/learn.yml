@@ -153,6 +153,10 @@ jobs:
           assert data.get('status', {}).get('research_lab_ok') is True
           assert data.get('research_lab', {}).get('paper_only') is True
           assert data.get('research_lab', {}).get('affects_execution') is False
+          assert data.get('research_lab', {}).get('version') == 2
+          assert len(data.get('research_lab', {}).get('policies', {})) == 8
+          assert data.get('research_lab', {}).get('strategy_league', {}).get('minimum_samples') == 40
+          assert data.get('research_lab', {}).get('strategy_league', {}).get('affects_execution') is False
           assert 'bot_intelligence_v4' in data
           assert data.get('background_paper', {}).get('paper_only') is True
           assert data.get('background_paper', {}).get('worker_ok') is True
