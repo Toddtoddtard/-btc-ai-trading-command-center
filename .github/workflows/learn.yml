@@ -160,8 +160,11 @@ jobs:
           assert data.get('research_lab', {}).get('affects_execution') is False
           assert data.get('research_lab', {}).get('version') == 2
           assert len(data.get('research_lab', {}).get('policies', {})) == 8
-          assert data.get('research_lab', {}).get('strategy_league', {}).get('minimum_samples') == 40
-          assert data.get('research_lab', {}).get('strategy_league', {}).get('affects_execution') is False
+          league=data.get('research_lab', {}).get('strategy_league', {})
+          assert league.get('minimum_samples') == 100
+          assert league.get('required_streak') == 3
+          assert league.get('active_policy') == 'Current 75 / 5'
+          assert league.get('affects_execution') is False
           assert 'bot_intelligence_v4' in data
           assert data.get('background_paper', {}).get('paper_only') is True
           assert data.get('background_paper', {}).get('worker_ok') is True

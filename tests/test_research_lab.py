@@ -87,17 +87,51 @@ class ResearchLabTests(unittest.TestCase):
         current = next(row for row in league["ranking"] if row["name"] == "Current 75 / 5")
         self.assertNotEqual(current["status"], "LEADER")
 
-    def test_mature_profitable_strategy_leads_after_fees_and_drawdown(self):
+    def test_policy_needs_strict_promotion_evidence_and_three_evaluations(self):
         lab = ensure_research_lab({})
         steady = lab["policies"]["Value 70 / 5"]
-        volatile = lab["policies"]["Explore 80 / 5"]
-        for i in range(50):
-            update_policy_bucket(steady, i % 3 != 0, 0.30 if i % 3 != 0 else -0.20)
-            update_policy_bucket(volatile, i % 2 == 0, 0.55 if i % 2 == 0 else -0.50)
+        active = lab["policies"]["Current 75 / 5"]
+        for i in range(100):
+            candidate_pnl = 0.30 if i % 4 else -0.20
+            active_pnl = 0.20 if i % 3 else -0.30
+            update_policy_bucket(steady, candidate_pnl > 0, candidate_pnl)
+            update_policy_bucket(active, active_pnl > 0, active_pnl)
+            lab["history"].append({
+                "result": "yes", "paper_pnl": candidate_pnl,
+                "policies": {
+                    "Value 70 / 5": {"eligible": True},
+                    "Current 75 / 5": {"eligible": active_pnl == candidate_pnl},
+                },
+            })
+        first = strategy_leaderboard(lab)
+        self.assertIsNone(first["leader"])
+        self.assertEqual(first["qualification_streaks"]["Value 70 / 5"], 1)
+        self.assertIsNone(strategy_leaderboard(lab)["leader"])
         league = strategy_leaderboard(lab)
         self.assertEqual(league["leader"], "Value 70 / 5")
         self.assertFalse(league["affects_execution"])
-        self.assertEqual(league["minimum_samples"], 40)
+        self.assertEqual(league["minimum_samples"], 100)
+        self.assertEqual(league["required_streak"], 3)
+
+    def test_policy_cannot_lead_without_paired_superiority(self):
+        lab = ensure_research_lab({})
+        candidate = lab["policies"]["Value 70 / 5"]
+        active = lab["policies"]["Current 75 / 5"]
+        for _ in range(100):
+            update_policy_bucket(candidate, True, 0.20)
+            update_policy_bucket(active, True, 0.20)
+            lab["history"].append({
+                "result": "yes", "paper_pnl": 0.20,
+                "policies": {
+                    "Value 70 / 5": {"eligible": True},
+                    "Current 75 / 5": {"eligible": True},
+                },
+            })
+        for _ in range(3):
+            league = strategy_leaderboard(lab)
+        self.assertIsNone(league["leader"])
+        row = next(row for row in league["ranking"] if row["name"] == "Value 70 / 5")
+        self.assertEqual(row["paired_pnl_delta"], 0.0)
 
 
 if __name__ == "__main__":

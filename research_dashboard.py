@@ -46,6 +46,8 @@ def render_research_dashboard(learning_state):
             "Average trade": float(row.get("avg_pnl") or 0.0),
             "Profit factor": None if profit_factor is None else (999.0 if profit_factor == float("inf") else float(profit_factor)),
             "Max drawdown": float(row.get("max_drawdown") or 0.0),
+            "Paired P/L edge": float(row.get("paired_pnl_delta") or 0.0),
+            "Qualification streak": int(row.get("qualification_streak") or 0),
             "Recent average": float(row.get("recent_avg_pnl") or 0.0),
         })
     if policies:
@@ -63,6 +65,7 @@ def render_research_dashboard(learning_state):
             "Average trade": st.column_config.NumberColumn(format="$%.3f"),
             "Profit factor": st.column_config.NumberColumn(format="%.2f"),
             "Max drawdown": st.column_config.NumberColumn(format="$%.2f"),
+            "Paired P/L edge": st.column_config.NumberColumn(format="$%.2f"),
             "Recent average": st.column_config.NumberColumn(format="$%.3f"),
         })
 

@@ -27,7 +27,10 @@ POLICIES = (
     {"name": "High Confidence 75 / 5", "max_entry": 0.75, "min_edge": 0.05, "min_confidence": 0.72},
 )
 
-LEAGUE_MIN_SAMPLES = 40
+LEAGUE_MIN_SAMPLES = 100
+LEAGUE_REQUIRED_STREAK = 3
+LEAGUE_MAX_DRAWDOWN = 5.0
+ACTIVE_POLICY_NAME = "Current 75 / 5"
 LEAGUE_EWMA_ALPHA = 0.18
 
 
@@ -78,6 +81,10 @@ def ensure_research_lab(state):
             bucket.setdefault(key, value)
     lab.setdefault("strategy_league", {
         "updated_at": None, "minimum_samples": LEAGUE_MIN_SAMPLES,
+        "required_streak": LEAGUE_REQUIRED_STREAK,
+        "maximum_drawdown": LEAGUE_MAX_DRAWDOWN,
+        "active_policy": ACTIVE_POLICY_NAME,
+        "qualification_streaks": {},
         "affects_execution": False, "leader": None, "ranking": [],
     })
     lab.setdefault("specialist_lifecycle", {})
@@ -198,6 +205,12 @@ def strategy_leaderboard(lab):
     Scores are descriptive research evidence only.  A small-sample strategy is
     never labeled LEADER, and this table cannot modify the live execution gate.
     """
+    history = [row for row in (lab.get("history") or []) if row.get("result") in {"yes", "no"}]
+    active_bucket = (lab.get("policies") or {}).get(ACTIVE_POLICY_NAME, {})
+    active_drawdown = _f(active_bucket.get("max_drawdown"), 0.0)
+    league = lab.setdefault("strategy_league", {})
+    previous_streaks = league.get("qualification_streaks") or {}
+    next_streaks = {}
     rows = []
     for name, bucket in (lab.get("policies") or {}).items():
         samples = int(bucket.get("samples") or 0)
@@ -221,6 +234,31 @@ def strategy_leaderboard(lab):
             + 0.10 * ((recent_win - 0.50) * 2.0)
             - 0.18 * math.tanh(drawdown / 1.50)
         )
+        candidate_paired_pnl = 0.0
+        active_paired_pnl = 0.0
+        paired_samples = 0
+        for observation in history:
+            decisions = observation.get("policies") or {}
+            candidate_eligible = bool((decisions.get(name) or {}).get("eligible"))
+            active_eligible = bool((decisions.get(ACTIVE_POLICY_NAME) or {}).get("eligible"))
+            if not (candidate_eligible or active_eligible):
+                continue
+            observation_pnl = _f(observation.get("paper_pnl"), 0.0)
+            candidate_paired_pnl += observation_pnl if candidate_eligible else 0.0
+            active_paired_pnl += observation_pnl if active_eligible else 0.0
+            paired_samples += 1
+        paired_delta = candidate_paired_pnl - active_paired_pnl
+        qualifies = bool(
+            name != ACTIVE_POLICY_NAME
+            and samples >= LEAGUE_MIN_SAMPLES
+            and pnl > 0.0
+            and paired_samples >= LEAGUE_MIN_SAMPLES
+            and paired_delta > 0.0
+            and drawdown <= LEAGUE_MAX_DRAWDOWN
+            and drawdown <= max(1.0, active_drawdown)
+        )
+        streak = int(previous_streaks.get(name, 0)) + 1 if qualifies else 0
+        next_streaks[name] = streak
         rows.append({
             "name": name,
             "samples": samples,
@@ -233,24 +271,38 @@ def strategy_leaderboard(lab):
             "max_drawdown": drawdown,
             "recent_win_rate": recent_win,
             "recent_avg_pnl": recent_pnl,
+            "paired_samples": paired_samples,
+            "paired_net_pnl": candidate_paired_pnl,
+            "active_paired_net_pnl": active_paired_pnl,
+            "paired_pnl_delta": paired_delta,
+            "qualification_streak": streak,
+            "qualifies_now": qualifies,
             "score": 50.0 + 50.0 * evidence * max(-1.0, min(1.0, quality)),
             "status": "LEARNING",
         })
     rows.sort(key=lambda row: (row["score"], row["net_pnl"], row["samples"]), reverse=True)
-    mature = [row for row in rows if row["samples"] >= LEAGUE_MIN_SAMPLES and row["net_pnl"] > 0]
-    leader = mature[0]["name"] if mature else None
+    qualified = [
+        row for row in rows
+        if row["qualifies_now"] and row["qualification_streak"] >= LEAGUE_REQUIRED_STREAK
+    ]
+    leader = qualified[0]["name"] if qualified else None
     for rank, row in enumerate(rows, 1):
         row["rank"] = rank
         if row["name"] == leader:
             row["status"] = "LEADER"
+        elif row["qualifies_now"]:
+            row["status"] = f"QUALIFYING {row['qualification_streak']}/{LEAGUE_REQUIRED_STREAK}"
         elif row["samples"] >= 10 and row["recent_avg_pnl"] > row["avg_pnl"]:
             row["status"] = "RISING"
         elif row["samples"] >= LEAGUE_MIN_SAMPLES:
             row["status"] = "TRACKING"
-    league = lab.setdefault("strategy_league", {})
     league.update({
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "minimum_samples": LEAGUE_MIN_SAMPLES,
+        "required_streak": LEAGUE_REQUIRED_STREAK,
+        "maximum_drawdown": LEAGUE_MAX_DRAWDOWN,
+        "active_policy": ACTIVE_POLICY_NAME,
+        "qualification_streaks": next_streaks,
         "affects_execution": False,
         "leader": leader,
         "ranking": rows,
