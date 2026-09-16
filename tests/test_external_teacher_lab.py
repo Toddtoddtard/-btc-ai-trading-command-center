@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from external_teacher_lab import (
@@ -113,6 +114,7 @@ class ExternalTeacherLabTests(unittest.TestCase):
         self.assertEqual(final["leader"], name)
         self.assertFalse(final["affects_execution"])
         self.assertEqual(final["teachers"][name]["samples"], 102)
+        json.dumps(final, allow_nan=False)
 
 
 if __name__ == "__main__":

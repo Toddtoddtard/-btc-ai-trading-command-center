@@ -404,7 +404,9 @@ def strategy_leaderboard(lab):
         bayes_win = (wins + 2.0) / (samples + 4.0)
         gross_profit = _f(bucket.get("gross_profit"), 0.0)
         gross_loss = abs(_f(bucket.get("gross_loss"), 0.0))
-        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (float("inf") if gross_profit > 0 else None)
+        # Persist a large finite sentinel so strict JSON writers used later in
+        # the learner pipeline never fail on an otherwise perfect no-loss run.
+        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (999.0 if gross_profit > 0 else None)
         drawdown = _f(bucket.get("max_drawdown"), 0.0)
         recent_pnl = _f(bucket.get("ewma_pnl"), 0.0)
         recent_win = _f(bucket.get("ewma_win_rate"), 0.5)

@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from research_lab import (
@@ -126,6 +127,7 @@ class ResearchLabTests(unittest.TestCase):
         self.assertIsNone(league["leader"])
         current = next(row for row in league["ranking"] if row["name"] == "Current 75 / 5")
         self.assertNotEqual(current["status"], "LEADER")
+        json.dumps(league, allow_nan=False)
 
     def test_policy_needs_strict_promotion_evidence_and_three_evaluations(self):
         lab = ensure_research_lab({})

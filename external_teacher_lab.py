@@ -289,7 +289,9 @@ def teacher_leaderboard(lab):
         pnl = _f(bucket.get("net_pnl"))
         gross_loss = abs(_f(bucket.get("gross_loss")))
         gross_profit = _f(bucket.get("gross_profit"))
-        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (float("inf") if gross_profit > 0 else None)
+        # JSON has no representation for infinity.  Keep a finite display
+        # sentinel so downstream strict serialization cannot stop learning.
+        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (999.0 if gross_profit > 0 else None)
         drawdown = _f(bucket.get("max_drawdown"))
         bayes_win = (wins + 2.0) / (samples + 4.0)
         avg_pnl = pnl / samples if samples else 0.0
