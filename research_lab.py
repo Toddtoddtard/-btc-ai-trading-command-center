@@ -39,6 +39,19 @@ LEAGUE_MAX_DRAWDOWN = 5.0
 ACTIVE_POLICY_NAME = "Current 75 / 5"
 LEAGUE_EWMA_ALPHA = 0.18
 
+# The probability model is deliberately conservative.  Kalshi's midpoint is
+# the benchmark and a feature, while the independent master score may only
+# move that probability after a causal walk-forward test proves incremental
+# Brier value.  These limits prevent a short noisy run from creating another
+# overconfident 1%/99% forecast.
+CALIBRATION_MIN_TRAINING_ROWS = 60
+CALIBRATION_MIN_VALIDATION_ROWS = 100
+CALIBRATION_LOOKBACK = 300
+CALIBRATION_RIDGE = 0.10
+CALIBRATION_MIN_EDGE = 0.0005
+CALIBRATION_MARKET_SLOPE_BOUNDS = (0.75, 1.25)
+CALIBRATION_MODEL_RESIDUAL_BOUNDS = (-0.15, 0.35)
+
 
 def _f(value, default=None):
     try:
@@ -65,12 +78,25 @@ def window_phase(opened_at, expires_at):
 
 def ensure_research_lab(state):
     lab = state.setdefault("research_lab", {})
-    lab["version"] = 2
+    lab["version"] = 3
     lab.setdefault("paper_only", True)
     lab.setdefault("affects_execution", False)
     lab.setdefault("pending", [])
     lab.setdefault("history", [])
     lab.setdefault("calibration", {"samples": 0, "model_brier": None, "market_brier": None})
+    calibration = lab["calibration"]
+    calibration.setdefault("guarded", {
+        "samples": 0,
+        "model_brier": None,
+        "market_brier": None,
+        "model_edge_vs_market": None,
+    })
+    lab.setdefault("guarded_calibrator", {
+        "version": 1,
+        "active": False,
+        "affects_execution": False,
+        "reason": "Waiting for causal walk-forward evidence",
+    })
     lab.setdefault("wait_counterfactual", {"samples": 0, "avoided_losses": 0, "missed_wins": 0, "net_if_traded": 0.0})
     lab.setdefault("phases", {})
     policies = lab.setdefault("policies", {})
@@ -124,6 +150,143 @@ def _yes_probability(pending):
     return max(0.01, min(0.99, 0.5 + 0.49 * base))
 
 
+def _bounded(value, bounds):
+    return max(bounds[0], min(bounds[1], float(value)))
+
+
+def _calibration_row(row):
+    market = _f(row.get("market_yes_probability"))
+    raw_model = _f(row.get("raw_model_yes_probability"))
+    if raw_model is None:
+        raw_model = _f(row.get("model_yes_probability"))
+    result = str(row.get("result") or "").lower()
+    if market is None or raw_model is None or result not in {"yes", "no"}:
+        return None
+    return {
+        "ticker": str(row.get("ticker") or ""),
+        "market": max(0.01, min(0.99, market)),
+        "raw_model": max(0.01, min(0.99, raw_model)),
+        "outcome": 1.0 if result == "yes" else 0.0,
+    }
+
+
+def _fit_calibration_coefficients(rows):
+    """Fit a bounded ridge correction to market probability without numpy."""
+    rows = list(rows)[-CALIBRATION_LOOKBACK:]
+    s11 = s12 = s22 = b1 = b2 = 0.0
+    for row in rows:
+        x1 = row["market"] - 0.5
+        x2 = row["raw_model"] - row["market"]
+        target = row["outcome"] - 0.5
+        s11 += x1 * x1
+        s12 += x1 * x2
+        s22 += x2 * x2
+        b1 += x1 * target
+        b2 += x2 * target
+    a11 = s11 + CALIBRATION_RIDGE
+    a22 = s22 + CALIBRATION_RIDGE
+    determinant = a11 * a22 - s12 * s12
+    if abs(determinant) < 1e-12:
+        return 1.0, 0.0
+    market_slope = (b1 * a22 - b2 * s12) / determinant
+    model_residual = (a11 * b2 - s12 * b1) / determinant
+    return (
+        _bounded(market_slope, CALIBRATION_MARKET_SLOPE_BOUNDS),
+        _bounded(model_residual, CALIBRATION_MODEL_RESIDUAL_BOUNDS),
+    )
+
+
+def _candidate_probability(raw_model, market, coefficients):
+    market_slope, model_residual = coefficients
+    probability = (
+        0.5
+        + market_slope * (float(market) - 0.5)
+        + model_residual * (float(raw_model) - float(market))
+    )
+    return max(0.02, min(0.98, probability))
+
+
+def fit_guarded_calibrator(history):
+    """Return a causal, walk-forward-tested probability calibrator.
+
+    All observations from one ticker are validated before that ticker is added
+    to training, so later phases of a market cannot learn its own settlement.
+    If the candidate has not beaten Kalshi both overall and recently, the live
+    research forecast falls back exactly to the contemporaneous market price.
+    """
+    grouped = {}
+    for original in history or []:
+        row = _calibration_row(original)
+        if row is not None:
+            grouped.setdefault(row["ticker"] or f"row-{len(grouped)}", []).append(row)
+
+    training = []
+    validation = []
+    for group in grouped.values():
+        if len(training) >= CALIBRATION_MIN_TRAINING_ROWS:
+            coefficients = _fit_calibration_coefficients(training)
+            for row in group:
+                candidate = _candidate_probability(row["raw_model"], row["market"], coefficients)
+                validation.append({
+                    "candidate_brier": (candidate - row["outcome"]) ** 2,
+                    "market_brier": (row["market"] - row["outcome"]) ** 2,
+                })
+        training.extend(group)
+
+    coefficients = _fit_calibration_coefficients(training) if training else (1.0, 0.0)
+    samples = len(validation)
+    candidate_brier = (
+        sum(row["candidate_brier"] for row in validation) / samples if samples else None
+    )
+    market_brier = (
+        sum(row["market_brier"] for row in validation) / samples if samples else None
+    )
+    recent = validation[-min(100, samples):]
+    recent_edge = (
+        sum(row["market_brier"] - row["candidate_brier"] for row in recent) / len(recent)
+        if recent else None
+    )
+    edge = None if samples == 0 else market_brier - candidate_brier
+    active = bool(
+        samples >= CALIBRATION_MIN_VALIDATION_ROWS
+        and edge is not None
+        and edge >= CALIBRATION_MIN_EDGE
+        and recent_edge is not None
+        and recent_edge >= 0.0
+    )
+    return {
+        "version": 1,
+        "active": active,
+        "affects_execution": False,
+        "training_samples": len(training),
+        "validation_samples": samples,
+        "validation_brier": candidate_brier,
+        "validation_market_brier": market_brier,
+        "validation_edge": edge,
+        "recent_validation_edge": recent_edge,
+        "market_slope": coefficients[0],
+        "model_residual_weight": coefficients[1],
+        "reason": (
+            "Walk-forward Brier improvement passed; guarded residual correction enabled"
+            if active else
+            "Candidate has not passed the walk-forward edge gate; using Kalshi probability fallback"
+        ),
+    }
+
+
+def guarded_probability(raw_model, market, calibrator):
+    if not (calibrator or {}).get("active"):
+        return max(0.01, min(0.99, float(market)))
+    return _candidate_probability(
+        raw_model,
+        market,
+        (
+            _f(calibrator.get("market_slope"), 1.0),
+            _f(calibrator.get("model_residual_weight"), 0.0),
+        ),
+    )
+
+
 def register_shadow(state, pending, market_info):
     if not pending or not market_info:
         return False
@@ -142,9 +305,17 @@ def register_shadow(state, pending, market_info):
     if yes_bid is None or yes_ask is None:
         return False
     no_ask = _f(market_info.get("no_ask"), 1.0 - yes_bid)
-    model_yes = _yes_probability(pending)
-    direction = "YES" if model_yes >= 0.5 else "NO"
-    side_probability = model_yes if direction == "YES" else 1.0 - model_yes
+    raw_model_yes = _yes_probability(pending)
+    market_yes = max(0.01, min(0.99, (yes_bid + yes_ask) / 2.0))
+    calibrator = fit_guarded_calibrator(lab.get("history") or [])
+    calibrator["updated_at"] = datetime.now(timezone.utc).isoformat()
+    lab["guarded_calibrator"] = calibrator
+    model_yes = guarded_probability(raw_model_yes, market_yes, calibrator)
+    # Keep the existing strategy-league experiment stable.  The new guarded
+    # probability is scored in parallel and cannot silently change historical
+    # entry-policy eligibility before it earns its own evidence.
+    direction = "YES" if raw_model_yes >= 0.5 else "NO"
+    side_probability = raw_model_yes if direction == "YES" else 1.0 - raw_model_yes
     ask = yes_ask if direction == "YES" else no_ask
     action = str(pending.get("master_action") or "WAIT").upper()
     policies = {}
@@ -167,8 +338,12 @@ def register_shadow(state, pending, market_info):
         "action": action,
         "direction": direction,
         "confidence": confidence,
-        "model_yes_probability": model_yes,
-        "market_yes_probability": max(0.01, min(0.99, (yes_bid + yes_ask) / 2.0)),
+        "model_yes_probability": raw_model_yes,
+        "raw_model_yes_probability": raw_model_yes,
+        "guarded_yes_probability": model_yes,
+        "probability_model_version": "guarded-market-residual-v1",
+        "calibrator_active": bool(calibrator.get("active")),
+        "market_yes_probability": market_yes,
         "yes_ask": yes_ask,
         "no_ask": no_ask,
         "selected_ask": ask,
@@ -329,7 +504,11 @@ def resolve_shadows(state, result_reader):
             unresolved.append(row)
             continue
         outcome = 1.0 if result == "yes" else 0.0
-        model_brier = (row["model_yes_probability"] - outcome) ** 2
+        raw_model_probability = _f(
+            row.get("raw_model_yes_probability"),
+            _f(row.get("model_yes_probability"), 0.5),
+        )
+        model_brier = (raw_model_probability - outcome) ** 2
         market_brier = (row["market_yes_probability"] - outcome) ** 2
         calibration = lab["calibration"]
         calibration["samples"] += 1
@@ -337,6 +516,23 @@ def resolve_shadows(state, result_reader):
         calibration["model_brier"] = _running_average(calibration.get("model_brier"), model_brier, n)
         calibration["market_brier"] = _running_average(calibration.get("market_brier"), market_brier, n)
         calibration["model_edge_vs_market"] = calibration["market_brier"] - calibration["model_brier"]
+
+        guarded_probability_value = _f(row.get("guarded_yes_probability"))
+        guarded_brier = None
+        if guarded_probability_value is not None:
+            guarded_brier = (guarded_probability_value - outcome) ** 2
+            guarded = calibration.setdefault("guarded", {})
+            guarded["samples"] = int(guarded.get("samples") or 0) + 1
+            guarded_n = guarded["samples"]
+            guarded["model_brier"] = _running_average(
+                guarded.get("model_brier"), guarded_brier, guarded_n
+            )
+            guarded["market_brier"] = _running_average(
+                guarded.get("market_brier"), market_brier, guarded_n
+            )
+            guarded["model_edge_vs_market"] = (
+                guarded["market_brier"] - guarded["model_brier"]
+            )
 
         won = row["direction"].lower() == result
         ask = _f(row.get("selected_ask"), 1.0)
@@ -359,7 +555,14 @@ def resolve_shadows(state, result_reader):
             bucket = lab["policies"].setdefault(name, {})
             update_policy_bucket(bucket, won, pnl)
         grade_teacher_calls(lab, row, result)
-        row.update({"result": result, "won": won, "paper_pnl": pnl, "model_brier": model_brier, "market_brier": market_brier})
+        row.update({
+            "result": result,
+            "won": won,
+            "paper_pnl": pnl,
+            "model_brier": model_brier,
+            "guarded_brier": guarded_brier,
+            "market_brier": market_brier,
+        })
         lab["history"].append(row)
         resolved += 1
     lab["pending"] = unresolved[-200:]

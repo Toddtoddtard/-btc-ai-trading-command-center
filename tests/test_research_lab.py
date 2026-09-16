@@ -3,6 +3,8 @@ import unittest
 from research_lab import (
     enrich_rationales,
     ensure_research_lab,
+    fit_guarded_calibrator,
+    guarded_probability,
     register_shadow,
     resolve_shadows,
     strategy_leaderboard,
@@ -46,6 +48,44 @@ class ResearchLabTests(unittest.TestCase):
         self.assertEqual(lab["wait_counterfactual"]["missed_wins"], 2)
         self.assertGreater(lab["history"][0]["paper_pnl"], 0)
         self.assertEqual(lab["pending"], [])
+
+    def test_guarded_probability_falls_back_to_market_before_validation(self):
+        calibration = fit_guarded_calibrator([])
+        self.assertFalse(calibration["active"])
+        self.assertAlmostEqual(guarded_probability(0.99, 0.62, calibration), 0.62)
+
+    def test_calibrator_activates_only_after_causal_walk_forward_edge(self):
+        history = []
+        for i in range(180):
+            outcome = 1.0 if i % 2 == 0 else 0.0
+            history.append({
+                "ticker": f"T-{i}",
+                "result": "yes" if outcome else "no",
+                "market_yes_probability": 0.55 if outcome else 0.45,
+                "model_yes_probability": 0.85 if outcome else 0.15,
+            })
+        calibration = fit_guarded_calibrator(history)
+        self.assertTrue(calibration["active"])
+        self.assertGreaterEqual(calibration["validation_samples"], 100)
+        self.assertGreater(calibration["validation_edge"], 0.0)
+        self.assertFalse(calibration["affects_execution"])
+
+    def test_guarded_score_has_separate_post_deployment_evidence(self):
+        state = {}
+        pending = {
+            "ticker": "KXBTC15M-GUARDED", "opened_at": 100, "expires_at": 1000,
+            "master_base_score": 1.0, "master_confidence": 0.9,
+            "master_action": "WAIT",
+        }
+        market = {"yes_bid": 0.59, "yes_ask": 0.61, "no_ask": 0.41}
+        self.assertTrue(register_shadow(state, pending, market))
+        row = state["research_lab"]["pending"][0]
+        self.assertAlmostEqual(row["model_yes_probability"], 0.99)
+        self.assertAlmostEqual(row["guarded_yes_probability"], 0.60)
+        self.assertEqual(resolve_shadows(state, lambda ticker: "no"), 1)
+        calibration = state["research_lab"]["calibration"]
+        self.assertEqual(calibration["guarded"]["samples"], 1)
+        self.assertLess(calibration["guarded"]["model_brier"], calibration["model_brier"])
 
     def test_lifecycle_never_controls_execution(self):
         state = {

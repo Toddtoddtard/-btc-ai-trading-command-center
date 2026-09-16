@@ -22,13 +22,25 @@ def render_research_dashboard(learning_state):
         return
 
     calibration = lab.get("calibration", {}) or {}
+    guarded = calibration.get("guarded", {}) or {}
+    calibrator = lab.get("guarded_calibrator", {}) or {}
     wait = lab.get("wait_counterfactual", {}) or {}
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Settled shadows", int(calibration.get("samples") or 0))
-    c2.metric("Model Brier", "—" if calibration.get("model_brier") is None else f"{calibration['model_brier']:.3f}")
-    c3.metric("Kalshi baseline", "—" if calibration.get("market_brier") is None else f"{calibration['market_brier']:.3f}")
-    edge = calibration.get("model_edge_vs_market")
+    c1.metric("Guarded samples", int(guarded.get("samples") or 0))
+    c2.metric("Guarded Brier", "—" if guarded.get("model_brier") is None else f"{guarded['model_brier']:.3f}")
+    c3.metric("Kalshi paired", "—" if guarded.get("market_brier") is None else f"{guarded['market_brier']:.3f}")
+    edge = guarded.get("model_edge_vs_market")
     c4.metric("Brier edge", "—" if edge is None else f"{edge:+.3f}", "positive beats market")
+    validation_brier = calibrator.get("validation_brier")
+    validation_market = calibrator.get("validation_market_brier")
+    st.caption(
+        f"Guarded calibrator: {'ACTIVE' if calibrator.get('active') else 'MARKET FALLBACK'} • "
+        f"walk-forward samples {int(calibrator.get('validation_samples') or 0)} • "
+        f"candidate Brier {'—' if validation_brier is None else f'{float(validation_brier):.3f}'} vs "
+        f"Kalshi {'—' if validation_market is None else f'{float(validation_market):.3f}'}. "
+        f"Legacy raw-model Brier {('—' if calibration.get('model_brier') is None else f'{float(calibration.get("model_brier")):.3f}')} "
+        f"on {int(calibration.get('samples') or 0)} historical shadows."
+    )
 
     league = lab.get("strategy_league", {}) or {}
     policies = []
