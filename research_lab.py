@@ -13,6 +13,12 @@ from __future__ import annotations
 import math
 from datetime import datetime, timezone
 
+from external_teacher_lab import (
+    build_teacher_calls,
+    ensure_teacher_lab,
+    grade_teacher_calls,
+    teacher_leaderboard,
+)
 from kalshi_paper_engine import kalshi_taker_fee
 
 
@@ -88,6 +94,7 @@ def ensure_research_lab(state):
         "affects_execution": False, "leader": None, "ranking": [],
     })
     lab.setdefault("specialist_lifecycle", {})
+    ensure_teacher_lab(lab)
     return lab
 
 
@@ -150,7 +157,7 @@ def register_shadow(state, pending, market_info):
             and confidence >= policy["min_confidence"]
         )
         policies[policy["name"]] = {"eligible": eligible}
-    lab["pending"].append({
+    observation = {
         "ticker": ticker,
         "opened_at": opened_at,
         "opened_at_utc": _iso(opened_at),
@@ -166,7 +173,9 @@ def register_shadow(state, pending, market_info):
         "no_ask": no_ask,
         "selected_ask": ask,
         "policies": policies,
-    })
+    }
+    observation["external_teachers"] = build_teacher_calls(lab, pending, market_info)
+    lab["pending"].append(observation)
     lab["pending"] = lab["pending"][-200:]
     return True
 
@@ -349,12 +358,14 @@ def resolve_shadows(state, result_reader):
                 continue
             bucket = lab["policies"].setdefault(name, {})
             update_policy_bucket(bucket, won, pnl)
+        grade_teacher_calls(lab, row, result)
         row.update({"result": result, "won": won, "paper_pnl": pnl, "model_brier": model_brier, "market_brier": market_brier})
         lab["history"].append(row)
         resolved += 1
     lab["pending"] = unresolved[-200:]
     lab["history"] = lab["history"][-1000:]
     strategy_leaderboard(lab)
+    teacher_leaderboard(lab)
     return resolved
 
 
