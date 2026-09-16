@@ -2,7 +2,10 @@
 
 This module never places orders and never changes the production execution gate.
 It records one shadow observation per contract and grades it only from Kalshi's
-official binary result so candidate policies can be compared safely.
+official binary result so candidate policies can be compared safely.  The
+strategy league evaluates many virtual policies from the same settled window,
+similar to a copy-trading leaderboard but without copying people or placing
+orders.
 """
 
 from __future__ import annotations
@@ -14,11 +17,18 @@ from kalshi_paper_engine import kalshi_taker_fee
 
 
 POLICIES = (
+    {"name": "Conservative 65 / 5", "max_entry": 0.65, "min_edge": 0.05, "min_confidence": 0.58},
     {"name": "Value 70 / 5", "max_entry": 0.70, "min_edge": 0.05, "min_confidence": 0.58},
+    {"name": "Value 70 / 10", "max_entry": 0.70, "min_edge": 0.10, "min_confidence": 0.65},
     {"name": "Current 75 / 5", "max_entry": 0.75, "min_edge": 0.05, "min_confidence": 0.58},
     {"name": "Explore 80 / 5", "max_entry": 0.80, "min_edge": 0.05, "min_confidence": 0.58},
     {"name": "Selective 75 / 10", "max_entry": 0.75, "min_edge": 0.10, "min_confidence": 0.65},
+    {"name": "Edge 75 / 15", "max_entry": 0.75, "min_edge": 0.15, "min_confidence": 0.65},
+    {"name": "High Confidence 75 / 5", "max_entry": 0.75, "min_edge": 0.05, "min_confidence": 0.72},
 )
+
+LEAGUE_MIN_SAMPLES = 40
+LEAGUE_EWMA_ALPHA = 0.18
 
 
 def _f(value, default=None):
@@ -46,7 +56,7 @@ def window_phase(opened_at, expires_at):
 
 def ensure_research_lab(state):
     lab = state.setdefault("research_lab", {})
-    lab.setdefault("version", 1)
+    lab["version"] = 2
     lab.setdefault("paper_only", True)
     lab.setdefault("affects_execution", False)
     lab.setdefault("pending", [])
@@ -54,7 +64,22 @@ def ensure_research_lab(state):
     lab.setdefault("calibration", {"samples": 0, "model_brier": None, "market_brier": None})
     lab.setdefault("wait_counterfactual", {"samples": 0, "avoided_losses": 0, "missed_wins": 0, "net_if_traded": 0.0})
     lab.setdefault("phases", {})
-    lab.setdefault("policies", {p["name"]: {**p, "samples": 0, "wins": 0, "net_pnl": 0.0} for p in POLICIES})
+    policies = lab.setdefault("policies", {})
+    for policy in POLICIES:
+        bucket = policies.setdefault(policy["name"], {})
+        for key, value in policy.items():
+            bucket.setdefault(key, value)
+        for key, value in {
+            "samples": 0, "wins": 0, "net_pnl": 0.0,
+            "gross_profit": 0.0, "gross_loss": 0.0,
+            "equity": 0.0, "peak_equity": 0.0, "max_drawdown": 0.0,
+            "ewma_win_rate": None, "ewma_pnl": None,
+        }.items():
+            bucket.setdefault(key, value)
+    lab.setdefault("strategy_league", {
+        "updated_at": None, "minimum_samples": LEAGUE_MIN_SAMPLES,
+        "affects_execution": False, "leader": None, "ranking": [],
+    })
     lab.setdefault("specialist_lifecycle", {})
     return lab
 
@@ -143,6 +168,96 @@ def _running_average(old, value, n):
     return value if n == 1 or old is None else old + (value - old) / n
 
 
+def _ewma(old, value, alpha=LEAGUE_EWMA_ALPHA):
+    return value if old is None else (1.0 - alpha) * float(old) + alpha * float(value)
+
+
+def update_policy_bucket(bucket, won, pnl):
+    """Update fee-aware strategy evidence without retaining unbounded trades."""
+    bucket["samples"] = int(bucket.get("samples") or 0) + 1
+    bucket["wins"] = int(bucket.get("wins") or 0) + int(bool(won))
+    bucket["net_pnl"] = _f(bucket.get("net_pnl"), 0.0) + pnl
+    bucket["gross_profit"] = _f(bucket.get("gross_profit"), 0.0) + max(0.0, pnl)
+    bucket["gross_loss"] = _f(bucket.get("gross_loss"), 0.0) + min(0.0, pnl)
+    equity = _f(bucket.get("equity"), 0.0) + pnl
+    peak = max(_f(bucket.get("peak_equity"), 0.0), equity)
+    bucket["equity"] = equity
+    bucket["peak_equity"] = peak
+    bucket["max_drawdown"] = max(
+        _f(bucket.get("max_drawdown"), 0.0),
+        max(0.0, peak - equity),
+    )
+    bucket["ewma_win_rate"] = _ewma(bucket.get("ewma_win_rate"), float(bool(won)))
+    bucket["ewma_pnl"] = _ewma(bucket.get("ewma_pnl"), pnl)
+    return bucket
+
+
+def strategy_leaderboard(lab):
+    """Rank shadow policies on profitability, consistency and drawdown.
+
+    Scores are descriptive research evidence only.  A small-sample strategy is
+    never labeled LEADER, and this table cannot modify the live execution gate.
+    """
+    rows = []
+    for name, bucket in (lab.get("policies") or {}).items():
+        samples = int(bucket.get("samples") or 0)
+        wins = int(bucket.get("wins") or 0)
+        pnl = _f(bucket.get("net_pnl"), 0.0)
+        avg_pnl = pnl / samples if samples else 0.0
+        bayes_win = (wins + 2.0) / (samples + 4.0)
+        gross_profit = _f(bucket.get("gross_profit"), 0.0)
+        gross_loss = abs(_f(bucket.get("gross_loss"), 0.0))
+        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (float("inf") if gross_profit > 0 else None)
+        drawdown = _f(bucket.get("max_drawdown"), 0.0)
+        recent_pnl = _f(bucket.get("ewma_pnl"), 0.0)
+        recent_win = _f(bucket.get("ewma_win_rate"), 0.5)
+        evidence = min(1.0, math.sqrt(samples / LEAGUE_MIN_SAMPLES)) if samples else 0.0
+        pf_term = 0.0 if profit_factor is None else math.tanh(math.log(max(profit_factor, 1e-6)) / 2.0)
+        quality = (
+            0.30 * ((bayes_win - 0.50) * 2.0)
+            + 0.28 * math.tanh(avg_pnl / 0.12)
+            + 0.17 * pf_term
+            + 0.15 * math.tanh(recent_pnl / 0.12)
+            + 0.10 * ((recent_win - 0.50) * 2.0)
+            - 0.18 * math.tanh(drawdown / 1.50)
+        )
+        rows.append({
+            "name": name,
+            "samples": samples,
+            "wins": wins,
+            "win_rate": (wins / samples) if samples else None,
+            "bayesian_win_rate": bayes_win,
+            "net_pnl": pnl,
+            "avg_pnl": avg_pnl,
+            "profit_factor": profit_factor,
+            "max_drawdown": drawdown,
+            "recent_win_rate": recent_win,
+            "recent_avg_pnl": recent_pnl,
+            "score": 50.0 + 50.0 * evidence * max(-1.0, min(1.0, quality)),
+            "status": "LEARNING",
+        })
+    rows.sort(key=lambda row: (row["score"], row["net_pnl"], row["samples"]), reverse=True)
+    mature = [row for row in rows if row["samples"] >= LEAGUE_MIN_SAMPLES and row["net_pnl"] > 0]
+    leader = mature[0]["name"] if mature else None
+    for rank, row in enumerate(rows, 1):
+        row["rank"] = rank
+        if row["name"] == leader:
+            row["status"] = "LEADER"
+        elif row["samples"] >= 10 and row["recent_avg_pnl"] > row["avg_pnl"]:
+            row["status"] = "RISING"
+        elif row["samples"] >= LEAGUE_MIN_SAMPLES:
+            row["status"] = "TRACKING"
+    league = lab.setdefault("strategy_league", {})
+    league.update({
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "minimum_samples": LEAGUE_MIN_SAMPLES,
+        "affects_execution": False,
+        "leader": leader,
+        "ranking": rows,
+    })
+    return league
+
+
 def resolve_shadows(state, result_reader):
     lab = ensure_research_lab(state)
     unresolved = []
@@ -180,15 +295,14 @@ def resolve_shadows(state, result_reader):
         for name, decision in row.get("policies", {}).items():
             if not decision.get("eligible"):
                 continue
-            bucket = lab["policies"].setdefault(name, {"samples": 0, "wins": 0, "net_pnl": 0.0})
-            bucket["samples"] += 1
-            bucket["wins"] += int(won)
-            bucket["net_pnl"] += pnl
+            bucket = lab["policies"].setdefault(name, {})
+            update_policy_bucket(bucket, won, pnl)
         row.update({"result": result, "won": won, "paper_pnl": pnl, "model_brier": model_brier, "market_brier": market_brier})
         lab["history"].append(row)
         resolved += 1
     lab["pending"] = unresolved[-200:]
     lab["history"] = lab["history"][-1000:]
+    strategy_leaderboard(lab)
     return resolved
 
 
