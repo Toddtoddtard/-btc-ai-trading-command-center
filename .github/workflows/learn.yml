@@ -27,6 +27,9 @@ on:
       - 'tests/test_audit_v6.py'
       - 'tests/test_market_research.py'
       - 'background_paper.py'
+      - 'multi_asset_paper.py'
+      - 'multi_asset_command_center.py'
+      - 'tests/test_multi_asset_paper.py'
       - 'tests/test_background_paper.py'
       - 'kalshi_paper_engine.py'
       - '.github/workflows/learn.yml'
@@ -56,9 +59,9 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py research_lab.py research_dashboard.py shared_learning.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_research_lab.py tests/test_shared_learning.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py multi_asset_paper.py research_lab.py research_dashboard.py shared_learning.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_multi_asset_paper.py tests/test_research_lab.py tests/test_shared_learning.py
       - name: Run audit v6 regression tests
-        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_research_lab tests.test_shared_learning -v
+        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_research_lab tests.test_shared_learning -v
       - name: Load previous private learning state and historical priors
         shell: bash
         run: |
@@ -119,6 +122,8 @@ jobs:
           # the same paper engine every second while the dashboard is open;
           # this scheduled cycle provides the unattended checkpoint.
           python background_paper.py
+      - name: Run persistent Gold, Gas, ZEC and WTI AUTO PAPER cycles
+        run: python multi_asset_paper.py --state /tmp/learning_state.json
       - name: Validate generated learning state
         run: |
           python - <<'PY'
@@ -160,6 +165,13 @@ jobs:
           assert 'bot_intelligence_v4' in data
           assert data.get('background_paper', {}).get('paper_only') is True
           assert data.get('background_paper', {}).get('worker_ok') is True
+          multi=data.get('multi_asset_paper', {})
+          assert multi.get('paper_only') is True
+          assert multi.get('real_money_execution') is False
+          assert multi.get('enabled') is True
+          assert set(multi.get('assets', {})) == {'gold', 'gas', 'zec', 'wti'}
+          assert all(row.get('enabled') is True for row in multi.get('assets', {}).values())
+          assert all(row.get('starting_cash') == 500.0 for row in multi.get('assets', {}).values())
           assert isinstance(data.get('bot_intelligence_v4', {}).get('ranking', []), list)
           assert 'specialist_knowledge_v5' in data
           assert isinstance(data.get('specialist_knowledge_v5', {}).get('bots', {}), dict)
