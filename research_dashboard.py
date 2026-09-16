@@ -54,7 +54,8 @@ def render_research_dashboard(learning_state):
         st.markdown("#### Strategy League — simultaneous shadow trials")
         st.caption(
             "Eight virtual entry policies learn from each official settlement. "
-            "LEADER requires at least 40 fee-aware samples and positive net P/L; rankings never place trades."
+            f"LEADER requires at least {int(league.get('minimum_samples') or 100)} fee-aware samples, "
+            "paired superiority, controlled drawdown and three qualifying evaluations; rankings never place trades."
         )
         frame = pd.DataFrame(policies)
         st.dataframe(frame, use_container_width=True, hide_index=True, column_config={
@@ -67,6 +68,43 @@ def render_research_dashboard(learning_state):
             "Max drawdown": st.column_config.NumberColumn(format="$%.2f"),
             "Paired P/L edge": st.column_config.NumberColumn(format="$%.2f"),
             "Recent average": st.column_config.NumberColumn(format="$%.3f"),
+        })
+
+    teachers = []
+    teacher_lab = lab.get("external_teacher_lab", {}) or {}
+    for row in teacher_lab.get("ranking") or []:
+        profit_factor = row.get("profit_factor")
+        teachers.append({
+            "Rank": int(row.get("rank") or 0),
+            "Teacher challenger": row.get("name"),
+            "Status": row.get("status"),
+            "Samples": int(row.get("samples") or 0),
+            "Score": float(row.get("score") or 0.0),
+            "Bayesian win rate": float(row.get("bayesian_win_rate") or 0.0) * 100,
+            "Net paper P/L": float(row.get("net_pnl") or 0.0),
+            "Average trade": float(row.get("avg_pnl") or 0.0),
+            "Profit factor": None if profit_factor is None else (999.0 if profit_factor == float("inf") else float(profit_factor)),
+            "Max drawdown": float(row.get("max_drawdown") or 0.0),
+            "Brier": row.get("brier"),
+            "Method": row.get("method"),
+        })
+    if teachers:
+        st.markdown("#### External Teacher Lab — public methods, shadow-only")
+        st.caption(
+            "Transparent challengers inspired by public Composer, Freqtrade, FinRL and Hummingbot concepts. "
+            f"An advisory leader requires {int(teacher_lab.get('minimum_samples') or 100)} official settlements, "
+            "positive after-fee P/L, profit factor above 1, controlled drawdown and three new qualifying evaluations. "
+            "Teachers cannot place trades or alter execution."
+        )
+        frame = pd.DataFrame(teachers)
+        st.dataframe(frame, use_container_width=True, hide_index=True, column_config={
+            "Score": st.column_config.NumberColumn(format="%.1f"),
+            "Bayesian win rate": st.column_config.NumberColumn(format="%.1f%%"),
+            "Net paper P/L": st.column_config.NumberColumn(format="$%.2f"),
+            "Average trade": st.column_config.NumberColumn(format="$%.3f"),
+            "Profit factor": st.column_config.NumberColumn(format="%.2f"),
+            "Max drawdown": st.column_config.NumberColumn(format="$%.2f"),
+            "Brier": st.column_config.NumberColumn(format="%.3f"),
         })
 
     phases = []
