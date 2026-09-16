@@ -13,7 +13,9 @@ import streamlit as st
 
 from access_control import require_owner_approval
 from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
+from multi_asset_paper import decision_from_specialists
 from multi_market_nav import MARKETS, render_market_nav
+from shared_learning import fetch_shared_learning_state
 
 
 ASSET_CONFIG = {
@@ -346,51 +348,13 @@ def _genericize_specialist_text(results, cfg, kctx):
 
 def _decision(results, market_key, kctx):
     cfg = ASSET_CONFIG[market_key]
-    active = list(BASE_SPECIALISTS)
-    if kctx.get("available"):
-        active.append("Kalshi Context AI")
-    if market_key == "zec":
-        active.extend(["Whale AI", "Liquidity AI"])
-
-    rows = [results[n] for n in active if n in results]
-    if not rows:
-        return {"action": "WAIT", "score": 0.0, "confidence": 0.0, "consensus": 0.0}
-
-    weights = []
-    weighted_scores = []
-    directional_signs = []
-    for result in rows:
-        conf = float(np.clip(_safe_float(result.get("confidence"), 0.48), 0.0, 1.0))
-        score = float(np.clip(_safe_float(result.get("score"), 0.0), -1.0, 1.0))
-        weight = max(0.15, conf)
-        weights.append(weight)
-        weighted_scores.append(score * weight)
-        if abs(score) >= 0.12:
-            directional_signs.append(np.sign(score))
-
-    score = float(sum(weighted_scores) / max(sum(weights), 1e-9))
-    direction = np.sign(score)
-    if directional_signs:
-        consensus = float(sum(1 for x in directional_signs if x == direction) / len(directional_signs))
-    else:
-        consensus = 0.0
-
-    evidence = min(1.0, abs(score) / 0.55)
-    confidence = float(np.clip(0.48 + 0.30 * evidence + 0.18 * consensus, 0.48, 0.92))
-
-    if abs(score) < 0.14 or consensus < 0.60 or confidence < 0.66:
-        action = "WAIT"
-    else:
-        action = "SCALP UP" if score > 0 else "SCALP DOWN"
-
-    return {
-        "action": action,
-        "score": score,
-        "confidence": confidence,
-        "consensus": consensus,
-        "active_specialists": len(rows),
-        "source": cfg["source"],
-    }
+    decision = decision_from_specialists(
+        results,
+        market_key,
+        kalshi_available=bool(kctx.get("available")),
+    )
+    decision["source"] = cfg["source"]
+    return decision
 
 
 def _fmt_price(value, cfg):
@@ -483,60 +447,58 @@ def _chart(hist, cfg, forecast=None, target=np.nan):
     return fig
 
 
-def _paper_state(key):
-    state_key = f"paper_state_{key}"
-    if state_key not in st.session_state:
-        st.session_state[state_key] = {
-            "cash": 100000.0,
-            "side": "NONE",
-            "entry": np.nan,
-            "qty": 0.0,
-            "realized": 0.0,
-            "trades": 0,
-        }
-    return st.session_state[state_key]
-
-
-def _paper_panel(market_key, price, decision):
-    state = _paper_state(market_key)
-    side = state["side"]
+def _paper_panel(market_key, price, decision, shared_state):
+    multi = (shared_state or {}).get("multi_asset_paper", {}) or {}
+    state = (multi.get("assets", {}) or {}).get(market_key, {}) or {}
+    side = str(state.get("side") or "NONE")
+    cash = _safe_float(state.get("cash"), 500.0)
+    realized = _safe_float(state.get("realized"), 0.0)
+    entry = _safe_float(state.get("entry"))
+    qty = _safe_float(state.get("qty"), 0.0)
     unrealized = 0.0
-    if side != "NONE" and pd.notna(state["entry"]):
-        move = (price - state["entry"]) * state["qty"]
+    if side != "NONE" and pd.notna(entry):
+        move = (price - entry) * qty
         unrealized = move if side == "LONG" else -move
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Paper cash", f"${state['cash']:,.2f}")
-    c2.metric("Position", side)
-    c3.metric("Realized P&L", f"${state['realized']:,.2f}")
-    c4.metric("Unrealized P&L", f"${unrealized:,.2f}")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("AUTO PAPER", "ON")
+    c2.metric("Paper balance", f"${cash:,.2f}")
+    c3.metric("Position", side)
+    c4.metric("Realized P&L", f"${realized:,.2f}")
+    c5.metric("Unrealized P&L", f"${unrealized:,.2f}")
 
-    st.caption("Manual paper controls for this market. Real-money execution is not included.")
-    left, mid, right = st.columns(3)
-    notional = min(5000.0, state["cash"] * 0.05)
-    qty = notional / max(price, 1e-9)
-
-    if left.button("Paper LONG", key=f"paper_long_{market_key}", use_container_width=True, disabled=side != "NONE"):
-        state.update(side="LONG", entry=price, qty=qty)
-        st.rerun()
-    if mid.button("Paper SHORT", key=f"paper_short_{market_key}", use_container_width=True, disabled=side != "NONE"):
-        state.update(side="SHORT", entry=price, qty=qty)
-        st.rerun()
-    if right.button("Close paper position", key=f"paper_close_{market_key}", use_container_width=True, disabled=side == "NONE"):
-        pnl = unrealized
-        state["cash"] += pnl
-        state["realized"] += pnl
-        state["trades"] += 1
-        state.update(side="NONE", entry=np.nan, qty=0.0)
-        st.rerun()
-
-    st.info(
-        f"AI council currently says **{decision['action']}** with "
-        f"{decision['confidence']:.0%} confidence and {decision['consensus']:.0%} consensus. "
-        "Paper buttons remain manual so the new markets can be validated before auto-paper execution."
+    trades = int(state.get("trades") or 0)
+    wins = int(state.get("wins") or 0)
+    losses = int(state.get("losses") or 0)
+    win_rate = wins / trades if trades else None
+    st.success(
+        "Automatic paper trading is permanently ON for this market. The GitHub learner scans and "
+        "manages it about every 10 minutes, even when this page is closed."
+    )
+    st.info(str(state.get("last_message") or "AUTO PAPER is initializing its persistent $500 ledger."))
+    st.caption(
+        f"Council now: {decision['action']} • confidence {decision['confidence']:.0%} • "
+        f"consensus {decision['consensus']:.0%} • completed {trades} • "
+        f"win rate {'Learning' if win_rate is None else f'{win_rate:.1%}'} • "
+        f"last worker update {multi.get('updated_at') or 'pending first scheduled run'}"
     )
 
+    history = list(state.get("history") or [])[-20:]
+    if history:
+        rows = []
+        for trade in reversed(history):
+            rows.append({
+                "Side": trade.get("side"),
+                "Entry": trade.get("entry"),
+                "Exit": trade.get("exit"),
+                "Net P&L": trade.get("net_pnl"),
+                "Exit reason": trade.get("exit_reason"),
+                "Closed": trade.get("closed_at"),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+
+@st.fragment(run_every=10)
 def render_market_command_center(market_key):
     require_owner_approval()
     cfg = ASSET_CONFIG[market_key]
@@ -563,6 +525,7 @@ def render_market_command_center(market_key):
         results = run_specialists_core(hist, agg, futures, kctx)
         results = _genericize_specialist_text(results, cfg, kctx)
         decision = _decision(results, market_key, kctx)
+        shared_state = fetch_shared_learning_state(ttl=10.0)
         price = float(hist["close"].iloc[-1])
         target = _safe_float(kctx.get("target"))
         forecast = forecast_path_core(
@@ -666,7 +629,7 @@ def render_market_command_center(market_key):
             )
 
     with paper_tab:
-        _paper_panel(market_key, price, decision)
+        _paper_panel(market_key, price, decision, shared_state)
 
     with diag_tab:
         st.json({
@@ -680,6 +643,10 @@ def render_market_command_center(market_key):
             "master_score": round(decision["score"], 4),
             "confidence": round(decision["confidence"], 4),
             "consensus": round(decision["consensus"], 4),
-            "auto_paper_trading": False,
+            "auto_paper_trading": True,
+            "auto_paper_source": "persistent GitHub learner",
+            "auto_paper_worker_ok": bool(
+                (shared_state.get("multi_asset_paper", {}) or {}).get("worker_ok", False)
+            ),
             "real_money_execution": False,
         })
