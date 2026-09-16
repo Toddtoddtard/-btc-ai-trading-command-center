@@ -41,6 +41,7 @@ from kalshi_paper_engine import (
     scalp_profitability_gate,
 )
 from learning_prices import closed_price_at
+from pro_trade_ticket import build_pro_trade_ticket
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
     learned_policy, learned_trade_gate, regime_specialist_weight,
@@ -56,7 +57,9 @@ st.set_page_config(
     page_title="BTC AI Trading Command Center",
     page_icon="₿",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # The owner primarily uses the command center from an iPhone.  Keep the
+    # full controls one tap away without covering the live trading surface.
+    initial_sidebar_state="collapsed",
 )
 
 
@@ -77,7 +80,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.09-r76-consistent-learning-summary"
+APP_VERSION = "2026.09.16-r77-pro-paper-ticket"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -141,6 +144,25 @@ st.markdown(
     .paper-banner {
         padding: 0.7rem 1rem; border: 1px solid rgba(255,255,255,.15);
         border-radius: 10px; margin-bottom: 0.8rem; font-weight: 700;
+    }
+    .pro-ticket {
+        padding:1rem; margin:.45rem 0 1rem; border:1px solid rgba(22,135,255,.55);
+        border-radius:15px; background:linear-gradient(155deg,rgba(11,27,47,.98),rgba(5,15,27,.98));
+        box-shadow:0 12px 30px rgba(0,0,0,.22),0 0 0 1px rgba(22,135,255,.08) inset;
+    }
+    .pro-ticket-head {display:flex;align-items:center;justify-content:space-between;gap:.8rem;margin-bottom:.8rem;}
+    .pro-ticket-title {font-size:1.02rem;font-weight:800;color:#f4f8ff;}
+    .pro-ticket-status {font-size:.72rem;font-weight:850;letter-spacing:.08em;color:#8bbcff;}
+    .pro-ticket-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.55rem;}
+    .pro-ticket-cell {min-width:0;padding:.68rem .72rem;border-radius:10px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08);}
+    .pro-ticket-label {font-size:.72rem;color:#8fa6c5;margin-bottom:.24rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .pro-ticket-value {font-size:1rem;font-weight:760;color:#f7faff;white-space:nowrap;}
+    .pro-ticket-protection {margin-top:.65rem;color:#a9bad1;font-size:.78rem;line-height:1.35;}
+    @media (max-width: 760px) {
+        .block-container {padding-left:.65rem;padding-right:.65rem;}
+        .pro-ticket-grid {grid-template-columns:repeat(2,minmax(0,1fr));}
+        .pro-ticket {padding:.78rem;}
+        .pro-ticket-head {align-items:flex-start;flex-direction:column;}
     }
     .direction-call {
         display:inline-flex; align-items:center; justify-content:center;
@@ -5964,6 +5986,55 @@ def live_dashboard():
                 f"Kalshi entry: {_open_contract['entry_price'] * 100:.0f}%"
             )
 
+        # BTCC-inspired clarity, adapted to the existing Kalshi paper engine:
+        # one compact ticket exposes executable price, costs, break-even and
+        # protection before the automatic worker can open anything.
+        _ticket = build_pro_trade_ticket(
+            decision,
+            risk,
+            _kp,
+            has_open_position=bool(_open_contract),
+        )
+
+        def _ticket_pct(value):
+            return "N/A" if value is None else f"{value * 100:.0f}%"
+
+        def _ticket_money(value, signed=False):
+            if value is None:
+                return "N/A"
+            return f"${value:+,.2f}" if signed else f"${value:,.2f}"
+
+        _projected_label = (
+            "Win scenario net" if _ticket["strategy"] == "LOCK" else "Projected net"
+        )
+        _blocker_text = (
+            " • ".join(_ticket["blockers"])
+            if _ticket["blockers"]
+            else "All displayed paper-entry checks are ready"
+        )
+        st.markdown(
+            f"""
+            <div class="pro-ticket">
+              <div class="pro-ticket-head">
+                <div class="pro-ticket-title">Pro Paper Trade Ticket — {_ticket['strategy']} {_ticket['direction']}</div>
+                <div class="pro-ticket-status">{_ticket['status']}</div>
+              </div>
+              <div class="pro-ticket-grid">
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">Entry ask</div><div class="pro-ticket-value">{_ticket_pct(_ticket['entry_price'])}</div></div>
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">Current bid</div><div class="pro-ticket-value">{_ticket_pct(_ticket['current_bid'])}</div></div>
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">Paper amount</div><div class="pro-ticket-value">{_ticket_money(_ticket['total_cost'])}</div></div>
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">Estimated entry fee</div><div class="pro-ticket-value">{_ticket_money(_ticket['entry_fee'])}</div></div>
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">Break-even exit</div><div class="pro-ticket-value">{_ticket_pct(_ticket['break_even_price'])}</div></div>
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">Target / settlement</div><div class="pro-ticket-value">{_ticket_pct(_ticket['take_profit_price'] if _ticket['strategy'] == 'SCALP' else _ticket['projected_exit_price'])}</div></div>
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">{_projected_label}</div><div class="pro-ticket-value">{_ticket_money(_ticket['projected_net_pnl'], signed=True)}</div></div>
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">Maximum entry loss</div><div class="pro-ticket-value">{_ticket_money(_ticket['max_loss'])}</div></div>
+              </div>
+              <div class="pro-ticket-protection"><b>Protection:</b> {_ticket['protection']}<br><b>Status:</b> {_blocker_text}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         auto_state = {
             "enabled": bool(_shared_paper.get("enabled", True)),
             "last_message": _shared_paper.get(
@@ -6006,13 +6077,9 @@ def live_dashboard():
         r2.metric("Position size", f"{risk['position_pct']*100:.2f}%")
         r3.metric("Risk score", f"{risk['risk_score']:.2f}")
         r4.metric("Decision", decision["action"])
-        _next_amount = max(
-            0.0,
-            float(_kp["cash"]) * min(0.25, max(0.0, float(risk["position_pct"]))),
-        )
         st.metric(
             "Next Approved Amount",
-            f"${_next_amount:,.2f}" if risk["approved"] and not _open_contract else "$0.00",
+            f"${_ticket['total_cost']:,.2f}" if _ticket["status"] == "READY" else "$0.00",
         )
         st.caption(risk["reason"])
         st.caption(
