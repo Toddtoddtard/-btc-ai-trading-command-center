@@ -21,6 +21,8 @@ on:
       - 'audit_scorecard_v7.py'
       - 'research_lab.py'
       - 'research_dashboard.py'
+      - 'external_teacher_lab.py'
+      - 'tests/test_external_teacher_lab.py'
       - 'tests/test_research_lab.py'
       - 'shared_learning.py'
       - 'tests/test_shared_learning.py'
@@ -59,9 +61,9 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py multi_asset_paper.py research_lab.py research_dashboard.py shared_learning.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_multi_asset_paper.py tests/test_research_lab.py tests/test_shared_learning.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py multi_asset_paper.py external_teacher_lab.py research_lab.py research_dashboard.py shared_learning.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_multi_asset_paper.py tests/test_external_teacher_lab.py tests/test_research_lab.py tests/test_shared_learning.py
       - name: Run audit v6 regression tests
-        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_research_lab tests.test_shared_learning -v
+        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_external_teacher_lab tests.test_research_lab tests.test_shared_learning -v
       - name: Load previous private learning state and historical priors
         shell: bash
         run: |
@@ -165,6 +167,12 @@ jobs:
           assert league.get('required_streak') == 3
           assert league.get('active_policy') == 'Current 75 / 5'
           assert league.get('affects_execution') is False
+          teachers=data.get('research_lab', {}).get('external_teacher_lab', {})
+          assert teachers.get('paper_only') is True
+          assert teachers.get('affects_execution') is False
+          assert teachers.get('minimum_samples') == 100
+          assert teachers.get('required_streak') == 3
+          assert len(teachers.get('teachers', {})) == 5
           assert 'bot_intelligence_v4' in data
           assert data.get('background_paper', {}).get('paper_only') is True
           assert data.get('background_paper', {}).get('worker_ok') is True
