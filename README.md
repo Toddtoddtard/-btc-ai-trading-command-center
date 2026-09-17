@@ -8,9 +8,11 @@ A paper-trading-only Bitcoin and Kalshi prediction dashboard built with Streamli
 - `dashboard_ui.py` — presentation-only formatters, directional badges, and themed tables.
 - `live_feeds.py` — testable concurrent loading of independent Binance and Kalshi reads.
 - `ai_core.py` — shared indicator, specialist-AI, and 15-minute forecast-path logic used by both the dashboard and the 24/7 learner.
+- `horizon_models.py` — separate leakage-safe 1-, 5-, and 15-minute probability models with prequential grading and strict promotion gates.
+- `kalshi_microstructure.py` — reconstructs executable bid/ask, spread, depth imbalance, and microprice from Kalshi's public bid-only order book.
 - `learner.py` — scheduled online learner. It grades completed windows, adapts specialist weights, measures final-price and 15-candle path error, and separately tracks official Kalshi YES/NO settlement accuracy.
 - `research_lab.py` — paper-only multi-phase shadow calls, Kalshi-baseline Brier scoring, fee-aware policy trials, WAIT counterfactuals, and advisory specialist lifecycle states.
-- `.github/workflows/learn.yml` — runs the learner every 10 minutes and publishes `learning_state.json` to the `learning-state` branch.
+- `.github/workflows/learn.yml` — runs the learner every 5 minutes and publishes `learning_state.json` to the `learning-state` branch.
 
 ## Data sources
 
@@ -18,7 +20,9 @@ A paper-trading-only Bitcoin and Kalshi prediction dashboard built with Streamli
 - Binance futures: funding, open interest, and depth imbalance.
 - Kalshi public read-only API: KXBTC15M and hourly BTC market context/targets.
 
-The BTC chart uses Binance as a real-time market proxy. Official Kalshi outcome accuracy is tracked from the settled Kalshi market result when available.
+The BTC chart uses Binance as a real-time market proxy. Kalshi's public order book supplies current executable quote context. Official Kalshi outcome accuracy is tracked from the settled Kalshi market result when available.
+
+The horizon models remain shadow-only until they beat the legacy baseline on an untouched chronological holdout and then repeat that Brier-score edge on at least 200 live, test-then-train observations. A weekly workflow retrains from up to ten years of Binance Vision one-minute archives using 70% train, 15% calibration, and 15% untouched test periods. Promotion never enables real-money execution; the project remains paper-only.
 
 ## Specialist AIs
 
