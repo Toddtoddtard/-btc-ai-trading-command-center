@@ -6432,7 +6432,10 @@ def live_dashboard():
         )
         validation = paper_performance_since_update(DB_PATH, STARTING_CASH)
         validation_gate = scalp_profitability_gate(DB_PATH, STARTING_CASH)
-        v1, v2, v3, v4, v5 = st.columns(5)
+        # Keep the validation scorecard readable on the owner's iPhone. Five
+        # equal columns compress the labels and values until they overlap, so
+        # present the primary outcome metrics first and costs/risk below them.
+        v1, v2, v3 = st.columns(3)
         v1.metric("Closed trades", validation["samples"])
         v2.metric(
             "Win rate",
@@ -6444,6 +6447,7 @@ def live_dashboard():
             "Learning" if validation["expectancy"] is None
             else f"${validation['expectancy']:+.2f}",
         )
+        v4, v5 = st.columns(2)
         v4.metric("Recorded fees", f"${validation['fees']:,.2f}")
         v5.metric(
             "Max drawdown",
