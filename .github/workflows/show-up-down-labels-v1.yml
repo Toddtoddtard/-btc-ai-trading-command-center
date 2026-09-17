@@ -19,9 +19,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Validate app syntax
-        run: python -m py_compile app.py
+        run: python -m py_compile app.py dashboard_ui.py
       - name: Verify UP DOWN position labels are installed
         run: |
-          grep -q 'def display_position_side(side):' app.py
-          grep -q 'LONG (UP)' app.py
-          grep -q 'SHORT (DOWN)' app.py
+          grep -q 'display_position_side = "UP" if _open_contract\["side"\] == "YES" else "DOWN"' app.py
+          grep -q "OPEN PAPER" app.py
