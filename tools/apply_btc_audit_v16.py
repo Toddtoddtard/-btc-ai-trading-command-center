@@ -4,7 +4,8 @@
 This updater is intentionally idempotent. The app may already contain the v16
 policy or a newer policy (for example the hold-balance thresholds). In those
 cases the script validates the required safety logic and exits successfully
-instead of failing on an obsolete source-code anchor.
+instead of failing on an obsolete source-code anchor. LOCK-first is one such
+newer policy: it intentionally removes the automatic scalp call path.
 """
 from pathlib import Path
 
@@ -79,6 +80,17 @@ if old_up in s:
     path.write_text(s)
     print("Applied BTC audit v16 decision fixes")
 else:
+    lock_first_required = (
+        "from lock_focus import (",
+        "evaluate_lock_focus(",
+        '"execution_mode": "LOCK_FIRST"',
+        '"auto_scalping_enabled": AUTO_SCALPING_ENABLED',
+        "LOCK-first mode: new automatic SCALP entries are disabled.",
+    )
+    if all(token in s for token in lock_first_required):
+        print("Compatible LOCK-first BTC decision policy already installed; no changes needed")
+        raise SystemExit(0)
+
     # Newer policy revisions intentionally changed the numeric thresholds. Require
     # the safety behavior introduced by v16, but do not downgrade newer tuning.
     required = (
