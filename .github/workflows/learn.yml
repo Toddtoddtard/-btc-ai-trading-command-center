@@ -160,7 +160,10 @@ jobs:
           assert data.get('status', {}).get('research_lab_ok') is True
           assert data.get('research_lab', {}).get('paper_only') is True
           assert data.get('research_lab', {}).get('affects_execution') is False
-          assert data.get('research_lab', {}).get('version') == 2
+          assert data.get('research_lab', {}).get('version') == 3
+          guarded=data.get('research_lab', {}).get('guarded_calibrator', {})
+          assert guarded.get('version') == 1
+          assert guarded.get('affects_execution') is False
           assert len(data.get('research_lab', {}).get('policies', {})) == 8
           league=data.get('research_lab', {}).get('strategy_league', {})
           assert league.get('minimum_samples') == 100
