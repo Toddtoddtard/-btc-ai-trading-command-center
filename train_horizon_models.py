@@ -53,7 +53,24 @@ def month_samples(df, horizon):
     features = feature_frame(df)
     close = df["close"].astype(float)
     target = (close.shift(-horizon) >= close).astype(float)
-    baseline = _sigmoid(np.tanh(close.pct_change(15) / .008).fillna(0.0).to_numpy())
+    # Match the production legacy path, rather than comparing the candidate to
+    # an easier momentum proxy. This keeps historical and live promotion gates
+    # apples-to-apples.
+    directional = (
+        .46 * close.pct_change(3)
+        + .34 * close.pct_change(8)
+        + .20 * close.pct_change(15)
+    ).clip(-.012, .012).fillna(0.0)
+    avg_range = (df["high"] - df["low"]).rolling(20).mean().fillna(close * .0005)
+    projected = close * directional * 2.20
+    minimum = np.maximum(avg_range * .35, close * .00015)
+    display = projected.where(projected.abs() >= minimum, np.sign(projected).replace(0, 1) * minimum)
+    progress = horizon / 15.0
+    eased = progress * progress * (3.0 - 2.0 * progress)
+    wave = math.sin(horizon * 1.35) * avg_range * .16 + math.cos(horizon * .72) * avg_range * .08
+    baseline_move = display * eased + wave
+    baseline_scale = np.maximum(avg_range * math.sqrt(horizon), close * .00025)
+    baseline = _sigmoid((baseline_move / baseline_scale).to_numpy())
     valid = features.notna().all(axis=1) & close.shift(-horizon).notna()
     idx = np.flatnonzero(valid.to_numpy())[::STEP]
     return features.iloc[idx].to_numpy(float), target.iloc[idx].to_numpy(float), baseline[idx]
