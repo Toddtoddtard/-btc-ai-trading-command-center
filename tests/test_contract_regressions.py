@@ -476,6 +476,15 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('if row["pnl"] is None', paper_tab)
         self.assertNotIn('LOCK sells automatically at a 95%', source)
         self.assertIn('Kalshi Execution Validation', source)
+        validation_tab = source.split(
+            '    with tab_backtest:', 1
+        )[1].split(
+            '    # ============================================================\n'
+            '    # DIAGNOSTICS / STATUS', 1
+        )[0]
+        self.assertIn('v1, v2, v3 = st.columns(3)', validation_tab)
+        self.assertIn('v4, v5 = st.columns(2)', validation_tab)
+        self.assertNotIn('st.columns(5)', validation_tab)
         self.assertIn('Every specialist remains active', source)
         self.assertIn(
             'Math.min(TOTAL,Math.max(0,(closeMs-Date.now())/1000))',
