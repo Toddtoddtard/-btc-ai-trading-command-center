@@ -24,6 +24,9 @@ Kalshi public BTC markets (KXBTC15M / hourly)
               ▼                   ▼
           Streamlit app       24/7 learner
             app.py             learner.py
+              │
+              ├─ dashboard_ui.py (presentation only)
+              ├─ live_feeds.py (concurrent reads)
               │                   │
               │                   ├─ grade final-price error
               │                   ├─ grade 15-candle path error
