@@ -7,7 +7,10 @@ import math
 
 AUTO_SCALPING_ENABLED = False
 LOCK_FOCUS_ENABLED = True
-LOCK_EARLIEST_SECONDS = 10 * 60
+# Evaluate from the moment an active market is available. The dashboard reruns
+# this policy every second; the unattended learner also refreshes it every five
+# minutes. Only the final 30 seconds remain blocked for stale/settlement risk.
+LOCK_EARLIEST_SECONDS = 15 * 60
 LOCK_LATEST_SECONDS = 30
 # Live calibrated history tops out near 0.73 with a ~0.67 95th percentile.
 # A 0.68 floor selects the strongest few percent without creating an
@@ -85,7 +88,7 @@ def evaluate_lock_focus(
     required_score = max(LOCK_MIN_ABS_SCORE, _f(edge_floor, 0.0))
 
     checks = {
-        "window": seconds_remaining is not None and LOCK_LATEST_SECONDS < seconds_remaining <= LOCK_EARLIEST_SECONDS,
+        "window": seconds_remaining is not None and seconds_remaining > LOCK_LATEST_SECONDS,
         "confidence": confidence >= LOCK_MIN_CONFIDENCE,
         "score": abs(base_score) >= required_score,
         "consensus": consensus >= LOCK_MIN_CONSENSUS,

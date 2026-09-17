@@ -12,6 +12,7 @@ import pandas as pd
 import learner as legacy
 import learner_v3 as v3
 from ai_core import forecast_path_core
+from forward_outlook import build_next_market_outlooks
 from lock_focus import (
     AUTO_SCALPING_ENABLED,
     LOCK_EARLIEST_SECONDS,
@@ -42,6 +43,9 @@ def ensure_v31(state):
     state.setdefault("data_quality", {})
     state.setdefault("wait_counterfactual", {"samples": 0, "profitable_waits": 0, "avoided_losses": 0})
     state.setdefault("prediction_snapshots", [])
+    state.setdefault("forward_outlook_history", [])
+    state.setdefault("forward_outlook_stats", {})
+    state.setdefault("next_market_outlooks", [])
     state["btc_execution_mode"] = {
         "name": "LOCK_FIRST",
         "paper_only": True,
@@ -54,6 +58,71 @@ def ensure_v31(state):
     state["status"].setdefault("learning_version", 31)
     ensure_research_lab(state)
     return state
+
+
+def grade_forward_outlooks(state, df, now=None):
+    """Grade future-window direction and Brier score at exact boundaries."""
+    now = time.time() if now is None else float(now)
+    graded = 0
+    history = state.setdefault("forward_outlook_history", [])
+    stats = state.setdefault("forward_outlook_stats", {})
+    for row in history:
+        if row.get("resolved") or safe_float(row.get("expires_at"), now + 1) > now:
+            continue
+        start_row = exact_expiry_row(df, row.get("window_start"))
+        close_row = exact_expiry_row(df, row.get("expires_at"))
+        if start_row is None or close_row is None:
+            continue
+        actual_open = safe_float(start_row.get("close"))
+        actual_close = safe_float(close_row.get("close"))
+        if actual_open is None or actual_close is None:
+            continue
+        actual_up = int(actual_close >= actual_open)
+        predicted_up = str(row.get("direction", "")).upper() == "UP"
+        confidence = float(np.clip(safe_float(row.get("confidence"), 0.5), 0.5, 0.99))
+        probability_up = confidence if predicted_up else 1.0 - confidence
+        correct = int(predicted_up == bool(actual_up))
+        brier = float((probability_up - actual_up) ** 2)
+        row.update({
+            "resolved": True,
+            "actual_open": actual_open,
+            "actual_close": actual_close,
+            "actual_direction": "UP" if actual_up else "DOWN",
+            "correct": correct,
+            "brier": brier,
+        })
+        key = str(int(row.get("horizon", 0)))
+        bucket = stats.setdefault(key, {"samples": 0, "hits": 0, "brier_sum": 0.0})
+        bucket["samples"] = int(bucket.get("samples", 0)) + 1
+        bucket["hits"] = int(bucket.get("hits", 0)) + correct
+        bucket["brier_sum"] = safe_float(bucket.get("brier_sum"), 0.0) + brier
+        bucket["accuracy"] = bucket["hits"] / bucket["samples"]
+        bucket["brier"] = bucket["brier_sum"] / bucket["samples"]
+        graded += 1
+    state["forward_outlook_history"] = history[-900:]
+    return graded
+
+
+def refresh_forward_outlooks(state, df, market_info, confidence, consensus, now=None):
+    """Refresh next-three outlooks and retain snapshots for honest grading."""
+    if not market_info:
+        state["next_market_outlooks"] = []
+        return []
+    now = time.time() if now is None else float(now)
+    outlooks = build_next_market_outlooks(
+        legacy.rows_for_forecast(df),
+        state.get("forecast", {}),
+        market_info.get("expires_at"),
+        confidence,
+        consensus,
+        state.get("forward_outlook_stats", {}),
+    )
+    state["next_market_outlooks"] = outlooks
+    history = state.setdefault("forward_outlook_history", [])
+    for outlook in outlooks:
+        history.append({**outlook, "created_at": now, "resolved": False})
+    state["forward_outlook_history"] = history[-900:]
+    return outlooks
 
 
 def load_previous_state():
@@ -373,10 +442,20 @@ def main():
     df = legacy.history()
     market_info = legacy.market()
     graded = strict_grade(state, df)
+    forward_outlooks_graded = grade_forward_outlooks(state, df)
     research_resolved = resolve_shadows(state, legacy.official_result)
     official_resolved = legacy.resolve_official_results(state)
     registered = register_with_snapshot(state, df, market_info)
     live_call = current_shadow_call(state, df, market_info)
+    _live_confidence = safe_float((live_call or {}).get("master_confidence"), 0.5)
+    _live_focus = (live_call or {}).get("lock_focus") or {}
+    forward_outlooks = refresh_forward_outlooks(
+        state,
+        df,
+        market_info,
+        _live_confidence,
+        safe_float(_live_focus.get("consensus"), 0.0),
+    )
     refreshed_lock_focus = refresh_pending_lock_focus(state, live_call, market_info)
     pending_action = str((state.get("pending") or {}).get("master_action") or "").upper()
     if live_call and pending_action.startswith("LOCK"):
@@ -405,6 +484,9 @@ def main():
         "research_resolved_this_run": research_resolved,
         "research_registered_this_run": research_registered,
         "lock_focus_refreshed_this_run": refreshed_lock_focus,
+        "continuous_lock_evaluation": True,
+        "forward_outlooks_generated": len(forward_outlooks),
+        "forward_outlooks_graded_this_run": forward_outlooks_graded,
         "btc_execution_mode": "LOCK_FIRST",
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "champion_promoted": state.get("champion_challenger", {}).get("promoted", False),

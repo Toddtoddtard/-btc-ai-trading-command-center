@@ -26,11 +26,13 @@ from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from research_dashboard import render_research_dashboard
 from background_paper import (
+    latest_shared_call_entry,
     shared_paper_chart_entries,
     shared_paper_history,
     shared_paper_scorecard,
     shared_paper_summary,
 )
+from forward_outlook import build_next_market_outlooks
 from kalshi_paper_engine import (
     manage_kalshi_paper_cycle,
     paper_chart_entries,
@@ -84,7 +86,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.17-r78-lock-first"
+APP_VERSION = "2026.09.17-r79-continuous-lock"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -1955,6 +1957,22 @@ def master_decision(results, hist, kalshi=None):
             + odds_text
         )
 
+    _outlook_rows = [
+        {
+            "open": float(row.open), "high": float(row.high),
+            "low": float(row.low), "close": float(row.close),
+        }
+        for row in hist.tail(60).itertuples()
+    ]
+    _next_market_outlooks = build_next_market_outlooks(
+        _outlook_rows,
+        remote_learning.get("forecast", {}),
+        (pd.Timestamp(kctx.get("close_time")).timestamp() if kctx.get("close_time") else None),
+        confidence,
+        consensus,
+        remote_learning.get("forward_outlook_stats", {}),
+    )
+
     return {
         "action": action,
         "locked_side": locked_side,
@@ -1984,6 +2002,7 @@ def master_decision(results, hist, kalshi=None):
         "execution_mode": "LOCK_FIRST",
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "lock_focus": locals().get("lock_focus", {}),
+        "next_market_outlooks": _next_market_outlooks,
         "whale_score": safe_float(
             (results.get("Whale AI") or {}).get("score"), 0.0
         ),
@@ -4034,7 +4053,8 @@ if auto_paper_enabled:
     st.sidebar.success("AUTO PAPER: ON")
     st.sidebar.caption(
         "The scheduled GitHub learner manages the persistent paper ledger about "
-        "every 10 minutes, even when this page is closed."
+        "every 5 minutes, even when this page is closed. The open dashboard "
+        "re-evaluates LOCK qualification on every live refresh."
     )
 else:
     st.sidebar.info("AUTO PAPER: OFF")
@@ -5171,7 +5191,18 @@ def live_dashboard():
             unsafe_allow_html=True,
         )
     m5.metric("Consensus", f"{decision['consensus']*100:.1f}%")
-    m6.metric("Spot feed", "N/A" if pd.isna(ticker.get("feed_ms")) else f"{ticker['feed_ms']:.0f} ms")
+    _latest_call_entry = latest_shared_call_entry(_shared_paper)
+    if _latest_call_entry:
+        _entry_pct = _latest_call_entry["kalshi_entry_pct"]
+        _entry_side = _latest_call_entry["side"]
+        _entry_value = f"{_entry_pct:.0f}% / {_entry_pct:.0f}¢ {_entry_side}"
+    else:
+        _entry_value = "N/A"
+    m6.metric(
+        "Kalshi Call Entry",
+        _entry_value,
+        help="Actual selected-side Kalshi ask captured when the most recent paper call opened.",
+    )
 
     st.caption(
         f"Dashboard cycle {full_cycle_ms:.0f} ms • kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "
@@ -5527,6 +5558,27 @@ def live_dashboard():
         d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
         d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
         d5.metric("Risk level", decision["risk_level"])
+
+        st.markdown("#### Next three 15-minute market outlooks")
+        _outlooks = decision.get("next_market_outlooks", [])
+        if _outlooks:
+            _outlook_cols = st.columns(3)
+            for _col, _outlook in zip(_outlook_cols, _outlooks):
+                _close_label = pd.to_datetime(
+                    _outlook["expires_at"], unit="s", utc=True
+                ).tz_convert("America/New_York").strftime("%I:%M %p")
+                _arrow = "▲" if _outlook["direction"] == "UP" else "▼"
+                _col.metric(
+                    f"Next +{_outlook['horizon']} • closes {_close_label}",
+                    f"{_arrow} {_outlook['direction']} {_outlook['confidence']*100:.1f}%",
+                    f"projected ${_outlook['projected_close']:,.0f}",
+                )
+            st.caption(
+                "Continuously refreshed research outlooks for the next three full Kalshi windows. "
+                "They are graded after each window closes and cannot place a trade before that market is active."
+            )
+        else:
+            st.caption("Next-market outlooks are waiting for an active Kalshi window and enough candle history.")
 
         # User-friendly AI Council summary
         action = str(decision.get("action", "HOLD"))
@@ -6014,7 +6066,7 @@ def live_dashboard():
         st.caption(risk["reason"])
         st.caption(
             "LOCK-first mode: new automatic SCALP entries are disabled. "
-            "A LOCK may first qualify with about 10 minutes remaining and requires "
+            "LOCK qualification is evaluated continuously throughout the active market and requires "
             "top-tail calibrated confidence (68% based on the live distribution), "
             "strong council agreement, healthy data, "
             "target confirmation, market alignment, and an entry at or below 75%. "

@@ -408,6 +408,40 @@ def shared_paper_chart_entries(paper, ticker, limit=11):
     ]
 
 
+def latest_shared_call_entry(paper):
+    """Return the latest captured Kalshi fill from the authoritative ledger."""
+    rows = []
+    for source in (
+        list((paper or {}).get("trades", [])),
+        list((paper or {}).get("pending_settlements", [])),
+        [((paper or {}).get("open_position"))],
+    ):
+        rows.extend(row for row in source if isinstance(row, dict))
+    valid = []
+    for row in rows:
+        entry = _f(row.get("entry_price"))
+        opened_at = _f(row.get("opened_at"))
+        side = str(row.get("side") or "").upper().strip()
+        if entry is None or opened_at is None or side not in {"YES", "NO"}:
+            continue
+        if 1.0 < entry <= 100.0:
+            entry /= 100.0
+        if 0.0 <= entry <= 1.0:
+            valid.append((opened_at, entry, side, row))
+    if not valid:
+        return None
+    opened_at, entry, side, row = max(valid, key=lambda item: item[0])
+    return {
+        "opened_at": opened_at,
+        "entry_price": entry,
+        "kalshi_entry_pct": entry * 100.0,
+        "side": side,
+        "direction": "UP" if side == "YES" else "DOWN",
+        "strategy": str(row.get("strategy") or "CALL").upper(),
+        "ticker": str(row.get("ticker") or ""),
+    }
+
+
 def _close(paper, position, exit_price, reason, now, charge_fee=True):
     contracts = int(position["contracts"])
     exit_fee = kalshi_taker_fee(contracts, exit_price) if charge_fee else 0.0
