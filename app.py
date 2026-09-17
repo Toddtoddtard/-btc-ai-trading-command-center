@@ -3,7 +3,6 @@ import math
 import re
 import sqlite3
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode
@@ -18,7 +17,20 @@ from access_control import require_owner_approval
 from market_guide import render_market_guide
 from shared_learning import fetch_shared_learning_state
 
-from ai_core import enrich_history_core, forecast_path_core, run_specialists_core
+from ai_core import (
+    clamp,
+    enrich_history_core,
+    forecast_path_core,
+    run_specialists_core,
+    safe_float,
+)
+from dashboard_ui import (
+    directional_badge_html,
+    fmt_money,
+    fmt_pct,
+    render_dashboard_table,
+)
+from live_feeds import load_live_feeds
 from macd_engine import project_macd_path
 from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
@@ -86,7 +98,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.17-r80-responsive-validation"
+APP_VERSION = "2026.09.17-r81-maintainability"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -325,151 +337,6 @@ st.markdown(
 def utc_now():
     return datetime.now(timezone.utc)
 
-
-def clamp(x, lo=-1.0, hi=1.0):
-    try:
-        return float(max(lo, min(hi, x)))
-    except Exception:
-        return 0.0
-
-
-def safe_float(x, default=np.nan):
-    try:
-        v = float(x)
-        return v if math.isfinite(v) else default
-    except Exception:
-        return default
-
-
-def fmt_money(x):
-    return "N/A" if pd.isna(x) else f"${x:,.2f}"
-
-
-def fmt_pct(x, digits=2):
-    return "N/A" if pd.isna(x) else f"{x:.{digits}f}%"
-
-
-def display_position_side(side):
-    """UI-only translation: LONG means UP, SHORT means DOWN."""
-    s = str(side or "NONE").upper().strip()
-    if s == "LONG":
-        return "LONG (UP)"
-    if s == "SHORT":
-        return "SHORT (DOWN)"
-    if s in {"NONE", "HOLD", "WAIT"}:
-        return "HOLD / NO TRADE"
-    return s
-
-
-def directional_badge_html(label, compact=False):
-    """Visual-only badge for directional calls; does not change decision logic."""
-    text = str(label or "HOLD").upper().strip()
-    if any(k in text for k in ("LOCK UP", "SCALP UP", "BULLISH")) or text == "UP":
-        cls, icon = "call-up", "▲"
-    elif any(k in text for k in ("LOCK DOWN", "SCALP DOWN", "BEARISH")) or text == "DOWN":
-        cls, icon = "call-down", "▼"
-    else:
-        cls, icon = "call-neutral", "•"
-    size_cls = " compact" if compact else ""
-    return f'<span class="direction-call {cls}{size_cls}">{icon}&nbsp;&nbsp;{text}</span>'
-
-
-
-def render_dashboard_table(df, formatters=None):
-    """Render dashboard tables with the same dark visual language as AI Council.
-
-    Presentation only: underlying dataframe values and trading logic are untouched.
-    """
-    if not st.session_state.get("dashboard_dark_mode", True):
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        return
-
-    view = df.copy()
-    fmts = dict(formatters or {})
-
-    def _semantic_badge(value):
-        text = str(value if value is not None else "").strip()
-        upper = text.upper()
-        positive = {
-            "BULLISH", "UP", "SCALP UP", "LOCK UP", "LONG", "BUY",
-            "CORRECT", "IMPROVING", "RESOLVED", "YES", "WIN", "TRUE",
-        }
-        negative = {
-            "BEARISH", "DOWN", "SCALP DOWN", "LOCK DOWN", "SHORT", "SELL",
-            "WRONG", "DECLINING", "LOSS", "NO", "FALSE",
-        }
-        if upper in positive or upper in {"1", "1.0"}:
-            cls = "dash-positive"
-        elif upper in negative or upper in {"0", "0.0"}:
-            cls = "dash-negative"
-        else:
-            cls = "dash-neutral"
-        return f'<span class="dash-badge {cls}">{text}</span>'
-
-    semantic_cols = {
-        "signal", "action", "direction", "trend", "correct", "resolved",
-        "side", "approved", "result", "status",
-    }
-    for col in view.columns:
-        if str(col).strip().lower() in semantic_cols and col not in fmts:
-            fmts[col] = _semantic_badge
-
-    table_html = view.to_html(
-        index=False,
-        border=0,
-        classes="dashboard-dark-table",
-        escape=False,
-        formatters=fmts,
-    )
-    st.markdown(
-        """
-        <style>
-        .dashboard-dark-wrap {
-            width:100%; overflow-x:auto; border:1px solid #1687ff;
-            border-radius:12px; background:#0b1220;
-        }
-        .dashboard-dark-table {
-            width:100%; border-collapse:collapse; color:#e8eef8;
-            background:#0b1220; font-size:.93rem; margin:0;
-        }
-        .dashboard-dark-table thead th {
-            position:sticky; top:0; z-index:1; text-align:left;
-            color:#b8cff7; background:#111c2e; font-weight:700;
-            border-bottom:1px solid #2b3b52; padding:10px 12px;
-            white-space:nowrap;
-        }
-        .dashboard-dark-table tbody td {
-            color:#e7edf7; background:#0b1220;
-            border-bottom:1px solid #1e2b3d; padding:9px 12px;
-            vertical-align:middle; white-space:nowrap;
-        }
-        .dashboard-dark-table tbody tr:nth-child(even) td {background:#0f1828;}
-        .dashboard-dark-table tbody tr:hover td {background:#15243a;}
-        .dash-badge {
-            display:inline-block; min-width:78px; text-align:center;
-            padding:4px 9px; border-radius:7px; font-weight:800;
-            letter-spacing:.02em; line-height:1.2; box-sizing:border-box;
-        }
-        .dash-positive {
-            color:#00f0b5; background:rgba(0,240,181,.13);
-            border:1px solid rgba(0,240,181,.80);
-        }
-        .dash-negative {
-            color:#ff536b; background:rgba(255,83,107,.13);
-            border:1px solid rgba(255,83,107,.85);
-        }
-        .dash-neutral {
-            color:#b8c6dc; background:rgba(184,198,220,.09);
-            border:1px solid rgba(184,198,220,.42);
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<div class="dashboard-dark-wrap">{table_html}</div>',
-        unsafe_allow_html=True,
-    )
 
 def http_json(url, params=None, timeout=2.8):
     if params:
@@ -1621,18 +1488,6 @@ def enrich_history(df):
     return enrich_history_core(df)
 
 
-def specialist(name, score, reason):
-    score = clamp(score)
-    if score > 0.12:
-        signal = "BULLISH"
-    elif score < -0.12:
-        signal = "BEARISH"
-    else:
-        signal = "NEUTRAL"
-    confidence = min(0.99, 0.48 + abs(score) * 0.48)
-    return {"name": name, "signal": signal, "score": score, "confidence": confidence, "reason": reason}
-
-
 def run_specialists(hist, agg, futures, kalshi):
     px = float(hist["close"].iloc[-1])
     kctx = stable_kalshi_contract(kalshi, px)
@@ -2283,33 +2138,6 @@ def normalize_learning_weights(state):
     state["target_influence"] = float(np.clip(state["target_influence"], 0.00, 0.50))
     state["bias"] = float(np.clip(state["bias"], -0.004, 0.004))
     return state
-
-
-def model_inputs_from_rows(rows, target=None):
-    closes = np.asarray([float(r["close"]) for r in rows], dtype=float)
-    if len(closes) < 16:
-        return None
-
-    last = float(closes[-1])
-    ret3 = last / float(closes[-4]) - 1.0
-    ret8 = last / float(closes[-9]) - 1.0
-    ret15 = last / float(closes[-16]) - 1.0
-
-    recent = rows[-20:]
-    ranges = [
-        max(0.0, float(r["high"]) - float(r["low"]))
-        for r in recent
-    ]
-    avg_range = float(np.mean(ranges)) if ranges else max(last * 0.0005, 1.0)
-
-    return {
-        "last": last,
-        "ret3": ret3,
-        "ret8": ret8,
-        "ret15": ret15,
-        "avg_range": avg_range,
-        "target": safe_float(target),
-    }
 
 
 def python_forecast_path(rows, target=None, state=None):
@@ -5068,41 +4896,24 @@ else:
 def live_dashboard():
 
     load_started = time.perf_counter()
-    errors = []
-
-    # All six reads are independent and already have their original cache TTLs.
-    # Starting them together removes network wait stacking without changing any
-    # returned value, freshness policy, decision rule, or rendering order.
-    with ThreadPoolExecutor(max_workers=6, thread_name_prefix="live-feed") as pool:
-        ticker_job = pool.submit(fetch_spot_ticker)
-        kline_job = pool.submit(fetch_klines, "1m", 500)
-        agg_job = pool.submit(fetch_agg_trades, 600)
-        futures_job = pool.submit(fetch_futures_snapshot)
-        kalshi_job = pool.submit(fetch_kalshi_bitcoin_markets)
-        hourly_kalshi_job = pool.submit(fetch_kalshi_hourly_bitcoin_markets)
-
-        try:
-            ticker = ticker_job.result()
-        except Exception as exc:
-            ticker = {"price": np.nan, "change_24h": np.nan, "quote_volume_24h": np.nan, "feed_ms": np.nan, "source": "Unavailable"}
-            errors.append(f"Spot ticker: {exc}")
-
-        try:
-            raw_hist, kline_ms = kline_job.result()
-            hist = enrich_history(raw_hist)
-        except Exception as exc:
-            hist, kline_ms = pd.DataFrame(), np.nan
-            errors.append(f"Klines: {exc}")
-
-        try:
-            agg, agg_ms = agg_job.result()
-        except Exception as exc:
-            agg, agg_ms = pd.DataFrame(), np.nan
-            errors.append(f"Aggregate trades: {exc}")
-
-        futures = futures_job.result()
-        kalshi = kalshi_job.result()
-        hourly_kalshi = hourly_kalshi_job.result()
+    feeds = load_live_feeds(
+        fetch_spot_ticker=fetch_spot_ticker,
+        fetch_klines=fetch_klines,
+        fetch_agg_trades=fetch_agg_trades,
+        fetch_futures_snapshot=fetch_futures_snapshot,
+        fetch_kalshi_markets=fetch_kalshi_bitcoin_markets,
+        fetch_hourly_kalshi_markets=fetch_kalshi_hourly_bitcoin_markets,
+        enrich_history=enrich_history,
+    )
+    ticker = feeds["ticker"]
+    hist = feeds["history"]
+    kline_ms = feeds["kline_ms"]
+    agg = feeds["aggregate_trades"]
+    agg_ms = feeds["aggregate_ms"]
+    futures = feeds["futures"]
+    kalshi = feeds["kalshi"]
+    hourly_kalshi = feeds["hourly_kalshi"]
+    errors = feeds["errors"]
 
     if hist.empty:
         st.error("Price history is unavailable, so the AI engine cannot run safely right now.")
