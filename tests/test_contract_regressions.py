@@ -430,6 +430,7 @@ class ContractRegressionTests(unittest.TestCase):
     def test_paper_tab_has_one_authoritative_summary(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / 'app.py').read_text()
+        feed_source = (root / 'live_feeds.py').read_text()
         paper_tab = source.split('    with tab_paper:', 1)[1].split(
             '    with tab_journal:', 1
         )[0]
@@ -451,11 +452,12 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('paper position holds through the end of the 15-minute window', source)
         self.assertIn('[data-testid="stAlert"] [data-testid="stMarkdownContainer"] p', source)
         self.assertIn('a[aria-label="Link to heading"]', source)
-        self.assertIn('with ThreadPoolExecutor(max_workers=6', source)
-        self.assertEqual(source.count('pool.submit(fetch_'), 6)
-        self.assertIn('ticker = ticker_job.result()', source)
-        self.assertIn('raw_hist, kline_ms = kline_job.result()', source)
-        self.assertIn('agg, agg_ms = agg_job.result()', source)
+        self.assertIn('load_live_feeds(', source)
+        self.assertIn('with ThreadPoolExecutor(max_workers=6', feed_source)
+        self.assertEqual(feed_source.count('pool.submit(fetch_'), 6)
+        self.assertIn('ticker = jobs["ticker"].result()', feed_source)
+        self.assertIn('raw_history, kline_ms = jobs["klines"].result()', feed_source)
+        self.assertIn('aggregate_trades, aggregate_ms = jobs["trades"].result()', feed_source)
         self.assertIn('latest_trade_price = (', source)
         self.assertIn('price = latest_trade_price', source)
         self.assertIn('live_close_ts = kalshi_close_timestamp(kctx)', source)
