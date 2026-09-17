@@ -86,7 +86,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.17-r79-continuous-lock"
+APP_VERSION = "2026.09.17-r80-responsive-validation"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -3750,6 +3750,22 @@ st.title("₿ BTC AI Trading Command Center")
 st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
 st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine • 24/7 remote learner • rolling 100/500/1000-window accuracy • paper-only")
 render_market_guide()
+
+# Keep this in the main script so Streamlit's hot rerun displays new project
+# notes immediately instead of retaining a previously imported helper module.
+with st.expander("🧾 Recent Updates — Last 24 Hours", expanded=False):
+    st.markdown(
+        """
+- **Continuous LOCK evaluation:** LOCK qualification is checked throughout the active 15-minute market instead of only at a single late-window moment.
+- **Three-market outlook:** the research layer now grades directional outlooks for the next three 15-minute markets to provide broader context without changing paper execution by itself.
+- **Authoritative Kalshi entry display:** selected-side paper fills come from the shared Kalshi ledger so the displayed entry percentage matches the actual recorded paper fill.
+- **LOCK-first automation:** new automatic BTC SCALP entries are disabled while qualified paper LOCK calls are prioritized; historical SCALPs remain available for learning and audit.
+- **Research calibration safeguards:** walk-forward Brier calibration and JSON-safe learning-state validation were tightened so research updates cannot silently corrupt the learner state.
+- **Responsive validation scorecard:** the Backtest validation metrics now use a readable 3-plus-2 layout instead of five cramped columns.
+
+*This panel summarizes command-center changes made during the latest 24-hour development window. It is project-update information, not a market-news feed.*
+"""
+    )
 
 # ============================================================
 # SIDEBAR
