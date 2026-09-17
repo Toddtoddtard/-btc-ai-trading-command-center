@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 59910)
-Total output lines: 6440
-
 import json
 import math
 import re
@@ -2902,7 +2899,1057 @@ def resolve_specialist_learning(hist):
                 resolved = 1,
                 actual_end = ?,
                 actual_direction = ?,
-                direction…9910 tokens truncated…d="stMarkdownContainer"],
+                direction_correct = ?,
+                realized_return = ?,
+                signed_edge = ?,
+                resolved_at = ?
+            WHERE ticker = ? AND specialist = ?
+        """, (
+            actual_end,
+            actual_direction,
+            direction_correct,
+            realized_return,
+            signed_edge,
+            datetime.now(timezone.utc).isoformat(),
+            ticker,
+            specialist,
+        ))
+
+        updates[specialist] = adaptive_weight
+
+    conn.commit()
+    conn.close()
+    return len(updates)
+
+
+def specialist_learning_dataframe():
+    state = get_specialist_learning_state()
+
+    rows = []
+    for name in sorted(state.keys()):
+        item = state[name]
+        rows.append({
+            "Specialist": name,
+            "Learned weight": item["adaptive_weight"],
+            "Samples": item["samples"],
+            "Accuracy %": (
+                np.nan
+                if pd.isna(item["accuracy"])
+                else item["accuracy"] * 100.0
+            ),
+            "Recent accuracy %": item["ewma_accuracy"] * 100.0,
+            "Recent edge": item["ewma_edge"],
+            "Calibration": item["ewma_calibration"],
+        })
+
+    return pd.DataFrame(rows)
+
+
+
+# ============================================================
+# ROLLING LEARNING ACCURACY
+# ============================================================
+
+def rolling_master_accuracy(window):
+    remote = fetch_remote_learning_state()
+    if isinstance(remote, dict):
+        history = remote.get("master_history")
+        if isinstance(history, list) and history:
+            rows = history[-int(window):]
+            correct = pd.to_numeric(
+                pd.Series([r.get("direction_correct") for r in rows]),
+                errors="coerce",
+            ).dropna()
+            abs_error = pd.to_numeric(
+                pd.Series([r.get("abs_error") for r in rows]),
+                errors="coerce",
+            )
+            path_error = pd.to_numeric(
+                pd.Series([r.get("path_error") for r in rows]),
+                errors="coerce",
+            )
+            return {
+                "samples": int(len(correct)),
+                "accuracy": float(correct.mean()) if len(correct) else np.nan,
+                "avg_abs_error": float(abs_error.mean()) if abs_error.notna().any() else np.nan,
+                "avg_path_error": float(path_error.mean()) if path_error.notna().any() else np.nan,
+            }
+
+    conn = learning_db()
+    df = pd.read_sql_query("""
+        SELECT direction_correct, abs_error, path_error, expires_at
+        FROM forecast_windows
+        WHERE resolved = 1
+        ORDER BY expires_at DESC
+        LIMIT ?
+    """, conn, params=(int(window),))
+    conn.close()
+
+    if df.empty:
+        return {
+            "samples": 0,
+            "accuracy": np.nan,
+            "avg_abs_error": np.nan,
+            "avg_path_error": np.nan,
+        }
+
+    df["direction_correct"] = pd.to_numeric(df["direction_correct"], errors="coerce")
+    df["abs_error"] = pd.to_numeric(df["abs_error"], errors="coerce")
+    df["path_error"] = pd.to_numeric(df["path_error"], errors="coerce")
+    valid = df["direction_correct"].dropna()
+
+    return {
+        "samples": int(len(valid)),
+        "accuracy": float(valid.mean()) if len(valid) else np.nan,
+        "avg_abs_error": float(df["abs_error"].mean()),
+        "avg_path_error": float(df["path_error"].mean()),
+    }
+
+def rolling_master_accuracy_table():
+    rows = []
+
+    for window in (100, 500, 1000):
+        stats = rolling_master_accuracy(window)
+
+        rows.append({
+            "Window": f"Last {window}",
+            "Samples": stats["samples"],
+            "Direction Accuracy %": (
+                np.nan
+                if pd.isna(stats["accuracy"])
+                else stats["accuracy"] * 100.0
+            ),
+            "Avg Final Error $": stats["avg_abs_error"],
+            "Avg Path Error $": stats["avg_path_error"],
+        })
+
+    return pd.DataFrame(rows)
+
+
+def rolling_specialist_accuracy(window):
+    remote = fetch_remote_learning_state()
+    if isinstance(remote, dict):
+        histories = remote.get("specialist_history")
+        if isinstance(histories, dict) and histories:
+            out = []
+            for specialist, history in histories.items():
+                if not isinstance(history, list):
+                    continue
+                rows = history[-int(window):]
+                correct = pd.to_numeric(
+                    pd.Series([r.get("direction_correct") for r in rows]),
+                    errors="coerce",
+                ).dropna()
+                edge = pd.to_numeric(
+                    pd.Series([r.get("signed_edge") for r in rows]),
+                    errors="coerce",
+                )
+                rewards = pd.to_numeric(
+                    pd.Series([r.get("time_reward") for r in rows]),
+                    errors="coerce",
+                )
+                out.append({
+                    "Specialist": specialist,
+                    "Samples": int(len(correct)),
+                    "Accuracy %": (
+                        np.nan if len(correct) == 0
+                        else float(correct.mean() * 100.0)
+                    ),
+                    "Avg Signed Edge": (
+                        float(edge.mean()) if edge.notna().any() else np.nan
+                    ),
+                    "Reward Points": (
+                        float(rewards.sum()) if rewards.notna().any() else 0.0
+                    ),
+                    "Avg Time Reward": (
+                        float(rewards.mean()) if rewards.notna().any() else np.nan
+                    ),
+                })
+            return pd.DataFrame(out)
+
+    conn = specialist_learning_db()
+    df = pd.read_sql_query("""
+        SELECT specialist, direction_correct, signed_edge, resolved_at
+        FROM specialist_window_predictions
+        WHERE resolved = 1
+        ORDER BY resolved_at DESC
+    """, conn)
+    conn.close()
+
+    if df.empty:
+        return pd.DataFrame(
+            columns=["Specialist", "Samples", "Accuracy %", "Avg Signed Edge", "Reward Points", "Avg Time Reward"]
+        )
+
+    df["direction_correct"] = pd.to_numeric(df["direction_correct"], errors="coerce")
+    df["signed_edge"] = pd.to_numeric(df["signed_edge"], errors="coerce")
+
+    out = []
+    for specialist, group in df.groupby("specialist"):
+        g = group.head(int(window)).copy()
+        valid = g["direction_correct"].dropna()
+        out.append({
+            "Specialist": specialist,
+            "Samples": int(len(valid)),
+            "Accuracy %": (
+                np.nan if len(valid) == 0 else float(valid.mean() * 100.0)
+            ),
+            "Avg Signed Edge": float(g["signed_edge"].mean()) if len(g) else np.nan,
+            "Reward Points": np.nan,
+            "Avg Time Reward": np.nan,
+        })
+
+    return pd.DataFrame(out)
+
+def specialist_multiwindow_accuracy():
+    merged = None
+
+    for window in (100, 500, 1000):
+        df = rolling_specialist_accuracy(window)
+
+        rename = {
+            "Samples": f"N{window}",
+            "Accuracy %": f"Acc {window} %",
+            "Avg Signed Edge": f"Edge {window}",
+            "Reward Points": f"Reward {window}",
+            "Avg Time Reward": f"Avg Reward {window}",
+        }
+
+        df = df.rename(columns=rename)
+
+        cols = [
+            "Specialist",
+            f"N{window}",
+            f"Acc {window} %",
+            f"Edge {window}",
+            f"Reward {window}",
+            f"Avg Reward {window}",
+        ]
+
+        df = df[cols]
+
+        merged = (
+            df if merged is None
+            else merged.merge(
+                df,
+                on="Specialist",
+                how="outer",
+            )
+        )
+
+    return (
+        merged
+        if merged is not None
+        else pd.DataFrame()
+    )
+
+
+def learning_trend_label(short_acc, long_acc):
+    if pd.isna(short_acc) or pd.isna(long_acc):
+        return "Not enough data"
+
+    diff = float(short_acc) - float(long_acc)
+
+    if diff >= 5.0:
+        return "Improving ↑"
+    if diff <= -5.0:
+        return "Slipping ↓"
+    return "Stable →"
+
+
+def add_specialist_learning_trends(df):
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+
+    out["Trend"] = out.apply(
+        lambda r: learning_trend_label(
+            r.get("Acc 100 %"),
+            r.get("Acc 1000 %"),
+        ),
+        axis=1,
+    )
+
+    return out
+
+
+# ============================================================
+# PREDICTION JOURNAL
+# ============================================================
+
+
+def maybe_record_prediction(decision, price, min_seconds=60):
+    """Record one primary prediction per Kalshi 15-minute contract window.
+
+    Dashboard refreshes may recalculate the call many times, but overlapping
+    snapshots are correlated evidence and must not be counted as independent
+    learning samples. min_seconds remains accepted for older callers.
+    """
+    del min_seconds
+    now_ts = int(time.time())
+    close_ts = safe_float(decision.get("kalshi_close_ts"))
+    if pd.notna(close_ts) and float(close_ts) > now_ts:
+        target_ts = int(close_ts)
+    else:
+        horizon_seconds = int(PREDICTION_HORIZON_MIN * 60)
+        target_ts = ((now_ts // horizon_seconds) + 1) * horizon_seconds
+
+    with db_conn() as conn:
+        # target_ts identifies the contract window. Existing rows are preserved,
+        # but no refresh or changed call can create another row for this window.
+        if conn.execute(
+            "SELECT 1 FROM predictions WHERE target_ts=? LIMIT 1",
+            (target_ts,),
+        ).fetchone():
+            return False
+        conn.execute(
+            """INSERT INTO predictions
+               (created_ts,created_iso,target_ts,price,action,score,confidence,consensus,target_price,rationale)
+               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (
+                now_ts,
+                utc_now().isoformat(),
+                target_ts,
+                price,
+                decision["action"],
+                decision["score"],
+                decision["confidence"],
+                decision["consensus"],
+                decision["target_price"],
+                decision["reason"],
+            ),
+        )
+        conn.commit()
+    return True
+
+
+def resolve_predictions(hist, current_price=None):
+    """Resolve every expired journal row from the nearest real 1m BTC candle.
+
+    The resolver is intentionally batch-oriented so a large legacy journal does
+    not make hundreds of HTTP requests during one Streamlit rerun. It also
+    repairs legacy rows whose stored target_ts is inconsistent by falling back
+    to created_ts + the configured prediction horizon.
+    """
+    now_ts = int(time.time())
+    horizon_seconds = int(PREDICTION_HORIZON_MIN * 60)
+
+    # Use the already-loaded dashboard history first.
+    candle_points = []
+    if hist is not None and not hist.empty and "time" in hist.columns and "close" in hist.columns:
+        hist2 = hist[["time", "close"]].copy()
+        hist2["_ts"] = pd.to_datetime(hist2["time"], utc=True, errors="coerce")
+        # pandas 3 may store microseconds rather than nanoseconds. Do not
+        # assume the integer dtype's time unit when computing epoch seconds.
+        hist2["_epoch"] = hist2["_ts"].map(lambda ts: ts.timestamp() if pd.notna(ts) else np.nan)
+        hist2["close"] = pd.to_numeric(hist2["close"], errors="coerce")
+        for _, candle in hist2.dropna(subset=["_epoch", "close"]).iterrows():
+            px = safe_float(candle["close"])
+            if pd.notna(px) and px > 0:
+                candle_points.append((int(candle["_epoch"]) + 60, float(px)))
+
+    with db_conn() as conn:
+        # created_ts is the reliable expiry gate for legacy rows. A prediction is
+        # mature once its full configured horizon has elapsed even if an older
+        # build stored a malformed target_ts.
+        rows = conn.execute(
+            """SELECT * FROM predictions
+               WHERE created_ts<=?
+                 AND (
+                    resolved=0
+                    OR (resolved=1 AND correct IS NULL AND action NOT IN ('HOLD','WAIT'))
+                 )
+               ORDER BY id ASC LIMIT 500""",
+            (now_ts - horizon_seconds,),
+        ).fetchall()
+
+        if not rows:
+            return 0
+
+        prepared = []
+        missing_targets = []
+        for row in rows:
+            created_ts = int(row["created_ts"] or 0)
+            expected_target = created_ts + horizon_seconds
+            stored_target = int(row["target_ts"] or 0)
+
+            # Normal rows should be almost exactly one horizon apart. If not,
+            # self-heal the legacy row using its creation timestamp.
+            if stored_target <= 0 or abs(stored_target - expected_target) > 300:
+                target_ts = expected_target
+            else:
+                target_ts = stored_target
+
+            action = str(row["action"] or "HOLD").upper().strip()
+            prepared.append((row, target_ts, action))
+
+            # HOLD/WAIT can be marked resolved without a directional grade.
+            if action not in {"HOLD", "WAIT"}:
+                missing_targets.append(target_ts)
+
+        # Fetch missing historical candles in large chronological batches.
+        # Binance allows up to 1000 1m candles per call; keep each batch under
+        # ~14 hours and only request ranges that contain prediction targets.
+        if missing_targets:
+            targets = sorted(set(int(x) for x in missing_targets))
+            batches = []
+            batch_start = targets[0]
+            batch_end = targets[0]
+            for target in targets[1:]:
+                if target - batch_start <= 800 * 60:
+                    batch_end = target
+                else:
+                    batches.append((batch_start, batch_end))
+                    batch_start = batch_end = target
+            batches.append((batch_start, batch_end))
+
+            for batch_start, batch_end in batches:
+                try:
+                    market_rows, _ = try_bases(
+                        SPOT_BASES,
+                        "/api/v3/klines",
+                        {
+                            "symbol": SYMBOL,
+                            "interval": "1m",
+                            "startTime": max(0, (batch_start - 120) * 1000),
+                            "endTime": (batch_end + 120) * 1000,
+                            "limit": 1000,
+                        },
+                        timeout=4.0,
+                    )
+                    for candle in market_rows or []:
+                        try:
+                            open_ts = int(candle[0]) // 1000
+                            close_px = safe_float(candle[4])
+                            if pd.notna(close_px) and close_px > 0:
+                                candle_points.append((open_ts + 60, float(close_px)))
+                        except Exception:
+                            continue
+                except Exception:
+                    # Do not corrupt rows if a historical data request fails.
+                    # They remain open and will be retried on the next rerun.
+                    continue
+
+        if candle_points:
+            # Dedupe by timestamp and keep a sorted sequence for nearest lookup.
+            candle_map = {}
+            for candle_ts, candle_px in candle_points:
+                candle_map[int(candle_ts)] = float(candle_px)
+            candle_points = sorted(candle_map.items())
+
+        def _nearest_price(target_ts):
+            if not candle_points:
+                return np.nan
+            eligible = [(ts, px) for ts, px in candle_points if 0 <= int(target_ts) - ts < 60]
+            if not eligible:
+                return np.nan
+            nearest_ts, nearest_px = max(eligible)
+            return float(nearest_px)
+
+        updated = 0
+        for row, target_ts, action in prepared:
+            start_price = safe_float(row["price"])
+            if pd.isna(start_price) or start_price <= 0:
+                continue
+
+            # HOLD/WAIT is a completed no-trade observation. Keep it outside
+            # directional win/loss accuracy, even if historical data is offline.
+            if action in {"HOLD", "WAIT"}:
+                resolved_price = _nearest_price(target_ts)
+                ret = (
+                    (resolved_price / start_price - 1.0) * 100.0
+                    if pd.notna(resolved_price) and resolved_price > 0
+                    else None
+                )
+                conn.execute(
+                    "UPDATE predictions SET target_ts=?,resolved=1,resolved_price=?,return_pct=?,correct=NULL WHERE id=?",
+                    (
+                        int(target_ts),
+                        None if pd.isna(resolved_price) else float(resolved_price),
+                        ret,
+                        int(row["id"]),
+                    ),
+                )
+                updated += 1
+                continue
+
+            resolved_price = _nearest_price(target_ts)
+            if pd.isna(resolved_price) or resolved_price <= 0:
+                continue
+
+            ret = (resolved_price / start_price - 1.0) * 100.0
+            # Grade the prediction journal by BTC direction from the call price.
+            # Kalshi contract settlement is authoritative only in the paper ledger.
+            if action in {"SCALP UP", "LOCK UP"}:
+                correct = int(resolved_price > start_price)
+            elif action in {"SCALP DOWN", "LOCK DOWN"}:
+                correct = int(resolved_price < start_price)
+            else:
+                correct = None
+
+            conn.execute(
+                """UPDATE predictions
+                   SET target_ts=?,resolved=1,resolved_price=?,return_pct=?,correct=?
+                   WHERE id=?""",
+                (
+                    int(target_ts),
+                    float(resolved_price),
+                    float(ret),
+                    correct,
+                    int(row["id"]),
+                ),
+            )
+            updated += 1
+
+        # Repair legacy resolved directional rows using the same directional
+        # definition as new journal rows. Kalshi settlement truth remains in
+        # the paper ledger and must not overwrite BTC direction accuracy.
+        conn.execute(
+            """UPDATE predictions
+               SET correct = CASE
+                   WHEN action IN ('SCALP UP','LOCK UP')
+                       THEN CASE WHEN resolved_price > price THEN 1 ELSE 0 END
+                   WHEN action IN ('SCALP DOWN','LOCK DOWN')
+                       THEN CASE WHEN resolved_price < price THEN 1 ELSE 0 END
+                   ELSE correct
+               END
+               WHERE resolved=1
+                 AND resolved_price IS NOT NULL
+                 AND price IS NOT NULL
+                 AND action IN ('SCALP UP','SCALP DOWN','LOCK UP','LOCK DOWN')"""
+        )
+        conn.commit()
+    return updated
+
+
+def recent_predictions(limit=100):
+    with db_conn() as conn:
+        df = pd.read_sql_query(
+            """SELECT id,created_iso,action,price,target_price,score,confidence,consensus,
+                      resolved,resolved_price,return_pct,correct
+               FROM predictions ORDER BY id DESC LIMIT ?""",
+            conn,
+            params=(int(limit),),
+        )
+    if not df.empty:
+        # Existing Streamlit Cloud databases can contain values written by an
+        # older build as strings/objects. Coerce display columns back to
+        # numeric before arithmetic/rounding so legacy rows cannot crash the UI.
+        numeric_cols = ["confidence", "consensus", "score", "price",
+                        "target_price", "resolved_price", "return_pct", "correct"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        if "created_iso" in df.columns:
+            _created_et = pd.to_datetime(df["created_iso"], utc=True, errors="coerce").dt.tz_convert("America/New_York")
+            df["created_iso"] = _created_et.dt.strftime("%Y-%m-%d %I:%M %p %Z")
+        df["confidence"] = (df["confidence"] * 100.0).round(1)
+        df["consensus"] = (df["consensus"] * 100.0).round(1)
+        df["score"] = df["score"].round(3)
+        df["return_pct"] = df["return_pct"].round(3)
+    return df
+
+
+def prediction_stats():
+    with db_conn() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) AS n,
+                      SUM(CASE WHEN resolved=1 THEN 1 ELSE 0 END) AS resolved_n,
+                      SUM(CASE WHEN resolved=1 AND action NOT IN ('HOLD','WAIT') THEN 1 ELSE 0 END) AS trade_resolved_n,
+                      SUM(CASE WHEN resolved=1 AND action NOT IN ('HOLD','WAIT') AND correct=1 THEN 1 ELSE 0 END) AS correct_n,
+                      SUM(CASE WHEN resolved=1 AND action IN ('HOLD','WAIT') THEN 1 ELSE 0 END) AS wait_resolved_n,
+                      AVG(CASE WHEN resolved=1 THEN ABS(return_pct) END) AS avg_abs_move
+               FROM predictions"""
+        ).fetchone()
+    n = int(row["n"] or 0)
+    resolved_n = int(row["resolved_n"] or 0)
+    trade_resolved_n = int(row["trade_resolved_n"] or 0)
+    correct_n = int(row["correct_n"] or 0)
+    wait_resolved_n = int(row["wait_resolved_n"] or 0)
+    return {
+        "n": n,
+        "resolved": resolved_n,
+        "trade_resolved": trade_resolved_n,
+        "wait_resolved": wait_resolved_n,
+        "accuracy": correct_n / trade_resolved_n if trade_resolved_n else np.nan,
+        "avg_abs_move": safe_float(row["avg_abs_move"]),
+    }
+
+
+# ============================================================
+# WALK-FORWARD BACKTEST
+# ============================================================
+
+
+def walk_forward_backtest(hist, horizon=15):
+    x = hist.copy().dropna(subset=["ema9", "ema21", "rsi", "close"])
+    if len(x) < 100:
+        return pd.DataFrame(), {}
+    x["signal"] = 0
+    x.loc[(x["ema9"] > x["ema21"]) & (x["rsi"] > 52), "signal"] = 1
+    x.loc[(x["ema9"] < x["ema21"]) & (x["rsi"] < 48), "signal"] = -1
+    x["future_return"] = x["close"].shift(-horizon) / x["close"] - 1
+    test = x.iloc[80:-horizon].copy()
+    test = test[test["signal"] != 0]
+    if test.empty:
+        return test, {}
+    test["strategy_return"] = test["signal"] * test["future_return"]
+    test["correct"] = (test["strategy_return"] > 0).astype(int)
+    stats = {
+        "trades": len(test),
+        "win_rate": test["correct"].mean(),
+        "avg_return": test["strategy_return"].mean(),
+        "median_return": test["strategy_return"].median(),
+        "total_compound": (1 + test["strategy_return"]).prod() - 1,
+    }
+    return test, stats
+
+# ============================================================
+# CHARTS
+# ============================================================
+
+
+def apply_plotly_theme(fig):
+    if st.session_state.get("dashboard_dark_mode", True):
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#080d14",
+            plot_bgcolor="#0d141f",
+            font=dict(color="#eef3fa"),
+            xaxis=dict(
+                gridcolor="rgba(255,255,255,0.10)",
+                zerolinecolor="rgba(255,255,255,0.16)",
+            ),
+            yaxis=dict(
+                gridcolor="rgba(255,255,255,0.10)",
+                zerolinecolor="rgba(255,255,255,0.16)",
+            ),
+        )
+    else:
+        fig.update_layout(
+            template="plotly_white",
+            paper_bgcolor="#ffffff",
+            plot_bgcolor="#ffffff",
+            font=dict(color="#111827"),
+            xaxis=dict(
+                gridcolor="rgba(0,0,0,0.08)",
+                zerolinecolor="rgba(0,0,0,0.14)",
+            ),
+            yaxis=dict(
+                gridcolor="rgba(0,0,0,0.08)",
+                zerolinecolor="rgba(0,0,0,0.14)",
+            ),
+        )
+    return fig
+
+
+def candle_chart(hist, kalshi_target=np.nan):
+    tail = hist.tail(180)
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Candlestick(
+            x=tail["time"],
+            open=tail["open"],
+            high=tail["high"],
+            low=tail["low"],
+            close=tail["close"],
+            name="BTC",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=tail["time"], y=tail["ema9"],
+            name="EMA 9", line=dict(width=1)
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=tail["time"], y=tail["ema21"],
+            name="EMA 21", line=dict(width=1)
+        )
+    )
+
+    if pd.notna(kalshi_target):
+        fig.add_hline(
+            y=kalshi_target,
+            line_dash="solid",
+            line_width=4,
+            opacity=1.0,
+            annotation_text=f"KALSHI TARGET  ${kalshi_target:,.2f}",
+            annotation_position="top left",
+            annotation_bgcolor="rgba(0,0,0,0.75)",
+            annotation_font=dict(size=14),
+        )
+
+    fig.update_layout(
+        height=430,
+        margin=dict(l=10, r=10, t=30, b=10),
+        xaxis_rangeslider_visible=False,
+        legend_orientation="h",
+        uirevision="btc-broader-market",
+        transition_duration=0,
+    )
+    apply_plotly_theme(fig)
+    return fig
+
+
+def kalshi_15m_chart(hist, spot_price, kctx, projected_end=np.nan):
+    """
+    AGGR-style Kalshi view:
+    - 1-minute BTC candles
+    - fixed Kalshi target for the current contract
+    - stable uirevision so refreshes do not reset the chart
+    - no rangeslider / minimal chrome
+    """
+    tail = hist.tail(32).copy()
+
+    # Keep only a useful window around the active 15-minute contract,
+    # while retaining a little context before it opened.
+    if kctx.get("close_time"):
+        try:
+            close_ts = pd.Timestamp(kctx["close_time"])
+            if close_ts.tzinfo is None:
+                close_ts = close_ts.tz_localize("UTC")
+            open_ts = close_ts - pd.Timedelta(minutes=15)
+            context_start = open_ts - pd.Timedelta(minutes=5)
+            filtered = tail[tail["time"] >= context_start]
+            if len(filtered) >= 6:
+                tail = filtered
+        except Exception:
+            pass
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Candlestick(
+            x=tail["time"],
+            open=tail["open"],
+            high=tail["high"],
+            low=tail["low"],
+            close=tail["close"],
+            name="BTC 1m",
+            increasing_line_width=1.8,
+            decreasing_line_width=1.8,
+            increasing_fillcolor="#12b886",
+            increasing_line_color="#12b886",
+            decreasing_fillcolor="#fa5252",
+            decreasing_line_color="#fa5252",
+            whiskerwidth=0.35,
+        )
+    )
+
+    target = kctx.get("target", np.nan)
+    ticker = kctx.get("ticker", "KXBTC15M")
+
+    if pd.notna(target):
+        fig.add_hline(
+            y=target,
+            line_dash="solid",
+            line_width=4,
+            line_color="#ffd43b",
+            opacity=1.0,
+            annotation_text=f"KALSHI TARGET  ${target:,.2f}",
+            annotation_position="top left",
+            annotation_bgcolor="rgba(8,13,20,0.92)",
+            annotation_bordercolor="#ffd43b",
+            annotation_borderwidth=1,
+            annotation_font=dict(size=14, color="#fff3bf"),
+        )
+
+    # Current live BTC marker: updates without changing the target.
+    now = pd.Timestamp.now(tz="UTC")
+    fig.add_trace(
+        go.Scatter(
+            x=[now],
+            y=[spot_price],
+            mode="markers",
+            marker=dict(size=8, symbol="circle"),
+            name="BTC now",
+            hovertemplate="BTC now: $%{y:,.2f}<extra></extra>",
+        )
+    )
+
+    if pd.notna(projected_end):
+        fig.add_trace(
+            go.Scatter(
+                x=[now],
+                y=[projected_end],
+                mode="markers",
+                marker=dict(size=9, symbol="diamond"),
+                name="AI projected end",
+                hovertemplate="AI projected end: $%{y:,.2f}<extra></extra>",
+            )
+        )
+
+    # Preserve zoom/pan and avoid a full visual reset every Streamlit refresh.
+    fig.update_layout(
+        uirevision=f"kalshi-{ticker}",
+        height=430,
+        margin=dict(l=8, r=8, t=18, b=8),
+        xaxis_rangeslider_visible=False,
+        hovermode="x unified",
+        dragmode="pan",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.01,
+            xanchor="left",
+            x=0,
+        ),
+        transition_duration=0,
+    )
+
+    # AGGR-like minimal chart chrome.
+    fig.update_xaxes(
+        showgrid=False,
+        showline=False,
+        zeroline=False,
+        fixedrange=False,
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridwidth=1,
+        side="right",
+        fixedrange=False,
+        tickformat="$,.0f",
+    )
+
+    apply_plotly_theme(fig)
+    return fig
+
+# ============================================================
+# STARTUP
+# ============================================================
+
+init_db()
+
+st.title("₿ BTC AI Trading Command Center")
+st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
+st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine • 24/7 remote learner • rolling 100/500/1000-window accuracy • paper-only")
+render_market_guide()
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+# Persistent Kalshi 15-minute countdown.
+# Seed the timer from Streamlit's server-side Kalshi request (avoids browser CORS issues),
+# then tick locally in the browser for smooth second-by-second updates.
+_timer_close_ms = 0
+_timer_ticker = ""
+try:
+    _timer_payload = fetch_kalshi_bitcoin_markets()
+    _timer_market = (_timer_payload or {}).get("current") or {}
+    _timer_close_ts = kalshi_close_timestamp(_timer_market)
+    if pd.notna(_timer_close_ts):
+        _timer_close_ms = int(float(_timer_close_ts) * 1000)
+    _timer_ticker = str(_timer_market.get("ticker") or "")
+except Exception:
+    pass
+
+_kalshi_timer_html = r"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html,body{margin:0;padding:0;background:transparent;color:#f5f9ff;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+  .kalshi-sidebar-timer{box-sizing:border-box;width:100%;border:1.5px solid #1687ff;border-radius:14px;padding:14px 14px 12px;background:linear-gradient(180deg,rgba(7,26,48,.98),rgba(5,20,37,.98));box-shadow:0 10px 26px rgba(0,0,0,.22),0 0 0 1px rgba(22,135,255,.10) inset;}
+  .timer-title{font-size:18px;font-weight:800;letter-spacing:.01em;margin:0 0 10px 0;}
+  .timer-main{display:flex;align-items:center;gap:12px;}
+  .clock{width:46px;height:46px;border:6px solid #1687ff;border-radius:50%;position:relative;box-sizing:border-box;box-shadow:0 0 18px rgba(22,135,255,.28);flex:0 0 auto;}
+  .clock:before{content:"";position:absolute;left:18px;top:8px;width:4px;height:15px;background:#1687ff;border-radius:3px;transform-origin:bottom center;}
+  .clock:after{content:"";position:absolute;left:18px;top:20px;width:13px;height:4px;background:#1687ff;border-radius:3px;transform:rotate(35deg);transform-origin:left center;}
+  .countdown{font-size:42px;line-height:1;font-weight:850;letter-spacing:.02em;font-variant-numeric:tabular-nums;}
+  .track{height:12px;border-radius:999px;background:#24496d;margin-top:13px;overflow:hidden;}
+  .fill{height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,#087cff,#18a7ff);transition:width .35s linear;box-shadow:0 0 12px rgba(22,135,255,.35);}
+  .meta{display:flex;justify-content:space-between;margin-top:9px;font-size:13px;color:#b9d3ef;font-variant-numeric:tabular-nums;}
+  .status{margin-top:7px;font-size:11px;color:#6f8ba8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+</style>
+</head>
+<body>
+<div class="kalshi-sidebar-timer">
+  <div class="timer-title">Kalshi 15m Timer</div>
+  <div class="timer-main"><div class="clock"></div><div id="countdown" class="countdown">--:--</div></div>
+  <div class="track"><div id="fill" class="fill"></div></div>
+  <div class="meta"><span id="elapsed">--:-- elapsed</span><span>15:00 total</span></div>
+  <div id="status" class="status">Finding current KXBTC15M market…</div>
+</div>
+<script>
+(() => {
+  const TOTAL=15*60;
+  let closeMs=Number('__CLOSE_MS__') || null;
+  let ticker='__TICKER__';
+  const cd=document.getElementById('countdown');
+  const fill=document.getElementById('fill');
+  const elapsedEl=document.getElementById('elapsed');
+  const status=document.getElementById('status');
+  const fmt=(sec)=>{sec=Math.max(0,Math.floor(sec));const m=Math.floor(sec/60),s=sec%60;return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');};
+  function render(){
+    if(!closeMs){cd.textContent='--:--';fill.style.width='0%';elapsedEl.textContent='--:-- elapsed';return;}
+    const remain=Math.min(TOTAL,Math.max(0,(closeMs-Date.now())/1000));
+    const elapsed=Math.max(0,Math.min(TOTAL,TOTAL-remain));
+    cd.textContent=fmt(remain);
+    elapsedEl.textContent=fmt(elapsed)+' elapsed';
+    fill.style.width=(Math.max(0,Math.min(1,elapsed/TOTAL))*100).toFixed(2)+'%';
+    if(remain<=0){ status.textContent='Market ended — loading next 15m market…'; }
+  }
+  function rollWindowIfNeeded(){
+    if(closeMs && Date.now() >= closeMs){
+      // KXBTC15M markets are sequential 15-minute windows. Continue the timer
+      // immediately while Streamlit refreshes the exact active ticker in the background.
+      const step=15*60*1000;
+      while(Date.now() >= closeMs) closeMs += step;
+      ticker='';
+      status.textContent='Next Kalshi 15m market';
+    }
+  }
+  status.textContent=ticker || (closeMs ? 'Kalshi 15m market' : 'Waiting for Kalshi market…');
+  render();
+  setInterval(()=>{rollWindowIfNeeded();render();},250);
+})();
+</script>
+</body>
+</html>
+"""
+_kalshi_timer_html = _kalshi_timer_html.replace("__CLOSE_MS__", str(_timer_close_ms)).replace("__TICKER__", _timer_ticker.replace("\\", "").replace("'", ""))
+with st.sidebar:
+    components.html(_kalshi_timer_html, height=205, scrolling=False)
+
+st.sidebar.header("Command Center")
+
+dark_mode = st.sidebar.toggle(
+    "🌙 Dark Mode",
+    value=True,
+    key="dashboard_dark_mode",
+    help="Switch the command center and charts between dark and light mode.",
+)
+
+# ============================================================
+# VISUAL APP SHELL — R21
+# Keeps all trading/learning logic intact; changes presentation only.
+# ============================================================
+if dark_mode:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --cc-bg:#050b14;
+            --cc-panel:#081525;
+            --cc-panel2:#0b1a2d;
+            --cc-border:#18324f;
+            --cc-text:#f4f8ff;
+            --cc-muted:#94a8c6;
+            --cc-blue:#1687ff;
+            --cc-green:#00e6b3;
+            --cc-red:#ff4964;
+        }
+
+        html, body, [data-testid="stAppViewContainer"], .stApp {
+            background: radial-gradient(circle at 65% -10%, #0b213b 0%, #050b14 38%, #030811 100%) !important;
+            color: var(--cc-text) !important;
+        }
+        [data-testid="stHeader"] {background: rgba(3,8,17,.72) !important;}
+        [data-testid="stToolbar"] {background: transparent !important;}
+        .block-container {max-width: 1500px; padding-top: 1rem !important;}
+
+        /* Sidebar */
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg,#071321 0%,#06101c 100%) !important;
+            border-right: 1px solid var(--cc-border) !important;
+        }
+        [data-testid="stSidebar"] > div:first-child {background: transparent !important;}
+        [data-testid="stSidebar"] * {color: var(--cc-text);}
+        [data-testid="stSidebar"] h2 {
+            font-size: 1.45rem !important;
+            letter-spacing: -.02em;
+            margin-bottom: .7rem !important;
+        }
+        [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {color:#d9e5f5 !important;}
+        [data-testid="stSidebar"] [data-baseweb="slider"] {padding-top:.15rem;}
+        [data-testid="stSidebar"] [role="switch"][aria-checked="true"] {background:var(--cc-blue) !important;}
+
+        /* Tabs as compact navigation */
+        [data-testid="stTabs"] [role="tablist"] {
+            gap:.35rem !important;
+            background:#071322 !important;
+            border:1px solid var(--cc-border) !important;
+            border-radius:12px !important;
+            padding:.35rem !important;
+            overflow-x:auto !important;
+        }
+        [data-testid="stTabs"] [role="tab"] {
+            border-radius:8px !important;
+            padding:.55rem .78rem !important;
+            color:#9fb2ce !important;
+            background:transparent !important;
+        }
+        [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+            background:linear-gradient(180deg,#0f64c7,#0a4fa8) !important;
+            color:#fff !important;
+            box-shadow:0 0 0 1px rgba(72,159,255,.24) inset !important;
+        }
+        [data-baseweb="tab-highlight"] {display:none !important;}
+
+        /* Cards / metrics */
+        [data-testid="stMetric"] {
+            background:linear-gradient(180deg,rgba(11,27,47,.96),rgba(7,20,35,.96)) !important;
+            border:1px solid #1687ff !important;
+            border-radius:13px !important;
+            padding:.85rem 1rem !important;
+            min-height:92px !important;
+            box-shadow:0 10px 28px rgba(0,0,0,.18), 0 0 0 1px rgba(22,135,255,.08) inset !important;
+        }
+        [data-testid="stMetric"]:hover {border-color:#4aa3ff !important;}
+        [data-testid="stTabs"] [data-testid="stVerticalBlock"] > div {
+            border-radius:12px;
+        }
+        [data-testid="stTabs"] h2, [data-testid="stTabs"] h3 {
+            padding-bottom:.35rem;
+            border-bottom:1px solid rgba(22,135,255,.24);
+        }
+        [data-testid="stMetricLabel"] {color:var(--cc-muted) !important;}
+        [data-testid="stMetricValue"] {color:var(--cc-text) !important; font-weight:750 !important;}
+        [data-testid="stMetricDelta"] {font-weight:650 !important;}
+
+        /* Dataframes/tables */
+        [data-testid="stDataFrame"], [data-testid="stTable"] {
+            background:#071321 !important;
+            border:1px solid var(--cc-border) !important;
+            border-radius:13px !important;
+            overflow:hidden !important;
+            box-shadow:0 10px 28px rgba(0,0,0,.16) !important;
+        }
+        [data-testid="stDataFrame"] * {color:#dbe7f7 !important;}
+        [data-testid="stDataFrame"] canvas {filter:none !important;}
+
+        /* Expanders, forms, inputs */
+        [data-testid="stExpander"], [data-testid="stForm"] {
+            background:rgba(8,21,37,.95) !important;
+            border:1px solid var(--cc-border) !important;
+            border-radius:12px !important;
+        }
+        [data-baseweb="select"] > div,
+        [data-baseweb="input"] > div,
+        input, textarea {
+            background:#081626 !important;
+            color:#f4f8ff !important;
+            border-color:#274564 !important;
+        }
+
+        /* Alerts and banners */
+        [data-testid="stAlert"] {
+            background:linear-gradient(180deg,#0a1a2d,#081522) !important;
+            border:1px solid #1687ff !important;
+            border-radius:12px !important;
+            color:#eaf2ff !important;
+            box-shadow:0 8px 22px rgba(0,0,0,.14) !important;
+        }
+        [data-testid="stAlert"] [data-testid="stMarkdownContainer"],
         [data-testid="stAlert"] [data-testid="stMarkdownContainer"] p,
         [data-testid="stAlert"] [data-testid="stMarkdownContainer"] span,
         [data-testid="stAlert"] > div {
