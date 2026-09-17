@@ -271,8 +271,12 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(reason, 'OFFICIAL_SETTLEMENT:yes')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-    def test_lock_does_not_require_ninety_five_percent_confidence(self):
-        self.decision['confidence'] = .60
+    def test_lock_requires_top_tail_confidence(self):
+        self.decision['confidence'] = .679
+        blocked = self.cycle()
+        self.assertFalse(blocked['event'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
+        self.decision['confidence'] = .68
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')
@@ -466,8 +470,8 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('_contract_history = shared_paper_history(_shared_paper', source)
         self.assertNotIn('auto_result = manage_auto_paper(', source)
         self.assertIn('persistent GitHub learning-state ledger', source)
-        self.assertIn('projected 5% gross return', source)
-        self.assertIn('15-point emergency adverse contract move', source)
+        self.assertIn('new automatic SCALP entries are disabled', source)
+        self.assertIn('top-tail calibrated confidence', source)
         self.assertIn('only from that ticker\'s official Kalshi settlement', source)
         self.assertIn('if row["pnl"] is None', paper_tab)
         self.assertNotIn('LOCK sells automatically at a 95%', source)
@@ -530,7 +534,7 @@ class ContractRegressionTests(unittest.TestCase):
             .75,
         )
 
-    def test_final_lock_may_enter_above_seventy_five_percent(self):
+    def test_lock_above_seventy_five_percent_is_rejected(self):
         self.decision.update(
             action='LOCK UP',
             confidence=.95,
@@ -538,12 +542,11 @@ class ContractRegressionTests(unittest.TestCase):
             yes_bid_dollars=.84,
         )
         opened = self.cycle()
-        self.assertTrue(opened['event'])
-        position = engine.paper_summary(self.db)['open_position']
-        self.assertEqual(position['strategy'], 'LOCK')
-        self.assertEqual(position['entry_price'], .85)
+        self.assertFalse(opened['event'])
+        self.assertIn('above the 75%', opened['message'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-    def test_lock_may_enter_at_ninety_five_percent_without_profit_gate(self):
+    def test_lock_at_ninety_five_percent_is_rejected(self):
         self.decision.update(
             action='LOCK UP',
             confidence=.40,
@@ -551,25 +554,22 @@ class ContractRegressionTests(unittest.TestCase):
             yes_bid_dollars=.94,
         )
         opened = self.cycle()
-        self.assertTrue(opened['event'])
-        position = engine.paper_summary(self.db)['open_position']
-        self.assertIsNotNone(position)
-        self.assertEqual(position['strategy'], 'LOCK')
-        self.assertEqual(position['entry_price'], .95)
+        self.assertFalse(opened['event'])
+        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_accepts_profitable_fee_aware_price(self):
         self.decision.update(
             action='LOCK UP',
             confidence=.95,
-            yes_ask_dollars=.94,
-            yes_bid_dollars=.93,
+            yes_ask_dollars=.75,
+            yes_bid_dollars=.74,
         )
-        self.assertGreater(engine.lock_target_pnl(10, .94), 0)
+        self.assertGreater(engine.lock_target_pnl(10, .75), 0)
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(
             engine.paper_summary(self.db)['open_position']['entry_price'],
-            .94,
+            .75,
         )
 
     def test_expired_or_invalid_quote_cannot_open(self):
@@ -622,11 +622,11 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn("currentTarget = NaN;", source)
 
 
-def test_lock_95_is_exit_target_not_entry_confidence_gate():
+def test_lock_first_mode_uses_top_tail_confidence_and_ninety_five_exit_target():
     from pathlib import Path
     engine_src = Path("kalshi_paper_engine.py").read_text()
     background = Path("background_paper.py").read_text()
-    assert 'strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE' not in engine_src
+    assert 'strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE' in engine_src
     assert 'strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"' not in background
     assert 'strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"' in background
     assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine_src
@@ -645,14 +645,14 @@ def test_background_paper_follows_explicit_master_action_source():
 
 
 
-def test_lock_can_enter_without_risk_approval_at_99_percent():
+def test_lock_can_bypass_risk_approval_only_when_lock_first_guards_pass():
     with tempfile.TemporaryDirectory() as tmp:
         db = tmp + "/paper-lock-free.db"
         decision = dict(
             action="LOCK UP", kalshi_ticker="KXBTC15M-LOCK-FREE",
             kalshi_close_ts=time.time()+900, target_price=100,
-            yes_ask_dollars=.99, yes_bid_dollars=.98,
-            no_ask_dollars=.02, no_bid_dollars=.01, confidence=.40,
+            yes_ask_dollars=.75, yes_bid_dollars=.74,
+            no_ask_dollars=.26, no_bid_dollars=.25, confidence=.68,
         )
         risk = dict(approved=False, position_pct=.10)
         opened = engine.open_position(db, 500, decision, risk, 100)
@@ -660,4 +660,4 @@ def test_lock_can_enter_without_risk_approval_at_99_percent():
         position = engine.paper_summary(db)["open_position"]
         assert position is not None
         assert position["strategy"] == "LOCK"
-        assert position["entry_price"] == .99
+        assert position["entry_price"] == .75

@@ -12,7 +12,21 @@ import pandas as pd
 import learner as legacy
 import learner_v3 as v3
 from ai_core import forecast_path_core
-from reliability_v31 import detect_regime, exact_expiry_row, safe_float
+from lock_focus import (
+    AUTO_SCALPING_ENABLED,
+    LOCK_EARLIEST_SECONDS,
+    LOCK_MAX_ENTRY_PRICE,
+    LOCK_MIN_CONFIDENCE,
+    evaluate_lock_focus,
+    specialist_consensus,
+)
+from reliability_v31 import (
+    detect_regime,
+    exact_expiry_row,
+    learned_policy,
+    safe_float,
+    source_health_from_specialists,
+)
 from research_lab import ensure_research_lab, register_shadow, resolve_shadows, update_lifecycles
 
 PROMOTION_MIN_SAMPLES = 20
@@ -28,6 +42,15 @@ def ensure_v31(state):
     state.setdefault("data_quality", {})
     state.setdefault("wait_counterfactual", {"samples": 0, "profitable_waits": 0, "avoided_losses": 0})
     state.setdefault("prediction_snapshots", [])
+    state["btc_execution_mode"] = {
+        "name": "LOCK_FIRST",
+        "paper_only": True,
+        "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
+        "lock_focus_enabled": True,
+        "earliest_lock_seconds": LOCK_EARLIEST_SECONDS,
+        "confidence_floor": LOCK_MIN_CONFIDENCE,
+        "maximum_entry_price": LOCK_MAX_ENTRY_PRICE,
+    }
     state["status"].setdefault("learning_version", 31)
     ensure_research_lab(state)
     return state
@@ -291,13 +314,57 @@ def current_shadow_call(state, df, market_info):
     confidence, base_score = v3.weighted_master_confidence(call, state)
     call["master_confidence"] = confidence
     call["master_base_score"] = base_score
-    wait = state.get("wait_policy", {})
-    would_wait = bool(
-        abs(base_score) < safe_float(wait.get("minimum_edge_score"), 0.18)
-        or confidence < safe_float(wait.get("minimum_calibrated_confidence"), 0.58)
+    direction = "UP" if base_score > 0 else "DOWN"
+    consensus = specialist_consensus(specialists, direction)
+    source_health = source_health_from_specialists(specialists)
+    seconds_remaining = safe_float(market_info.get("expires_at"), 0.0) - time.time()
+    predicted_end = safe_float(forecast.get("predicted_end"))
+    target = safe_float(market_info.get("target"))
+    price_floor = price * 0.00035
+    target_confirmed = bool(
+        predicted_end is not None
+        and target is not None
+        and ((predicted_end - target) * base_score) > 0
+        and abs(predicted_end - target) >= price_floor
     )
-    call["master_action"] = "WAIT" if would_wait else ("SCALP UP" if base_score > 0 else "SCALP DOWN")
+    policy = learned_policy(state, detect_regime(df))
+    focus = evaluate_lock_focus(
+        base_score=base_score,
+        confidence=confidence,
+        consensus=consensus,
+        source_health=source_health,
+        seconds_remaining=seconds_remaining,
+        market=market_info,
+        target_confirmed=target_confirmed,
+        edge_floor=policy["edge_floor"],
+    )
+    call["master_action"] = focus["action"]
+    call["would_wait"] = not focus["eligible"]
+    call["lock_focus"] = focus
     return call
+
+
+def refresh_pending_lock_focus(state, live_call, market_info):
+    """Refresh WAIT into a qualified LOCK without altering grading geometry."""
+    pending = state.get("pending")
+    if not isinstance(pending, dict) or not isinstance(live_call, dict):
+        return False
+    if str(pending.get("ticker") or "") != str((market_info or {}).get("ticker") or ""):
+        return False
+    old_action = str(pending.get("master_action") or "WAIT").upper()
+    if old_action.startswith("LOCK"):
+        return False
+    for key in (
+        "specialists", "master_confidence", "master_base_score",
+        "master_action", "would_wait", "lock_focus",
+    ):
+        pending[key] = live_call.get(key)
+    if str(pending.get("master_action") or "").startswith("LOCK"):
+        pending["lock_called_at"] = time.time()
+        pending["lock_called_seconds_remaining"] = (
+            (live_call.get("lock_focus") or {}).get("seconds_remaining")
+        )
+    return True
 
 
 def main():
@@ -309,7 +376,15 @@ def main():
     research_resolved = resolve_shadows(state, legacy.official_result)
     official_resolved = legacy.resolve_official_results(state)
     registered = register_with_snapshot(state, df, market_info)
-    shadow_call = state.get("pending") if registered else current_shadow_call(state, df, market_info)
+    live_call = current_shadow_call(state, df, market_info)
+    refreshed_lock_focus = refresh_pending_lock_focus(state, live_call, market_info)
+    pending_action = str((state.get("pending") or {}).get("master_action") or "").upper()
+    if live_call and pending_action.startswith("LOCK"):
+        live_call["master_action"] = pending_action
+        live_call["would_wait"] = False
+    # Research phases use the current observation time, while execution keeps
+    # the original pending forecast geometry for strict expiry grading.
+    shadow_call = live_call or state.get("pending")
     research_registered = register_shadow(state, shadow_call, market_info)
     v3.update_rolling(state)
     state["validation"] = v3.walk_forward_validate(df, state)
@@ -329,6 +404,9 @@ def main():
         "research_lab_ok": True,
         "research_resolved_this_run": research_resolved,
         "research_registered_this_run": research_registered,
+        "lock_focus_refreshed_this_run": refreshed_lock_focus,
+        "btc_execution_mode": "LOCK_FIRST",
+        "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "champion_promoted": state.get("champion_challenger", {}).get("promoted", False),
         "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),
         "samples_before_run": before_samples,

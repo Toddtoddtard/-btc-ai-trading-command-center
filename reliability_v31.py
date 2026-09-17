@@ -76,9 +76,10 @@ def learned_policy(state, regime="UNKNOWN"):
     edge_floor = float(np.clip(base_edge - 0.035 * reliability, 0.10, 0.24))
     return {
         "trade_confidence_floor": trade_conf,
-        # LOCK is a near-certain, once-per-market commitment. Unlike SCALP,
-        # learning may not relax this hard confidence floor.
-        "lock_confidence_floor": 0.95,
+        # The live model's 95th-percentile calibrated confidence is about 0.67.
+        # Use 0.68 to select only its strongest tail, then require independent
+        # consensus, feed, target, market and price checks in LOCK-first mode.
+        "lock_confidence_floor": 0.68,
         "edge_floor": edge_floor,
         "regime": regime,
         "regime_samples": samples,

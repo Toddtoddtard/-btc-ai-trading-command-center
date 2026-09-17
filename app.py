@@ -41,6 +41,10 @@ from kalshi_paper_engine import (
     scalp_profitability_gate,
 )
 from learning_prices import closed_price_at
+from lock_focus import (
+    AUTO_SCALPING_ENABLED,
+    evaluate_lock_focus,
+)
 from pro_trade_ticket import build_pro_trade_ticket
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
@@ -80,7 +84,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.16-r77-pro-paper-ticket"
+APP_VERSION = "2026.09.17-r78-lock-first"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -1811,95 +1815,27 @@ def master_decision(results, hist, kalshi=None):
         # LOCK UP   = expected to FINISH ABOVE the Kalshi target.
         # LOCK DOWN = expected to FINISH BELOW the Kalshi target.
         # -----------------------------------------------------------
-        lock_up = (
-            raw_side == "UP"
-            and confidence >= policy["lock_confidence_floor"]
-            and projected_edge >= max(atr * 0.35, px * 0.00035)
-            and (
-                (pd.notna(remaining) and remaining <= 300)
-                or abs(score) >= 0.30
-            )
+        target_confirmed = bool(
+            (raw_side == "UP" and projected_edge >= max(atr * 0.35, px * 0.00035))
+            or (raw_side == "DOWN" and projected_edge <= -max(atr * 0.35, px * 0.00035))
         )
-
-        lock_down = (
-            raw_side == "DOWN"
-            and confidence >= policy["lock_confidence_floor"]
-            and projected_edge <= -max(atr * 0.35, px * 0.00035)
-            and (
-                (pd.notna(remaining) and remaining <= 300)
-                or abs(score) >= 0.30
-            )
+        lock_focus = evaluate_lock_focus(
+            base_score=base_score,
+            confidence=confidence,
+            consensus=consensus,
+            source_health=source_health_from_specialists(results),
+            seconds_remaining=remaining,
+            market=kctx.get("market") or {},
+            target_confirmed=target_confirmed,
+            edge_floor=policy["edge_floor"],
         )
-
-        # -----------------------------------------------------------
-        # SCALP semantics
-        # Requires BOTH:
-        # 1) a strong expected move before expiry
-        # 2) Kalshi side price still favorable enough for paper-profit
-        #
-        # A lower probability means cheaper contracts and more upside,
-        # but we avoid extremely low-probability lottery-style entries.
-        # -----------------------------------------------------------
-        # BTC scalp calls are directional market calls. The prior thresholds
-        # accidentally required roughly a 0.56 council score in low-volatility
-        # conditions, far above the learned edge floor, so valid setups almost
-        # never reached SCALP. Align movement/consensus with the learned policy.
-        strong_move_up = (
-            base_score >= policy["edge_floor"]
-            and forecast_move >= max(atr * 0.14, px * 0.00014)
-            and consensus >= 0.12
-        )
-        strong_move_down = (
-            base_score <= -policy["edge_floor"]
-            and forecast_move <= -max(atr * 0.14, px * 0.00014)
-            and consensus >= 0.12
-        )
-
-        # BTC data supplies the directional thesis, while the paper executor
-        # trades the selected Kalshi contract. An extreme opposing market signal
-        # therefore blocks the call before contract-price economics are checked.
-        up_market_conflict = pd.notna(up_prob) and up_prob < 0.20
-        down_market_conflict = pd.notna(down_prob) and down_prob < 0.20
-
-        scalp_up_candidate = (
-            strong_move_up
-            and not up_market_conflict
-            and confidence >= policy["trade_confidence_floor"]
-        )
-        scalp_down_candidate = (
-            strong_move_down
-            and not down_market_conflict
-            and confidence >= policy["trade_confidence_floor"]
-        )
-        scalp_candidate = scalp_up_candidate or scalp_down_candidate
-
-        # Compare the quality of the shorter-term scalp thesis against the
-        # settlement/target thesis. SCALP is the default when both are valid;
-        # LOCK only wins when its evidence is stronger.
-        edge_strength = min(1.0, abs(base_score) / max(policy["edge_floor"] * 2.0, 1e-6))
-        scalp_likelihood = float(np.clip(
-            0.58 * confidence + 0.24 * consensus + 0.18 * edge_strength,
-            0.0, 1.0,
-        ))
-        settlement_urgency = (
-            float(np.clip(1.0 - (remaining / 900.0), 0.0, 1.0))
-            if pd.notna(remaining) else 0.0
-        )
-        lock_likelihood = float(np.clip(
-            0.58 * confidence + 0.27 * distance_strength + 0.15 * settlement_urgency,
-            0.0, 1.0,
-        ))
+        lock_up = lock_focus["action"] == "LOCK UP" and raw_side == "UP"
+        lock_down = lock_focus["action"] == "LOCK DOWN" and raw_side == "DOWN"
 
         # Preserve an already-established lock for the active contract.
         if lock_ticker == current_ticker and lock_side in {"UP", "DOWN"}:
             action = f"LOCK {lock_side}"
             locked_side = lock_side
-
-        # New decisions are scalp-first. A lock is selected only when its
-        # settlement case is more likely than the competing scalp case.
-        elif scalp_candidate and not ((lock_up or lock_down) and lock_likelihood > scalp_likelihood):
-            action = "SCALP UP" if scalp_up_candidate else "SCALP DOWN"
-            locked_side = None
 
         elif lock_up:
             action = "LOCK UP"
@@ -1908,10 +1844,6 @@ def master_decision(results, hist, kalshi=None):
         elif lock_down:
             action = "LOCK DOWN"
             locked_side = "DOWN"
-
-        elif scalp_candidate:
-            action = "SCALP UP" if scalp_up_candidate else "SCALP DOWN"
-            locked_side = None
 
         else:
             action = "HOLD"
@@ -1938,12 +1870,7 @@ def master_decision(results, hist, kalshi=None):
         down_prob = np.nan
         scalp_projected_exit_price = np.nan
 
-        if base_score >= policy["edge_floor"] and confidence >= policy["trade_confidence_floor"]:
-            action = "SCALP UP"
-        elif base_score <= -policy["edge_floor"] and confidence >= policy["trade_confidence_floor"]:
-            action = "SCALP DOWN"
-        else:
-            action = "HOLD"
+        action = "HOLD"
 
         prediction_label = "Kalshi target unavailable"
 
@@ -2054,6 +1981,9 @@ def master_decision(results, hist, kalshi=None):
         "policy": policy,
         "source_health": source_health,
         "regime": regime_name,
+        "execution_mode": "LOCK_FIRST",
+        "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
+        "lock_focus": locals().get("lock_focus", {}),
         "whale_score": safe_float(
             (results.get("Whale AI") or {}).get("score"), 0.0
         ),
@@ -6083,13 +6013,12 @@ def live_dashboard():
         )
         st.caption(risk["reason"])
         st.caption(
-            "Entry rule: automatic SCALP trades are rejected above a 75% "
-            "Kalshi contract price; final LOCK calls are not subject to that "
-            "SCALP entry cap. SCALP requires a projected 5% gross return on entry cost, "
-            "has no maximum-spread filter, stops after a "
-            "15-point emergency adverse contract move, can exit earlier on an "
-            "AI-confirmed reversal, and must receive a fresh signal "
-            "before same-side re-entry. LOCK keeps its original direction, "
+            "LOCK-first mode: new automatic SCALP entries are disabled. "
+            "A LOCK may first qualify with about 10 minutes remaining and requires "
+            "top-tail calibrated confidence (68% based on the live distribution), "
+            "strong council agreement, healthy data, "
+            "target confirmation, market alignment, and an entry at or below 75%. "
+            "LOCK keeps its original direction, "
             "stays open through the exact 15-minute window, and is finalized "
             "only from that ticker's official Kalshi settlement."
         )
@@ -6474,10 +6403,9 @@ def live_dashboard():
             "closed post-fix Kalshi trades collected."
         )
         st.caption(
-            "SCALPs automatically pause after 50 post-fix SCALP trades if "
-            "profit factor is below 1.15, expectancy is not positive, or "
-            "maximum drawdown is above 10%. LOCK rules and all specialists "
-            "remain unchanged."
+            "LOCK-first mode is active and new automatic SCALP entries are disabled. "
+            "Historical SCALP results remain in the ledger for learning and audit; "
+            "all specialists continue running to evaluate settlement-side LOCK evidence."
         )
 
     # ============================================================

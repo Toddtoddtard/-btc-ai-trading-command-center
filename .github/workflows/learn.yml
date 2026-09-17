@@ -9,6 +9,7 @@ on:
       - 'learner.py'
       - 'learner_v3.py'
       - 'learner_v31.py'
+      - 'lock_focus.py'
       - 'reliability_v31.py'
       - 'ai_core.py'
       - 'market_research.py'
@@ -24,6 +25,7 @@ on:
       - 'external_teacher_lab.py'
       - 'tests/test_external_teacher_lab.py'
       - 'tests/test_research_lab.py'
+      - 'tests/test_lock_focus.py'
       - 'shared_learning.py'
       - 'tests/test_shared_learning.py'
       - 'tests/test_audit_v6.py'
@@ -36,7 +38,7 @@ on:
       - 'kalshi_paper_engine.py'
       - '.github/workflows/learn.yml'
   schedule:
-    - cron: "2,12,22,32,42,52 * * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -61,9 +63,9 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py multi_asset_paper.py external_teacher_lab.py research_lab.py research_dashboard.py shared_learning.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_multi_asset_paper.py tests/test_external_teacher_lab.py tests/test_research_lab.py tests/test_shared_learning.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py lock_focus.py reliability_v31.py ai_core.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py multi_asset_paper.py external_teacher_lab.py research_lab.py research_dashboard.py shared_learning.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_multi_asset_paper.py tests/test_external_teacher_lab.py tests/test_research_lab.py tests/test_lock_focus.py tests/test_shared_learning.py
       - name: Run audit v6 regression tests
-        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_external_teacher_lab tests.test_research_lab tests.test_shared_learning -v
+        run: python -m unittest tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_external_teacher_lab tests.test_research_lab tests.test_lock_focus tests.test_shared_learning -v
       - name: Load previous private learning state and historical priors
         shell: bash
         run: |
@@ -158,6 +160,15 @@ jobs:
           assert 'prediction_snapshots' in data
           assert 'wait_counterfactual' in data
           assert data.get('status', {}).get('research_lab_ok') is True
+          mode=data.get('btc_execution_mode', {})
+          assert mode.get('name') == 'LOCK_FIRST'
+          assert mode.get('paper_only') is True
+          assert mode.get('auto_scalping_enabled') is False
+          assert mode.get('earliest_lock_seconds') == 600
+          assert mode.get('confidence_floor') == 0.68
+          assert mode.get('maximum_entry_price') == 0.75
+          assert data.get('status', {}).get('btc_execution_mode') == 'LOCK_FIRST'
+          assert data.get('status', {}).get('auto_scalping_enabled') is False
           assert data.get('research_lab', {}).get('paper_only') is True
           assert data.get('research_lab', {}).get('affects_execution') is False
           assert data.get('research_lab', {}).get('version') == 3
