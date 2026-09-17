@@ -58,6 +58,10 @@ Kalshi public BTC markets (KXBTC15M / hourly)
 
 `app.py` and `learner.py` use the same specialist and forecast implementations from `ai_core.py`. This prevents the dashboard from showing one set of formulas while the scheduled learner grades another.
 
+Independent horizon models live in `horizon_models.py`. Predictions are persisted before their labels exist, graded in timestamp order, and updated only after grading. Offline candidates use chronological train/calibration/untouched-test partitions. They must pass historical validation plus repeated live Brier-score gates before a bounded 25% blend can influence the forecast. Until then they are diagnostic shadow models.
+
+Kalshi depth is read from the unauthenticated public order-book endpoint. `kalshi_microstructure.py` reconstructs asks from the opposite bid side and exposes midpoint, spread, depth imbalance, and microprice. No credentials or order endpoints are present.
+
 ## Specialist council
 
 The shared specialist council contains Trend, Momentum, Volume, Pattern, Support/Resistance, Volatility, Market Regime, Whale, Liquidity, Derivatives, Kalshi Context, Historical Pattern, and Combination AI.
@@ -72,7 +76,7 @@ The live BTC underlying is a Binance proxy. For learning, final-price/path error
 
 ## Learning state
 
-GitHub Actions runs `.github/workflows/learn.yml` every ten minutes. The worker writes version-31 state to the `learning-state` branch. State includes bounded forecast weights, specialist adaptive weights, rolling history, real 15-candle path error, official Kalshi settlement accuracy, and a paper-only research lab.
+GitHub Actions runs `.github/workflows/learn.yml` every five minutes. The worker writes version-31 state to the `learning-state` branch. `.github/workflows/train-horizon-models.yml` retrains horizon candidates weekly. State includes bounded forecast weights, specialist adaptive weights, rolling history, real 15-candle path error, official Kalshi settlement accuracy, horizon-model evidence, and a paper-only research lab.
 
 The research lab can record one independent shadow call in each `OPEN`, `MIDDLE`, `FINAL 5`, and `FINAL 2` phase. It grades model Brier score against the contemporaneous Kalshi midpoint, counterfactual WAIT outcomes, fee-aware one-contract paper P/L, and simultaneous entry-policy candidates. Specialist lifecycle labels are advisory and never disable execution.
 

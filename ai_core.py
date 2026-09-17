@@ -2,6 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from horizon_models import predict_horizons
 from macd_engine import add_macd_features, score_macd
 from research_lab import enrich_rationales
 
@@ -339,7 +340,7 @@ def model_inputs_from_rows_core(rows, target=None):
     return {"last": last, "ret3": ret3, "ret8": ret8, "ret15": ret15, "avg_range": avg_range, "target": safe_float(target)}
 
 
-def forecast_path_core(rows, target=None, state=None):
+def forecast_path_core(rows, target=None, state=None, horizon_state=None):
     state = state or {}
     defaults = {"w_ret3":0.46,"w_ret8":0.34,"w_ret15":0.20,"momentum_scale":2.20,"target_influence":0.18,"bias":0.0}
     cfg = {k: safe_float(state.get(k), v) for k, v in defaults.items()}
@@ -355,6 +356,12 @@ def forecast_path_core(rows, target=None, state=None):
         gap = inputs["target"] - last
         max_influence = max(avg_range * 2.0, last * 0.0015)
         projected_move += float(np.clip(gap * cfg["target_influence"], -max_influence, max_influence))
+    horizon_predictions = predict_horizons(rows, horizon_state or {})
+    model_15 = horizon_predictions.get("15", {})
+    if model_15.get("enabled"):
+        probability = safe_float(model_15.get("probability_up"), 0.5)
+        model_move = (probability - 0.5) * 2.0 * avg_range * math.sqrt(15.0)
+        projected_move = 0.75 * projected_move + 0.25 * model_move
     # The raw model move is the ONLY value used for grading, calibration,
     # backtests and champion/challenger evaluation.  Presentation helpers below
     # may make a near-flat path visible, but can never alter the scored target.
@@ -388,4 +395,5 @@ def forecast_path_core(rows, target=None, state=None):
         "predicted_direction": raw_predicted_direction,
         "raw_projected_move": raw_projected_move,
         "display_predicted_end": float(forecast[-1]["close"]),
+        "horizon_models": horizon_predictions,
     }

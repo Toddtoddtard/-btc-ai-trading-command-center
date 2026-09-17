@@ -13,6 +13,13 @@ import learner as legacy
 import learner_v3 as v3
 from ai_core import forecast_path_core
 from forward_outlook import build_next_market_outlooks
+from horizon_models import (
+    baseline_probabilities,
+    ensure_horizon_state,
+    merge_offline_bundle,
+    register_horizon_predictions,
+    resolve_horizon_predictions,
+)
 from lock_focus import (
     AUTO_SCALPING_ENABLED,
     LOCK_EARLIEST_SECONDS,
@@ -57,6 +64,7 @@ def ensure_v31(state):
     }
     state["status"].setdefault("learning_version", 31)
     ensure_research_lab(state)
+    ensure_horizon_state(state)
     return state
 
 
@@ -139,11 +147,20 @@ def load_previous_state():
             payload = json.loads(Path(input_path).read_text())
             if isinstance(payload, dict) and "forecast" in payload:
                 payload = legacy.migrate_event_name(payload)
+                bundle_path = os.getenv("HORIZON_MODELS_INPUT", "").strip()
+                if bundle_path and Path(bundle_path).is_file():
+                    merge_offline_bundle(payload, json.loads(Path(bundle_path).read_text()))
                 payload.setdefault("status", {})["loaded_from_private_branch"] = True
                 return payload
         except Exception as exc:
             print(f"Could not load LEARNING_STATE_INPUT: {exc}")
     state = legacy.load()
+    bundle_path = os.getenv("HORIZON_MODELS_INPUT", "").strip()
+    if bundle_path and Path(bundle_path).is_file():
+        try:
+            merge_offline_bundle(state, json.loads(Path(bundle_path).read_text()))
+        except Exception as exc:
+            print(f"Could not load HORIZON_MODELS_INPUT: {exc}")
     state.setdefault("status", {})["loaded_from_private_branch"] = False
     return state
 
@@ -370,7 +387,10 @@ def current_shadow_call(state, df, market_info):
         legacy.futures_snapshot(),
         legacy.kalshi_context(market_info, price),
     )
-    forecast = forecast_path_core(legacy.rows_for_forecast(df), market_info.get("target"), state.get("forecast"))
+    forecast = forecast_path_core(
+        legacy.rows_for_forecast(df), market_info.get("target"),
+        state.get("forecast"), state.get("horizon_models"),
+    )
     if not forecast:
         return None
     call = {
@@ -441,12 +461,23 @@ def main():
     before_samples = int(state.get("forecast", {}).get("samples", 0))
     df = legacy.history()
     market_info = legacy.market()
+    horizon_graded = resolve_horizon_predictions(state, df)
     graded = strict_grade(state, df)
     forward_outlooks_graded = grade_forward_outlooks(state, df)
     research_resolved = resolve_shadows(state, legacy.official_result)
     official_resolved = legacy.resolve_official_results(state)
     registered = register_with_snapshot(state, df, market_info)
     live_call = current_shadow_call(state, df, market_info)
+    forecast_rows = legacy.rows_for_forecast(df)
+    legacy_forecast = forecast_path_core(
+        forecast_rows, (market_info or {}).get("target"), state.get("forecast")
+    )
+    horizon_registered = register_horizon_predictions(
+        state,
+        forecast_rows,
+        market_info=market_info,
+        baseline=baseline_probabilities(forecast_rows, legacy_forecast),
+    )
     _live_confidence = safe_float((live_call or {}).get("master_confidence"), 0.5)
     _live_focus = (live_call or {}).get("lock_focus") or {}
     forward_outlooks = refresh_forward_outlooks(
@@ -491,6 +522,10 @@ def main():
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "champion_promoted": state.get("champion_challenger", {}).get("promoted", False),
         "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),
+        "horizon_models_paper_only": state.get("horizon_models", {}).get("paper_only") is True,
+        "horizon_models_affect_execution": state.get("horizon_models", {}).get("affects_execution", False),
+        "horizon_predictions_graded_this_run": horizon_graded,
+        "horizon_predictions_registered_this_run": horizon_registered,
         "samples_before_run": before_samples,
         "samples_after_run": int(state.get("forecast", {}).get("samples", 0)),
         "current_regime": current_regime,

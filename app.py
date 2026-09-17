@@ -45,6 +45,7 @@ from background_paper import (
     shared_paper_summary,
 )
 from forward_outlook import build_next_market_outlooks
+from kalshi_microstructure import orderbook_features
 from kalshi_paper_engine import (
     manage_kalshi_paper_cycle,
     paper_chart_entries,
@@ -984,6 +985,20 @@ def fetch_kalshi_bitcoin_markets():
     }
 
 
+@st.cache_data(ttl=2, show_spinner=False)
+def fetch_kalshi_orderbook(ticker):
+    """Read public depth only; this function has no trading credentials."""
+    if not ticker:
+        return orderbook_features({})
+    for base in KALSHI_BASES:
+        try:
+            payload, _ = http_json(base + "/markets/" + ticker + "/orderbook", timeout=2.5)
+            return orderbook_features(payload)
+        except Exception:
+            continue
+    return orderbook_features({})
+
+
 def kalshi_probability(market):
     if not market:
         return np.nan
@@ -1119,6 +1134,9 @@ def stable_kalshi_contract(kalshi, spot_price):
             else np.nan
         )
         result["available"] = True
+        result["orderbook"] = fetch_kalshi_orderbook(str(result.get("ticker") or ""))
+        if result["orderbook"].get("midpoint") is not None:
+            result["up_probability"] = result["orderbook"]["midpoint"]
         return result
 
     return live
@@ -2059,6 +2077,7 @@ def get_learning_state():
                 state["direction_hits"] / state["samples"]
                 if state["samples"] else np.nan
             )
+            state["horizon_models"] = remote.get("horizon_models", {})
             return state
 
     conn = learning_db()
@@ -2141,7 +2160,8 @@ def normalize_learning_weights(state):
 
 
 def python_forecast_path(rows, target=None, state=None):
-    return forecast_path_core(rows, target, state or get_learning_state())
+    state = state or get_learning_state()
+    return forecast_path_core(rows, target, state, state.get("horizon_models", {}))
 
 
 def register_forecast_window(ticker, expires_at, rows, target):
@@ -4084,6 +4104,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         const MOMENTUM_SCALE = Number(learning.momentum_scale ?? 2.20);
         const TARGET_INFLUENCE = Number(learning.target_influence ?? 0.18);
         const MODEL_BIAS = Number(learning.bias ?? 0.0);
+        const HORIZON_MODELS = learning.horizon_models || {{}};
 
         const paperBg = "{paper}";
         const plotBg = "{bg}";
@@ -4112,7 +4133,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             }};
         }}
 
-        function predictedCandles(rows) {{
+        function predictedCandles(rows, horizonMinutes = 15) {{
             if (!rows || rows.length < 12) return [];
 
             const closes = rows.map(r => Number(r.close)).filter(Number.isFinite);
@@ -4145,6 +4166,15 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             directional = Math.max(-0.012, Math.min(0.012, directional));
 
             let projectedMove = last * directional * MOMENTUM_SCALE;
+
+            const horizonModels = typeof HORIZON_MODELS !== "undefined" ? HORIZON_MODELS : {{}};
+            const model = (horizonModels.models || {{}})[String(horizonMinutes)] || {{}};
+            const prediction = (horizonModels.last_prediction || {{}})[String(horizonMinutes)] || {{}};
+            const probability = Number(prediction.probability_up);
+            if (model.enabled === true && Number.isFinite(probability)) {{
+                const modelMove = (probability - 0.5) * 2 * avgRange * Math.sqrt(Number(horizonMinutes));
+                projectedMove = 0.75 * projectedMove + 0.25 * modelMove;
+            }}
 
             if (Number.isFinite(currentTarget)) {{
                 const gap = currentTarget - last;
@@ -4214,7 +4244,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 
         function predictionTrace(rows, horizonMinutes = 15) {{
             const horizon = [1, 5, 15].includes(Number(horizonMinutes)) ? Number(horizonMinutes) : 15;
-            const forecast = predictedCandles(rows).slice(0, horizon);
+            const forecast = predictedCandles(rows, horizon).slice(0, horizon);
 
             return {{
                 type: "candlestick",
@@ -4245,7 +4275,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }}
 
         function predictionPathTrace(rows, horizonMinutes = 15) {{
-            const forecast = predictedCandles(rows);
+            const forecast = predictedCandles(rows, horizonMinutes);
             const horizon = Math.max(1, Math.min(15, Number(horizonMinutes) || 15));
             const clipped = forecast.slice(0, Math.min(forecast.length, horizon));
 
@@ -4822,7 +4852,7 @@ st.caption(
     "Persistent AGGR-style candle chart — this chart updates in place "
     "and is not rebuilt by the dashboard refresh."
 )
-st.caption("1m / 5m / 15m select portions of the same 15-minute forecast, not separately trained models. Forecasts are estimates, not guaranteed price paths.")
+st.caption("1m / 5m / 15m have separate shadow models. Each can affect the displayed forecast only after historical validation and repeated live Brier-score outperformance. Forecasts remain estimates, not guarantees.")
 
 # Grade completed windows and learn before drawing the next forecast.
 try:
@@ -4845,7 +4875,7 @@ try:
     register_forecast_window(
         _persistent_ctx.get("ticker", ""),
         _active_close_ts,
-        _persistent_hist.tail(60).to_dict("records"),
+        _persistent_hist.tail(300).to_dict("records"),
         _persistent_ctx.get("target", np.nan),
     )
 except Exception:

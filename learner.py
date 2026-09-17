@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from ai_core import SPECIALIST_NAMES, enrich_history_core, forecast_path_core, run_specialists_core
+from kalshi_microstructure import orderbook_features
 from learning_prices import closed_price_at
 from time_rewards_v1 import time_reward
 
@@ -205,6 +206,14 @@ def exact_market(ticker):
         return {}
 
 
+def orderbook(ticker):
+    """Fetch public, read-only depth for executable quote diagnostics."""
+    try:
+        return orderbook_features(get(KALSHI + "/markets/" + ticker + "/orderbook"))
+    except Exception:
+        return orderbook_features({})
+
+
 def market():
     try:
         markets = get(KALSHI + "/markets", {"limit": 100, "status": "open", "series_ticker": "KXBTC15M"}).get("markets", [])
@@ -250,6 +259,14 @@ def market():
 
     yes_bid, yes_ask = quote_value("yes_bid"), quote_value("yes_ask")
     no_bid, no_ask = quote_value("no_bid"), quote_value("no_ask")
+    book = orderbook(ticker)
+    if book.get("available"):
+        yes_bid = book.get("yes_bid") if book.get("yes_bid") is not None else yes_bid
+        yes_ask = book.get("yes_ask") if book.get("yes_ask") is not None else yes_ask
+        no_bid = book.get("no_bid") if book.get("no_bid") is not None else no_bid
+        no_ask = book.get("no_ask") if book.get("no_ask") is not None else no_ask
+        if book.get("midpoint") is not None:
+            prob = float(book["midpoint"])
     if no_ask is None and yes_bid is not None:
         no_ask = 1.0 - yes_bid
     if no_bid is None and yes_ask is not None:
@@ -257,6 +274,7 @@ def market():
     return {
         "ticker": ticker, "expires_at": expires, "target": float(target), "prob": prob,
         "yes_bid": yes_bid, "yes_ask": yes_ask, "no_bid": no_bid, "no_ask": no_ask,
+        "orderbook": book,
     }
 
 
@@ -272,6 +290,7 @@ def kalshi_context(market_info, price):
         "up_probability": float(market_info.get("prob", 0.5)),
         "distance": distance,
         "distance_pct": distance / target if target else 0.0,
+        "orderbook": market_info.get("orderbook", {}),
     }
 
 
@@ -285,8 +304,12 @@ def official_result(ticker):
 
 def rows_for_forecast(df):
     return [
-        {"open": float(row.open), "high": float(row.high), "low": float(row.low), "close": float(row.close)}
-        for row in df.tail(60).itertuples()
+        {
+            "time": row.time, "open": float(row.open), "high": float(row.high),
+            "low": float(row.low), "close": float(row.close),
+            "volume": float(getattr(row, "volume", 0.0)),
+        }
+        for row in df.tail(300).itertuples()
     ]
 
 
@@ -297,7 +320,9 @@ def register(state, df, market_info):
     agg = aggregate_trades()
     futures = futures_snapshot()
     specialists = run_specialists_core(df, agg, futures, kalshi_context(market_info, price))
-    forecast = forecast_path_core(rows_for_forecast(df), market_info["target"], state["forecast"])
+    forecast = forecast_path_core(
+        rows_for_forecast(df), market_info["target"], state["forecast"], state.get("horizon_models")
+    )
     if not forecast:
         return False
     inputs = forecast["inputs"]

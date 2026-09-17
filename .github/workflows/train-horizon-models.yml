@@ -1,0 +1,61 @@
+name: Train BTC Horizon Models
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: btc-ai-learning-state
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r learner-requirements.txt
+      - name: Train with chronological holdout
+        env:
+          HISTORICAL_YEARS: "10"
+          TRAINING_STEP_MINUTES: "5"
+          HORIZON_MODELS_OUTPUT: /tmp/horizon_models.json
+        run: python train_horizon_models.py
+      - name: Validate bundle
+        run: |
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/horizon_models.json'))
+          assert data['version'] == 1
+          assert set(data['models']) == {'1', '5', '15'}
+          assert data['temporal_split']['untouched_test'] == 0.15
+          for model in data['models'].values():
+              assert len(model['weights']) == 14
+              assert model['validation']['samples'] >= 10000
+          PY
+      - name: Publish research bundle
+        run: |
+          set -e
+          git config user.name "btc-ai-learning-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin learning-state:refs/remotes/origin/learning-state || true
+          if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
+            git checkout -B learning-state refs/remotes/origin/learning-state
+          else
+            git checkout --orphan learning-state
+            git rm -rf . || true
+          fi
+          cp /tmp/horizon_models.json ./horizon_models.json
+          git add horizon_models.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Update horizon model research bundle"
+          git push origin learning-state --force-with-lease

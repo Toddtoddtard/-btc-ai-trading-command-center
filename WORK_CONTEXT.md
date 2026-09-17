@@ -12,6 +12,8 @@ Use this file as the first-pass map for future maintenance/audits so the active 
 6. `bot_intelligence_dashboard.py` — bot/specialist review UI.
 7. `research_lab.py` / `research_dashboard.py` — official-settlement shadow trials, calibration baseline, phase results, advisory lifecycle, and UI.
 8. `.github/workflows/learn.yml` — scheduled learner execution and learning-state branch writes.
+9. `horizon_models.py` / `train_horizon_models.py` — causal horizon prediction, live promotion gates, and chronological offline training.
+10. `kalshi_microstructure.py` — public order-book parsing; read-only and credential-free.
 
 ## Supporting modules extracted from `app.py`
 
