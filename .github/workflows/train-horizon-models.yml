@@ -2,6 +2,13 @@ name: Train BTC Horizon Models
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'horizon_models.py'
+      - 'train_horizon_models.py'
+      - '.github/workflows/train-horizon-models.yml'
   schedule:
     - cron: "17 3 * * 0"
 
