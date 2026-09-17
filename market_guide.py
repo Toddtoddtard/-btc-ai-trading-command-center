@@ -65,6 +65,21 @@ The bot is deliberately designed to skip weak setups. More trades does not mean 
 """
         )
 
+    # Keep this immediately below the Market Guide so recent project changes are
+    # visible before the persistent Live Kalshi BTC Market section.
+    with st.expander("🧾 Recent Updates — Last 24 Hours", expanded=False):
+        st.markdown(
+            """
+- **Continuous LOCK evaluation:** LOCK qualification is checked throughout the active 15-minute market instead of only at a single late-window moment.
+- **Three-market outlook:** the research layer now grades directional outlooks for the next three 15-minute markets to provide broader context without changing paper execution by itself.
+- **Authoritative Kalshi entry display:** selected-side paper fills come from the shared Kalshi ledger so the displayed entry percentage matches the actual recorded paper fill.
+- **LOCK-first automation:** new automatic BTC SCALP entries are disabled while qualified paper LOCK calls are prioritized; historical SCALPs remain available for learning and audit.
+- **Research calibration safeguards:** walk-forward Brier calibration and JSON-safe learning-state validation were tightened so research updates cannot silently corrupt the learner state.
+
+*This panel summarizes command-center changes made during the latest 24-hour development window. It is project-update information, not a market-news feed.*
+"""
+        )
+
     with st.sidebar.expander("📘 Quick BTC checklist", expanded=False):
         st.markdown(
             """
