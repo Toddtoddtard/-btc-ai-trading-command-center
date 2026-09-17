@@ -476,6 +476,14 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('if row["pnl"] is None', paper_tab)
         self.assertNotIn('LOCK sells automatically at a 95%', source)
         self.assertIn('Kalshi Execution Validation', source)
+        self.assertEqual(
+            source.count('Recent Updates — Last 24 Hours'),
+            1,
+        )
+        self.assertLess(
+            source.index('Recent Updates — Last 24 Hours'),
+            source.index('def live_dashboard():'),
+        )
         validation_tab = source.split(
             '    with tab_backtest:', 1
         )[1].split(
