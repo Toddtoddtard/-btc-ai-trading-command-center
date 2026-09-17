@@ -206,6 +206,22 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(len(pending_markers), 1)
         self.assertEqual(pending_markers[0]["spot_entry_price"], 100000)
 
+    def test_latest_call_entry_uses_authoritative_selected_side_fill(self):
+        paper = bg.initial_state(now=1000)
+        paper["trades"] = [{
+            "ticker": "OLD", "side": "YES", "strategy": "LOCK",
+            "entry_price": .50, "opened_at": 900,
+        }]
+        paper["open_position"] = {
+            "ticker": "NEW", "side": "NO", "strategy": "LOCK",
+            "entry_price": .63, "opened_at": 1000,
+        }
+        entry = bg.latest_shared_call_entry(paper)
+        self.assertEqual(entry["ticker"], "NEW")
+        self.assertEqual(entry["side"], "NO")
+        self.assertEqual(entry["direction"], "DOWN")
+        self.assertEqual(entry["kalshi_entry_pct"], 63.0)
+
     def test_invalid_159_pm_pre_guard_trade_is_voided_without_rewriting_truth(self):
         paper = bg.initial_state(now=1000)
         paper["trades"] = [{

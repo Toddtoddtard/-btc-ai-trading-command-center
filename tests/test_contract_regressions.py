@@ -632,6 +632,14 @@ def test_lock_first_mode_uses_top_tail_confidence_and_ninety_five_exit_target():
     assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine_src
 
 
+def test_call_entry_card_uses_shared_ledger_not_local_sqlite_adapter():
+    app = Path("app.py").read_text()
+    adapter = Path("profitability_v5.py").read_text()
+    assert "latest_shared_call_entry(_shared_paper)" in app
+    assert 'm6.metric(\n        "Kalshi Call Entry"' in app
+    assert 'if normalized == "spot feed":' not in adapter
+
+
 
 def test_background_paper_follows_explicit_master_action_source():
     from pathlib import Path

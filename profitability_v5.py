@@ -8,7 +8,7 @@ This module also installs a deliberately narrow Streamlit presentation adapter.
 The adapter does not place trades or alter the trading engine. It keeps the main
 BTC dashboard aligned with the authoritative paper-trading state by:
 
-* replacing the old ``Spot feed`` metric with the latest Kalshi call entry;
+* preserving presentation compatibility for older dashboard builds;
 * replacing the main ``24h`` BTC-change metric with lifetime directional-call accuracy;
 * rendering ``HOLD SCALP UP/DOWN`` when the existing paper engine says that a
   fresh scalp no longer meets its profitability / projected-return target; and
@@ -226,7 +226,7 @@ def _install_dashboard_adapter():
     # function is bound before DeltaGenerator.tabs is monkeypatched. We patch both
     # call paths, while keeping one shared original function so the wrapper cannot
     # recurse or stack across hot reloads.
-    adapter_version = 5
+    adapter_version = 6
     installed_version = int(
         getattr(DeltaGenerator, "_btc_profitability_dashboard_adapter_version", 0) or 0
     )
@@ -254,19 +254,6 @@ def _install_dashboard_adapter():
     def metric_adapter(self, label, value, *args, **kwargs):
         label_text = str(label or "")
         normalized = label_text.strip().lower().replace("-", " ")
-
-        if normalized == "spot feed":
-            entry, side = latest_kalshi_call_entry()
-            if entry is None:
-                return original_metric(self, "Kalshi Call Entry", "N/A", *args, **kwargs)
-            side_text = f" {side}" if side else ""
-            return original_metric(
-                self,
-                "Kalshi Call Entry",
-                f"{entry * 100:.0f}% / {entry * 100:.0f}c{side_text}",
-                *args,
-                **kwargs,
-            )
 
         if normalized in {
             "24h",

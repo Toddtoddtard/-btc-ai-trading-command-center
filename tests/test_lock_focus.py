@@ -32,13 +32,18 @@ class LockFocusTests(unittest.TestCase):
     def test_automatic_scalping_is_disabled(self):
         self.assertFalse(AUTO_SCALPING_ENABLED)
 
-    def test_qualified_lock_can_fire_ten_minutes_early(self):
+    def test_qualified_lock_can_fire_at_market_open(self):
         row = self.evaluate(seconds_remaining=LOCK_EARLIEST_SECONDS)
         self.assertEqual(row["action"], "LOCK UP")
         self.assertTrue(row["eligible"])
 
-    def test_lock_cannot_fire_before_ten_minute_window(self):
+    def test_lock_evaluation_is_not_blocked_before_ten_minutes(self):
         row = self.evaluate(seconds_remaining=LOCK_EARLIEST_SECONDS + 1)
+        self.assertEqual(row["action"], "LOCK UP")
+        self.assertTrue(row["checks"]["window"])
+
+    def test_lock_stops_in_final_thirty_seconds(self):
+        row = self.evaluate(seconds_remaining=30)
         self.assertEqual(row["action"], "WAIT")
         self.assertFalse(row["checks"]["window"])
 
