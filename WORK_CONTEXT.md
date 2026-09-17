@@ -13,12 +13,23 @@ Use this file as the first-pass map for future maintenance/audits so the active 
 7. `research_lab.py` / `research_dashboard.py` — official-settlement shadow trials, calibration baseline, phase results, advisory lifecycle, and UI.
 8. `.github/workflows/learn.yml` — scheduled learner execution and learning-state branch writes.
 
+## Supporting modules extracted from `app.py`
+
+- `dashboard_ui.py` — display formatting, directional badges, and themed table rendering. It has no trading logic.
+- `live_feeds.py` — concurrent orchestration of the six independent live reads. Feed functions are injected so failures and timing can be tested offline.
+
+Keep business rules in the authoritative modules above. New display-only helpers belong in
+`dashboard_ui.py`; new feed orchestration belongs in `live_feeds.py`. This keeps the Streamlit
+entrypoint focused on page composition and makes future audits faster.
+
 ## Primary regression coverage
 
 - `tests/test_contract_regressions.py` — contract-entry/exit, fee, LOCK/SCALP, persistence and app integration regressions.
 - `tests/test_settlement_rollover.py` — stale-expiry/current-ticker rollover settlement regressions.
 - `tests/test_background_paper.py` — scheduled/background paper-ledger behavior.
 - `tests/test_research_lab.py` — shadow isolation, official grading, phases, rationale, and lifecycle safeguards.
+- `tests/test_live_feeds.py` — concurrent feed orchestration and optional-feed fallbacks.
+- `tests/test_dashboard_ui.py` — stable money/percentage and call-badge presentation contracts.
 - `.github/workflows/integration-regressions.yml` — compile + offline regression gate.
 
 ## Maintenance rules
