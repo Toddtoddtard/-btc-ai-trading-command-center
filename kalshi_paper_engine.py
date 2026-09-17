@@ -33,9 +33,9 @@ MAX_ENTRY_PRICE = 0.75
 # but allow more borderline bot calls to collect evidence. The 75% max entry
 # cap, fee checks, loss circuit breaker, and profitability gate remain intact.
 MIN_SCALP_MARKET_PROBABILITY = 0.15
-# Kept only as a legacy compatibility constant; do not use it as an entry
-# confidence gate or as an early-exit rule for current LOCK positions.
-LOCK_MIN_CONFIDENCE = 0.95
+# LOCK-first entry floor. It is intentionally calibrated to the live model's
+# top confidence tail and is not an early-exit rule for open LOCK positions.
+LOCK_MIN_CONFIDENCE = 0.68
 MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
 MAX_SCALP_LOSSES_PER_MARKET = 2
@@ -403,6 +403,8 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     # bot's actual LOCK decisions. Hard execution constraints still apply.
     if strategy == "SCALP" and not bool(risk.get("approved")):
         return None
+    if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
+        return None
     ticker = str(decision.get("kalshi_ticker") or "")
     if not ticker:
         return None
@@ -411,7 +413,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     )["approved"]:
         return None
     entry = _quote(decision, side, ask=True)
-    if entry is None or (strategy == "SCALP" and entry > MAX_ENTRY_PRICE):
+    if entry is None or entry > MAX_ENTRY_PRICE:
         return None
     if strategy == "SCALP":
         market_probability = _selected_side_market_probability(decision, side)
@@ -816,16 +818,24 @@ def manage_kalshi_paper_cycle(
 
     action = str(decision.get("action", "")).upper()
     strategy = "LOCK" if action.startswith("LOCK") else "SCALP"
+    if entry_side and strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
+        return {
+            "event": False,
+            "message": (
+                f"Skipped PAPER LOCK: confidence {_decision_confidence(decision) * 100:.0f}% "
+                f"is below the {LOCK_MIN_CONFIDENCE * 100:.0f}% LOCK-first floor."
+            ),
+        }
     if (
         entry_side
-        and strategy == "SCALP"
+        and strategy in {"SCALP", "LOCK"}
         and entry_price is not None
         and entry_price > MAX_ENTRY_PRICE
     ):
         return {
             "event": False,
             "message": (
-                f"Skipped PAPER SCALP: Kalshi price {entry_price * 100:.0f}% "
+                f"Skipped PAPER {strategy}: Kalshi price {entry_price * 100:.0f}% "
                 f"is above the {MAX_ENTRY_PRICE * 100:.0f}% maximum."
             ),
         }

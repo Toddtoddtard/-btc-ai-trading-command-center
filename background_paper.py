@@ -695,6 +695,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         learning_state["background_paper"] = paper
     paper["last_cycle_at"] = _now_iso(now)
     paper["worker_ok"] = True
+    execution_mode = learning_state.get("btc_execution_mode") or {}
+    auto_scalping_enabled = bool(execution_mode.get("auto_scalping_enabled", True))
     paper.setdefault("last_signal_at", None)
     paper.setdefault("last_signal_message", "No approved signal has reached execution yet.")
     paper.setdefault("signal_attempts", [])
@@ -866,8 +868,22 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if ask is None or bid is None:
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER entry: executable quote unavailable.", "BLOCKED", now)
         return paper
-    if strategy == "SCALP" and ask > MAX_ENTRY_PRICE:
-        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER SCALP: Kalshi price {ask*100:.0f}% is above the 75% maximum.", "BLOCKED", now)
+    if strategy == "LOCK" and confidence < LOCK_MIN_CONFIDENCE:
+        _record_signal_outcome(
+            paper, pending, ticker, side, strategy, confidence,
+            f"Skipped PAPER LOCK: confidence {confidence*100:.0f}% is below the {LOCK_MIN_CONFIDENCE*100:.0f}% LOCK-first floor.",
+            "BLOCKED", now,
+        )
+        return paper
+    if strategy == "SCALP" and not auto_scalping_enabled:
+        _record_signal_outcome(
+            paper, pending, ticker, side, strategy, confidence,
+            "Skipped PAPER SCALP: LOCK-first mode has automatic scalping disabled.",
+            "BLOCKED", now,
+        )
+        return paper
+    if ask > MAX_ENTRY_PRICE:
+        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: Kalshi price {ask*100:.0f}% is above the 75% maximum.", "BLOCKED", now)
         return paper
     if strategy == "SCALP":
         market_probability = (bid + ask) / 2.0

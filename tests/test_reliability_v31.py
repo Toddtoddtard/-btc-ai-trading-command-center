@@ -84,11 +84,11 @@ class ReliabilityTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("CONFLICT", reason)
 
-    def test_lock_gate_is_fixed_at_ninety_five_percent(self):
+    def test_lock_gate_uses_live_top_tail_confidence_floor(self):
         policy = learned_policy({}, "UNKNOWN")
-        self.assertEqual(policy["lock_confidence_floor"], .95)
-        denied, _ = learned_trade_gate("LOCK UP", .949, .5, .8, policy, source_health=1.0)
-        allowed, action = learned_trade_gate("LOCK UP", .95, .5, .8, policy, source_health=1.0)
+        self.assertEqual(policy["lock_confidence_floor"], .68)
+        denied, _ = learned_trade_gate("LOCK UP", .679, .5, .8, policy, source_health=1.0)
+        allowed, action = learned_trade_gate("LOCK UP", .68, .5, .8, policy, source_health=1.0)
         self.assertFalse(denied)
         self.assertTrue(allowed)
         self.assertEqual(action, "LOCK UP")

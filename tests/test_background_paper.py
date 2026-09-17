@@ -7,7 +7,7 @@ try:
     import kalshi_paper_engine  # noqa: F401
 except ModuleNotFoundError:  # Allows this isolated test artifact to run locally.
     stub = types.ModuleType("kalshi_paper_engine")
-    stub.LOCK_MIN_CONFIDENCE = .95
+    stub.LOCK_MIN_CONFIDENCE = .68
     stub.LOCK_TAKE_PROFIT_PRICE = .95
     stub.MAX_ENTRY_PRICE = .75
     stub.MIN_SCALP_MARKET_PROBABILITY = .15
@@ -66,28 +66,33 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertIn("above the 75%", paper["last_signal_message"])
         self.assertEqual(len(paper["signal_attempts"]), 1)
 
-    def test_final_lock_may_enter_above_75(self):
-        state = self.pending(master_confidence=.60, master_action="LOCK UP")
+    def test_lock_entry_above_75_is_rejected(self):
+        state = self.pending(master_confidence=.68, master_action="LOCK UP")
         paper = bg.run_cycle(
             state,
             lambda _: self.market(yes_bid_dollars=.84, yes_ask_dollars=.85),
             now=1000,
         )
-        self.assertIsNotNone(paper["open_position"])
-        self.assertEqual(paper["open_position"]["strategy"], "LOCK")
-        self.assertEqual(paper["open_position"]["entry_price"], .85)
-        self.assertEqual(paper["last_signal"]["outcome"], "OPENED")
+        self.assertIsNone(paper["open_position"])
+        self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
+        self.assertIn("above the 75%", paper["last_message"])
 
-    def test_lock_may_enter_at_95_without_profit_gate(self):
-        state = self.pending(master_confidence=.60, master_action="LOCK UP")
+    def test_lock_entry_at_95_is_rejected(self):
+        state = self.pending(master_confidence=.68, master_action="LOCK UP")
         paper = bg.run_cycle(
             state,
             lambda _: self.market(yes_bid_dollars=.94, yes_ask_dollars=.95),
             now=1000,
         )
-        self.assertIsNotNone(paper["open_position"])
-        self.assertEqual(paper["open_position"]["strategy"], "LOCK")
-        self.assertEqual(paper["open_position"]["entry_price"], .95)
+        self.assertIsNone(paper["open_position"])
+        self.assertIn("above the 75%", paper["last_message"])
+
+    def test_lock_first_mode_disables_new_scalps(self):
+        state = self.pending()
+        state["btc_execution_mode"] = {"auto_scalping_enabled": False}
+        paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
+        self.assertIsNone(paper["open_position"])
+        self.assertIn("LOCK-first mode", paper["last_message"])
 
     def test_lottery_style_low_probability_scalp_is_rejected(self):
         state = self.pending()
