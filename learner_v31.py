@@ -124,6 +124,7 @@ def refresh_forward_outlooks(state, df, market_info, confidence, consensus, now=
         confidence,
         consensus,
         state.get("forward_outlook_stats", {}),
+        state.get("horizon_models", {}),
     )
     state["next_market_outlooks"] = outlooks
     history = state.setdefault("forward_outlook_history", [])
@@ -461,6 +462,9 @@ def main():
     before_samples = int(state.get("forecast", {}).get("samples", 0))
     df = legacy.history()
     market_info = legacy.market()
+    timeframe_context = legacy.market_timeframe_context()
+    horizon_root = ensure_horizon_state(state)
+    horizon_root["latest_context"] = timeframe_context
     horizon_graded = resolve_horizon_predictions(state, df)
     graded = strict_grade(state, df)
     forward_outlooks_graded = grade_forward_outlooks(state, df)
@@ -526,6 +530,9 @@ def main():
         "horizon_models_affect_execution": state.get("horizon_models", {}).get("affects_execution", False),
         "horizon_predictions_graded_this_run": horizon_graded,
         "horizon_predictions_registered_this_run": horizon_registered,
+        "higher_timeframes_requested": 7,
+        "higher_timeframes_available": int(timeframe_context.get("available_timeframes", 0)),
+        "higher_timeframes_all_closed": bool(timeframe_context.get("all_closed", False)),
         "samples_before_run": before_samples,
         "samples_after_run": int(state.get("forecast", {}).get("samples", 0)),
         "current_regime": current_regime,
