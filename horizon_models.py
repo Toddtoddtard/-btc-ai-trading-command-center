@@ -14,13 +14,17 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
+from multi_timeframe import CONTEXT_FEATURE_NAMES, context_vector, summarize_context
+
 
 HORIZONS = (1, 5, 15)
-FEATURE_NAMES = (
+BASE_FEATURE_NAMES = (
     "ret1", "ret3", "ret5", "ret15", "ret30", "ret60",
     "trend_5_20", "vol_ratio_5_30", "body", "range_position_20",
     "zscore_20", "volume_z", "tod_sin", "tod_cos",
 )
+FEATURE_NAMES = BASE_FEATURE_NAMES + CONTEXT_FEATURE_NAMES
+MODEL_VERSION = 2
 MIN_LIVE_SAMPLES = 200
 PROMOTION_REQUIRED_STREAK = 3
 MIN_BRIER_EDGE = 0.005
@@ -57,7 +61,7 @@ def _as_frame(rows):
     return frame.dropna(subset=["open", "high", "low", "close"])
 
 
-def feature_vector(rows):
+def feature_vector(rows, context=None):
     """Build bounded scale-free features using only observations in ``rows``."""
     frame = _as_frame(rows)
     if len(frame) < 61:
@@ -114,7 +118,7 @@ def feature_vector(rows):
         math.sin(angle),
         math.cos(angle),
     )
-    return np.asarray(values, dtype=float)
+    return np.concatenate((np.asarray(values, dtype=float), context_vector(context)))
 
 
 def default_model(horizon):
@@ -141,7 +145,18 @@ def default_model(horizon):
 
 def ensure_horizon_state(state):
     root = state.setdefault("horizon_models", {})
-    root.setdefault("version", 1)
+    schema_changed = (
+        int(root.get("version", 0)) != MODEL_VERSION
+        or root.get("feature_names") != list(FEATURE_NAMES)
+    )
+    if schema_changed:
+        root["models"] = {}
+        root["pending"] = []
+        root["last_registered_minute"] = None
+        root["affects_execution"] = False
+        root["schema_migrated_at"] = datetime.now(timezone.utc).isoformat()
+    root["version"] = MODEL_VERSION
+    root["feature_names"] = list(FEATURE_NAMES)
     root.setdefault("paper_only", True)
     root.setdefault("affects_execution", False)
     root.setdefault("minimum_live_samples", MIN_LIVE_SAMPLES)
@@ -172,13 +187,14 @@ def model_probability(model, features):
     return float(np.clip(_sigmoid(raw / temperature + calibration_bias), 0.01, 0.99))
 
 
-def predict_horizons(rows, state_or_root):
+def predict_horizons(rows, state_or_root, context=None):
     root = (
         state_or_root.get("horizon_models", {})
         if isinstance(state_or_root, dict) and "horizon_models" in state_or_root
         else (state_or_root or {})
     )
-    features = feature_vector(rows)
+    context = context if context is not None else root.get("latest_context", {})
+    features = feature_vector(rows, context)
     models = root.get("models", {}) if isinstance(root, dict) else {}
     return {
         str(horizon): {
@@ -209,12 +225,13 @@ def register_horizon_predictions(state, rows, observed_at=None, market_info=None
     minute_key = int(observed_at // 60)
     if root.get("last_registered_minute") == minute_key:
         return False
-    features = feature_vector(rows)
+    context = root.get("latest_context", {})
+    features = feature_vector(rows, context)
     if features is None:
         return False
     frame = _as_frame(rows)
     start_price = float(frame["close"].iloc[-1])
-    predictions = predict_horizons(rows, root)
+    predictions = predict_horizons(rows, root, context)
     baseline = baseline if isinstance(baseline, dict) else {}
     root.setdefault("pending", []).append({
         "created_at": observed_at,
@@ -235,6 +252,7 @@ def register_horizon_predictions(state, rows, observed_at=None, market_info=None
     root["pending"] = root["pending"][-MAX_PENDING:]
     root["last_registered_minute"] = minute_key
     root["last_prediction"] = predictions
+    root["early_context"] = summarize_context(context)
     return True
 
 
@@ -373,7 +391,7 @@ def baseline_probabilities(rows, forecast_result):
 def merge_offline_bundle(state, bundle):
     """Install historical candidates without enabling execution influence."""
     root = ensure_horizon_state(state)
-    if not isinstance(bundle, dict) or int(bundle.get("version", 0)) != 1:
+    if not isinstance(bundle, dict) or int(bundle.get("version", 0)) != MODEL_VERSION:
         return False
     changed = False
     for horizon in HORIZONS:

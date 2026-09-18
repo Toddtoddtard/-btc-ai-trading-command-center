@@ -7,6 +7,7 @@ import math
 import numpy as np
 
 from ai_core import forecast_path_core
+from multi_timeframe import summarize_context
 
 
 OUTLOOK_HORIZONS = 3
@@ -28,6 +29,7 @@ def build_next_market_outlooks(
     confidence,
     consensus,
     horizon_stats=None,
+    horizon_state=None,
 ):
     """Project and expose the next three full market windows.
 
@@ -48,6 +50,8 @@ def build_next_market_outlooks(
     confidence = float(np.clip(_f(confidence, 0.5), 0.5, 0.99))
     consensus = float(np.clip(_f(consensus, 0.0), 0.0, 1.0))
     stats = horizon_stats if isinstance(horizon_stats, dict) else {}
+    context = summarize_context((horizon_state or {}).get("latest_context", {}))
+    context_score = _f(context.get("score"), 0.0)
 
     projected_open = _f(forecast.get("predicted_end"), last)
     outlooks = []
@@ -57,7 +61,10 @@ def build_next_market_outlooks(
         # of blindly repeating the same direction three times.
         persistence = 0.78 ** horizon
         reversal = -last * fast_minus_slow * (0.10 + 0.05 * horizon)
-        move = base_move * persistence + reversal
+        # Higher frames are a bounded, decaying early-warning prior here. This
+        # surface is research-only and cannot place or change an order.
+        context_move = last * context_score * 0.0015 * (0.86 ** (horizon - 1))
+        move = base_move * persistence + reversal + context_move
         move = float(np.clip(move, -last * 0.012, last * 0.012))
         projected_close = projected_open + move
         direction = "UP" if move >= 0 else "DOWN"
@@ -86,7 +93,9 @@ def build_next_market_outlooks(
             "research_only": True,
             "executable": False,
             "graded_samples": samples,
+            "higher_timeframe_context": context_score,
+            "context_direction": context.get("direction", "MIXED"),
+            "context_agreement": context.get("agreement", 0.0),
         })
         projected_open = projected_close
     return outlooks
-

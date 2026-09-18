@@ -45,6 +45,18 @@ class ForwardOutlookTests(unittest.TestCase):
         self.assertEqual(state["forward_outlook_stats"]["1"]["accuracy"], 1.0)
         self.assertAlmostEqual(state["forward_outlook_stats"]["1"]["brier"], .09)
 
+    def test_higher_timeframe_prior_stays_research_only(self):
+        horizon_state = {"latest_context": {
+            "available_timeframes": 7,
+            "features": {name: 1.0 for name in (
+                "context_30m", "context_1h", "context_4h", "context_12h",
+                "context_1d", "context_1w", "context_1mo",
+            )},
+        }}
+        rows = build_next_market_outlooks(self.rows(), {}, 1800, .72, .70, {}, horizon_state)
+        self.assertTrue(all(row["higher_timeframe_context"] == 1.0 for row in rows))
+        self.assertTrue(all(row["research_only"] and not row["executable"] for row in rows))
+
 
 if __name__ == "__main__":
     unittest.main()

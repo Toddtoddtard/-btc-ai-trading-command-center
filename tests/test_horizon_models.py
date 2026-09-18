@@ -36,6 +36,27 @@ class HorizonModelTests(unittest.TestCase):
         self.assertTrue(np.isfinite(before).all())
         np.testing.assert_allclose(before, after)
 
+    def test_context_adds_seven_bounded_features(self):
+        frame = candles()
+        plain = feature_vector(frame.to_dict("records"))
+        context = {"features": {"context_30m": .75, "context_1mo": -0.4}}
+        enriched = feature_vector(frame.to_dict("records"), context)
+        self.assertEqual(len(enriched), 21)
+        np.testing.assert_allclose(plain[:14], enriched[:14])
+        self.assertAlmostEqual(enriched[14], .75)
+        self.assertAlmostEqual(enriched[-1], -.4)
+
+    def test_old_schema_is_reset_instead_of_mixed(self):
+        state = {"horizon_models": {
+            "version": 1, "feature_names": ["old"],
+            "models": {"1": {"weights": [1.0], "enabled": True}},
+            "pending": [{"features": [1.0]}],
+        }}
+        root = ensure_horizon_state(state)
+        self.assertEqual(root["version"], 2)
+        self.assertEqual(root["pending"], [])
+        self.assertFalse(root["models"]["1"]["enabled"])
+
     def test_prediction_is_registered_then_graded_and_trained(self):
         frame = candles()
         state = {}

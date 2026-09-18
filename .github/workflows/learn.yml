@@ -14,6 +14,7 @@ on:
       - 'reliability_v31.py'
       - 'ai_core.py'
       - 'horizon_models.py'
+      - 'multi_timeframe.py'
       - 'kalshi_microstructure.py'
       - 'market_research.py'
       - 'council_v4.py'
@@ -66,9 +67,9 @@ jobs:
       - name: Install learner dependencies
         run: pip install -r learner-requirements.txt
       - name: Validate learner code
-        run: python -m py_compile learner.py learner_v3.py learner_v31.py lock_focus.py forward_outlook.py reliability_v31.py ai_core.py horizon_models.py kalshi_microstructure.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py multi_asset_paper.py external_teacher_lab.py research_lab.py research_dashboard.py shared_learning.py tests/test_horizon_models.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_multi_asset_paper.py tests/test_external_teacher_lab.py tests/test_research_lab.py tests/test_lock_focus.py tests/test_forward_outlook.py tests/test_shared_learning.py
+        run: python -m py_compile learner.py learner_v3.py learner_v31.py lock_focus.py forward_outlook.py reliability_v31.py ai_core.py horizon_models.py multi_timeframe.py kalshi_microstructure.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py multi_asset_paper.py external_teacher_lab.py research_lab.py research_dashboard.py shared_learning.py tests/test_horizon_models.py tests/test_multi_timeframe.py tests/test_train_horizon_models.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_multi_asset_paper.py tests/test_external_teacher_lab.py tests/test_research_lab.py tests/test_lock_focus.py tests/test_forward_outlook.py tests/test_shared_learning.py
       - name: Run audit v6 regression tests
-        run: python -m unittest tests.test_horizon_models tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_external_teacher_lab tests.test_research_lab tests.test_lock_focus tests.test_forward_outlook tests.test_shared_learning -v
+        run: python -m unittest tests.test_horizon_models tests.test_multi_timeframe tests.test_train_horizon_models tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_external_teacher_lab tests.test_research_lab tests.test_lock_focus tests.test_forward_outlook tests.test_shared_learning -v
       - name: Load previous private learning state and historical priors
         shell: bash
         run: |
@@ -177,6 +178,11 @@ jobs:
           assert data.get('status', {}).get('continuous_lock_evaluation') is True
           assert data.get('horizon_models', {}).get('paper_only') is True
           assert data.get('status', {}).get('horizon_models_paper_only') is True
+          assert data.get('horizon_models', {}).get('version') == 2
+          assert data.get('status', {}).get('higher_timeframes_requested') == 7
+          context=data.get('horizon_models', {}).get('latest_context', {})
+          assert len(context.get('features', {})) == 7
+          assert all(row.get('closed') is True for row in context.get('details', {}).values())
           outlooks=data.get('next_market_outlooks', [])
           assert len(outlooks) in {0, 3}
           assert all(row.get('research_only') is True for row in outlooks)

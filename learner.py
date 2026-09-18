@@ -15,6 +15,7 @@ import pandas as pd
 from ai_core import SPECIALIST_NAMES, enrich_history_core, forecast_path_core, run_specialists_core
 from kalshi_microstructure import orderbook_features
 from learning_prices import closed_price_at
+from multi_timeframe import fetch_multi_timeframe_context
 from time_rewards_v1 import time_reward
 
 SPOT = "https://data-api.binance.vision"
@@ -129,6 +130,14 @@ def history():
         df[key] = pd.to_numeric(df[key], errors="coerce")
     df["time"] = pd.to_datetime(df.ot, unit="ms", utc=True)
     return enrich_history_core(df)
+
+
+def market_timeframe_context():
+    """Read seven completed higher-timeframe candles without credentials."""
+    try:
+        return fetch_multi_timeframe_context(get, SPOT)
+    except Exception:
+        return fetch_multi_timeframe_context(lambda *_args, **_kwargs: [], SPOT)
 
 
 def aggregate_trades():
