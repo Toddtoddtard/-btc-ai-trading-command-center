@@ -60,18 +60,25 @@ def feature_frame(df):
     # are the higher-frame close boundary, and merge_asof only carries a bar
     # backward after that boundary has passed. No partial/future bar is used.
     source = x.assign(_time=stamp).set_index("_time").sort_index()
-    observation_times = pd.DataFrame({"_observed": stamp + pd.Timedelta(minutes=1)}, index=x.index)
+    observation_times = pd.DataFrame({
+        "_observed_ns": (stamp + pd.Timedelta(minutes=1)).astype("datetime64[ns, UTC]").astype("int64")
+    }, index=x.index)
     scales = {name: scale for name, _interval, scale in TIMEFRAME_SPECS}
     for name in CONTEXT_FEATURE_NAMES:
         rule = CONTEXT_RULES[name]
         bars = source.resample(rule, label="right", closed="left").agg({"open": "first", "close": "last"}).dropna()
         bars[name] = np.tanh((bars["close"] / bars["open"] - 1.0) / scales[name])
         available = bars[[name]].reset_index().rename(columns={"_time": "_available"})
+        available["_available_ns"] = (
+            pd.to_datetime(available["_available"], utc=True)
+            .astype("datetime64[ns, UTC]")
+            .astype("int64")
+        )
         merged = pd.merge_asof(
-            observation_times.reset_index().sort_values("_observed"),
-            available.sort_values("_available"),
-            left_on="_observed",
-            right_on="_available",
+            observation_times.reset_index().sort_values("_observed_ns"),
+            available.sort_values("_available_ns"),
+            left_on="_observed_ns",
+            right_on="_available_ns",
             direction="backward",
         ).set_index("index")
         out[name] = merged[name].reindex(out.index)
