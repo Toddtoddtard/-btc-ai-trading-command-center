@@ -14,6 +14,7 @@ def load_live_feeds(
     fetch_kalshi_markets,
     fetch_hourly_kalshi_markets,
     enrich_history,
+    fetch_kalshi_reference=None,
 ):
     """Load independent feeds concurrently and return normalized results.
 
@@ -22,7 +23,7 @@ def load_live_feeds(
     former inline implementation in ``app.py``.
     """
     errors = []
-    with ThreadPoolExecutor(max_workers=6, thread_name_prefix="live-feed") as pool:
+    with ThreadPoolExecutor(max_workers=7, thread_name_prefix="live-feed") as pool:
         jobs = {
             "ticker": pool.submit(fetch_spot_ticker),
             "klines": pool.submit(fetch_klines, "1m", 500),
@@ -31,6 +32,8 @@ def load_live_feeds(
             "kalshi": pool.submit(fetch_kalshi_markets),
             "hourly_kalshi": pool.submit(fetch_hourly_kalshi_markets),
         }
+        if fetch_kalshi_reference is not None:
+            jobs["kalshi_reference"] = pool.submit(fetch_kalshi_reference)
 
         try:
             ticker = jobs["ticker"].result()
@@ -60,6 +63,19 @@ def load_live_feeds(
         futures = jobs["futures"].result()
         kalshi = jobs["kalshi"].result()
         hourly_kalshi = jobs["hourly_kalshi"].result()
+        try:
+            kalshi_reference = (
+                jobs["kalshi_reference"].result()
+                if "kalshi_reference" in jobs else {}
+            )
+        except Exception as exc:
+            kalshi_reference = {
+                "available": False,
+                "healthy": False,
+                "price": np.nan,
+                "source": "Kalshi reference unavailable",
+            }
+            errors.append(f"Kalshi reference: {exc}")
 
     return {
         "ticker": ticker,
@@ -70,5 +86,6 @@ def load_live_feeds(
         "futures": futures,
         "kalshi": kalshi,
         "hourly_kalshi": hourly_kalshi,
+        "kalshi_reference": kalshi_reference,
         "errors": errors,
     }

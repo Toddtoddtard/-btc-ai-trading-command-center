@@ -269,7 +269,7 @@ def _install_dashboard_adapter():
                     f"Lifetime resolved directional calls: {wins} wins, {losses} losses. "
                     "HOLD/WAIT excluded from win/loss accuracy."
                 )
-            return original_metric(self, "Lifetime Accuracy", shown, *args, **kwargs)
+            return original_metric(self, "Paper Call Accuracy", shown, *args, **kwargs)
 
         return original_metric(self, label, value, *args, **kwargs)
 

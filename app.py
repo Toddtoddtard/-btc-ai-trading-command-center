@@ -31,6 +31,7 @@ from dashboard_ui import (
     render_dashboard_table,
 )
 from live_feeds import load_live_feeds
+from kalshi_reference import fetch_kalshi_reference
 from macd_engine import project_macd_path
 from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
@@ -99,7 +100,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.17-r81-maintainability"
+APP_VERSION = "2026.09.18-r82-kalshi-reference-lock-safety"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -720,6 +721,12 @@ def fetch_spot_ticker():
         "feed_ms": ms,
         "source": "Binance Spot",
     }
+
+
+@st.cache_data(ttl=1, show_spinner=False)
+def fetch_kalshi_reference_price():
+    """Free USD composite aligned to Kalshi's BRTI settlement basis."""
+    return fetch_kalshi_reference()
 
 
 @st.cache_data(ttl=2, show_spinner=False)
@@ -1506,10 +1513,12 @@ def enrich_history(df):
     return enrich_history_core(df)
 
 
-def run_specialists(hist, agg, futures, kalshi):
-    px = float(hist["close"].iloc[-1])
+def run_specialists(hist, agg, futures, kalshi, settlement_price=None):
+    px = safe_float(settlement_price, float(hist["close"].iloc[-1]))
     kctx = stable_kalshi_contract(kalshi, px)
-    return run_specialists_core(hist, agg, futures, kctx)
+    return run_specialists_core(
+        hist, agg, futures, kctx, settlement_price=px
+    )
 
 # ============================================================
 # MASTER AI + RISK
@@ -1578,7 +1587,9 @@ def _register_window_lock(ticker, side, expires_at):
     return row["side"] if row else None
 
 
-def master_decision(results, hist, kalshi=None):
+def master_decision(
+    results, hist, kalshi=None, settlement_price=None, reference_healthy=True
+):
     remote_learning = fetch_remote_learning_state() or {}
     regime_name = detect_regime(hist)
     policy = learned_policy(remote_learning, regime_name)
@@ -1591,7 +1602,7 @@ def master_decision(results, hist, kalshi=None):
     consensus = float(v5_council["consensus"])
     council_confidence = float(v5_council["confidence"])
 
-    px = float(hist["close"].iloc[-1])
+    px = safe_float(settlement_price, float(hist["close"].iloc[-1]))
     atr = safe_float(hist["atr14"].iloc[-1], px * 0.002)
     kctx = stable_kalshi_contract(kalshi or {}, px)
 
@@ -1691,8 +1702,11 @@ def master_decision(results, hist, kalshi=None):
         # LOCK DOWN = expected to FINISH BELOW the Kalshi target.
         # -----------------------------------------------------------
         target_confirmed = bool(
-            (raw_side == "UP" and projected_edge >= max(atr * 0.35, px * 0.00035))
-            or (raw_side == "DOWN" and projected_edge <= -max(atr * 0.35, px * 0.00035))
+            reference_healthy
+            and (
+                (raw_side == "UP" and projected_edge >= max(atr * 0.35, px * 0.00035))
+                or (raw_side == "DOWN" and projected_edge <= -max(atr * 0.35, px * 0.00035))
+            )
         )
         lock_focus = evaluate_lock_focus(
             base_score=base_score,
@@ -4823,12 +4837,24 @@ except Exception:
     _persistent_hist = pd.DataFrame()
 
 try:
+    _persistent_reference = fetch_kalshi_reference_price()
+except Exception:
+    _persistent_reference = {
+        "available": False,
+        "healthy": False,
+        "price": np.nan,
+        "source": "Kalshi reference unavailable",
+    }
+
+try:
     _persistent_ticker = fetch_spot_ticker()
-    _persistent_px = safe_float(
-        _persistent_ticker.get("price"),
-        safe_float(_persistent_hist["close"].iloc[-1])
-        if not _persistent_hist.empty else np.nan,
-    )
+    _persistent_px = safe_float(_persistent_reference.get("price"), np.nan)
+    if pd.isna(_persistent_px) or _persistent_px <= 0:
+        _persistent_px = safe_float(
+            _persistent_ticker.get("price"),
+            safe_float(_persistent_hist["close"].iloc[-1])
+            if not _persistent_hist.empty else np.nan,
+        )
 except Exception:
     _persistent_px = (
         safe_float(_persistent_hist["close"].iloc[-1])
@@ -4908,11 +4934,11 @@ if _learning_state["samples"] > 0:
     _acc = _learning_state["direction_accuracy"] * 100
     st.caption(
         f"Self-learning model: {_learning_state['samples']} completed windows • "
-        f"direction accuracy {_acc:.1f}% • "
+        f"next-close direction accuracy {_acc:.1f}% • "
         f"avg final-price error ${_learning_state['avg_abs_error']:,.2f} • "
         f"avg path error ${_learning_state['avg_path_error']:,.2f}"
         + (
-            f" • official Kalshi accuracy {_learning_state.get('kalshi_hits', 0) / _learning_state.get('kalshi_samples', 1) * 100:.1f}% "
+            f" • Kalshi settlement-side accuracy {_learning_state.get('kalshi_hits', 0) / _learning_state.get('kalshi_samples', 1) * 100:.1f}% "
             f"({_learning_state.get('kalshi_samples', 0)} settled)"
             if _learning_state.get('kalshi_samples', 0) else ""
         )
@@ -4935,6 +4961,7 @@ def live_dashboard():
         fetch_kalshi_markets=fetch_kalshi_bitcoin_markets,
         fetch_hourly_kalshi_markets=fetch_kalshi_hourly_bitcoin_markets,
         enrich_history=enrich_history,
+        fetch_kalshi_reference=fetch_kalshi_reference_price,
     )
     ticker = feeds["ticker"]
     hist = feeds["history"]
@@ -4944,6 +4971,7 @@ def live_dashboard():
     futures = feeds["futures"]
     kalshi = feeds["kalshi"]
     hourly_kalshi = feeds["hourly_kalshi"]
+    kalshi_reference = feeds["kalshi_reference"]
     errors = feeds["errors"]
 
     if hist.empty:
@@ -4960,13 +4988,15 @@ def live_dashboard():
         if not agg.empty and "price" in agg.columns
         else np.nan
     )
-    price = latest_trade_price
+    price = safe_float(kalshi_reference.get("price"), np.nan)
+    if pd.isna(price) or price <= 0:
+        price = latest_trade_price
     if pd.isna(price) or price <= 0:
         price = safe_float(ticker.get("price"), safe_float(hist["close"].iloc[-1]))
     if pd.isna(price) or price <= 0:
         price = float(hist["close"].iloc[-1])
 
-    results = run_specialists(hist, agg, futures, kalshi)
+    results = run_specialists(hist, agg, futures, kalshi, settlement_price=price)
     # Let every specialist learn independently from this Kalshi window.
     try:
         _learn_ctx = stable_kalshi_contract(kalshi, price)
@@ -4986,7 +5016,13 @@ def live_dashboard():
     except Exception:
         pass
 
-    decision = master_decision(results, hist, kalshi)
+    decision = master_decision(
+        results,
+        hist,
+        kalshi,
+        settlement_price=price,
+        reference_healthy=bool(kalshi_reference.get("healthy")),
+    )
     hourly_ai = hourly_kalshi_target_ai(hist, results, hourly_kalshi, price)
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
@@ -5061,6 +5097,20 @@ def live_dashboard():
         _entry_value,
         help="Actual selected-side Kalshi ask captured when the most recent paper call opened.",
     )
+
+    _reference_source = kalshi_reference.get("source", "Kalshi reference unavailable")
+    _reference_dispersion = safe_float(kalshi_reference.get("dispersion_pct"), np.nan)
+    _reference_note = f" • venue spread {_reference_dispersion*100:.3f}%" if pd.notna(_reference_dispersion) else ""
+    if kalshi_reference.get("healthy"):
+        st.caption(
+            f"BTC decision price: {_reference_source}{_reference_note}. "
+            "Kalshi settles from the licensed CF Benchmarks BRTI final-minute average; this free USD composite is the closest public proxy."
+        )
+    else:
+        st.warning(
+            "Kalshi reference feed is degraded. The dashboard may show a fallback price, "
+            "but new LOCK calls are blocked until at least two aligned USD venues recover."
+        )
 
     st.caption(
         f"Dashboard cycle {full_cycle_ms:.0f} ms • kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "

@@ -272,11 +272,11 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_requires_top_tail_confidence(self):
-        self.decision['confidence'] = .679
+        self.decision['confidence'] = .949
         blocked = self.cycle()
         self.assertFalse(blocked['event'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
-        self.decision['confidence'] = .68
+        self.decision['confidence'] = .95
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')
@@ -453,13 +453,13 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('[data-testid="stAlert"] [data-testid="stMarkdownContainer"] p', source)
         self.assertIn('a[aria-label="Link to heading"]', source)
         self.assertIn('load_live_feeds(', source)
-        self.assertIn('with ThreadPoolExecutor(max_workers=6', feed_source)
-        self.assertEqual(feed_source.count('pool.submit(fetch_'), 6)
+        self.assertIn('with ThreadPoolExecutor(max_workers=7', feed_source)
+        self.assertEqual(feed_source.count('pool.submit(fetch_'), 7)
         self.assertIn('ticker = jobs["ticker"].result()', feed_source)
         self.assertIn('raw_history, kline_ms = jobs["klines"].result()', feed_source)
         self.assertIn('aggregate_trades, aggregate_ms = jobs["trades"].result()', feed_source)
         self.assertIn('latest_trade_price = (', source)
-        self.assertIn('price = latest_trade_price', source)
+        self.assertIn('price = safe_float(kalshi_reference.get("price"), np.nan)', source)
         self.assertIn('live_close_ts = kalshi_close_timestamp(kctx)', source)
         self.assertIn('live_close_ts - time.time()', source)
         self.assertIn('components.html(_live_countdown_html, height=72', source)

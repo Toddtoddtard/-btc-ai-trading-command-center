@@ -13,7 +13,7 @@ class LockFocusTests(unittest.TestCase):
     def evaluate(**updates):
         values = {
             "base_score": 0.40,
-            "confidence": 0.70,
+            "confidence": 0.95,
             "consensus": 0.75,
             "source_health": 1.0,
             "seconds_remaining": 600,
@@ -48,7 +48,7 @@ class LockFocusTests(unittest.TestCase):
         self.assertFalse(row["checks"]["window"])
 
     def test_lock_requires_top_tail_confidence(self):
-        row = self.evaluate(confidence=0.679)
+        row = self.evaluate(confidence=0.949)
         self.assertEqual(row["action"], "WAIT")
         self.assertFalse(row["checks"]["confidence"])
 

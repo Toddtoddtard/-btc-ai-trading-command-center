@@ -7,7 +7,7 @@ try:
     import kalshi_paper_engine  # noqa: F401
 except ModuleNotFoundError:  # Allows this isolated test artifact to run locally.
     stub = types.ModuleType("kalshi_paper_engine")
-    stub.LOCK_MIN_CONFIDENCE = .68
+    stub.LOCK_MIN_CONFIDENCE = .95
     stub.LOCK_TAKE_PROFIT_PRICE = .95
     stub.MAX_ENTRY_PRICE = .75
     stub.MIN_SCALP_MARKET_PROBABILITY = .15
@@ -67,7 +67,7 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertEqual(len(paper["signal_attempts"]), 1)
 
     def test_lock_entry_above_75_is_rejected(self):
-        state = self.pending(master_confidence=.68, master_action="LOCK UP")
+        state = self.pending(master_confidence=.95, master_action="LOCK UP")
         paper = bg.run_cycle(
             state,
             lambda _: self.market(yes_bid_dollars=.84, yes_ask_dollars=.85),
@@ -78,7 +78,7 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertIn("above the 75%", paper["last_message"])
 
     def test_lock_entry_at_95_is_rejected(self):
-        state = self.pending(master_confidence=.68, master_action="LOCK UP")
+        state = self.pending(master_confidence=.95, master_action="LOCK UP")
         paper = bg.run_cycle(
             state,
             lambda _: self.market(yes_bid_dollars=.94, yes_ask_dollars=.95),

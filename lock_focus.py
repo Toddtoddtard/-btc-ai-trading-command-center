@@ -12,10 +12,10 @@ LOCK_FOCUS_ENABLED = True
 # minutes. Only the final 30 seconds remain blocked for stale/settlement risk.
 LOCK_EARLIEST_SECONDS = 15 * 60
 LOCK_LATEST_SECONDS = 30
-# Live calibrated history tops out near 0.73 with a ~0.67 95th percentile.
-# A 0.68 floor selects the strongest few percent without creating an
-# impossible gate; independent checks below must still all pass.
-LOCK_MIN_CONFIDENCE = 0.68
+# LOCK is a final settlement-side call, not an ordinary directional lean.
+# Enforce the owner's explicit 95% certainty requirement. Lower-confidence
+# directional opportunities remain HOLD/SCALP candidates, never LOCK calls.
+LOCK_MIN_CONFIDENCE = 0.95
 LOCK_MIN_CONSENSUS = 0.55
 LOCK_MIN_SOURCE_HEALTH = 0.70
 LOCK_MIN_ABS_SCORE = 0.20

@@ -102,10 +102,13 @@ def _specialist(name, score, reason):
     return {"name": name, "signal": signal, "score": score, "confidence": confidence, "reason": reason}
 
 
-def run_specialists_core(hist, agg, futures, kctx, research_snapshot=None):
+def run_specialists_core(
+    hist, agg, futures, kctx, research_snapshot=None, settlement_price=None
+):
     last = hist.iloc[-1]
     prev = hist.iloc[-2]
     px = float(last["close"])
+    settlement_px = safe_float(settlement_price, px)
     out = {}
 
     # Use EMA separation magnitude, not just sign. This prevents tiny low-volatility
@@ -231,12 +234,15 @@ def run_specialists_core(hist, agg, futures, kctx, research_snapshot=None):
         probability = safe_float(kctx.get("up_probability"))
         market_score = clamp((probability - 0.5) * 2.0) if pd.notna(probability) else 0.0
         target = safe_float(kctx.get("target"))
-        distance = px - target if pd.notna(target) else np.nan
+        distance = settlement_px - target if pd.notna(target) else np.nan
         distance_pct = distance / target if pd.notna(distance) and target else np.nan
-        target_distance_score = clamp((px - target) / max(px * 0.0025, 1.0)) if pd.notna(target) else 0.0
+        target_distance_score = (
+            clamp((settlement_px - target) / max(settlement_px * 0.0025, 1.0))
+            if pd.notna(target) else 0.0
+        )
         context_score = clamp(0.55 * market_score + 0.45 * target_distance_score)
         context_reason = (
-            f"Kalshi target ${target:,.2f}; BTC {distance:+,.2f} ({distance_pct*100:+.3f}%) vs target; "
+            f"Kalshi target ${target:,.2f}; reference BTC {distance:+,.2f} ({distance_pct*100:+.3f}%) vs target; "
             + (f"UP market ~{probability*100:.1f}%" if pd.notna(probability) else "UP market price unavailable")
         )
     else:

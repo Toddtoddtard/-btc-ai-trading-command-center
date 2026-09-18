@@ -35,7 +35,7 @@ MAX_ENTRY_PRICE = 0.75
 MIN_SCALP_MARKET_PROBABILITY = 0.15
 # LOCK-first entry floor. It is intentionally calibrated to the live model's
 # top confidence tail and is not an early-exit rule for open LOCK positions.
-LOCK_MIN_CONFIDENCE = 0.68
+LOCK_MIN_CONFIDENCE = 0.95
 MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
 MAX_SCALP_LOSSES_PER_MARKET = 2
