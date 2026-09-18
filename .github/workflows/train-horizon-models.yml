@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'horizon_models.py'
+      - 'multi_timeframe.py'
       - 'train_horizon_models.py'
       - '.github/workflows/train-horizon-models.yml'
   schedule:
@@ -42,11 +43,12 @@ jobs:
           python - <<'PY'
           import json
           data=json.load(open('/tmp/horizon_models.json'))
-          assert data['version'] == 1
+          assert data['version'] == 2
           assert set(data['models']) == {'1', '5', '15'}
           assert data['temporal_split']['untouched_test'] == 0.15
+          assert data['context_timeframes'] == ['30m', '1h', '4h', '12h', '1d', '1w', '1M']
           for model in data['models'].values():
-              assert len(model['weights']) == 14
+              assert len(model['weights']) == 21
               assert model['validation']['samples'] >= 10000
           PY
       - name: Publish research bundle
