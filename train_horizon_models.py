@@ -14,10 +14,20 @@ import pandas as pd
 
 from historical_backtest import fetch_month, month_iter
 from horizon_models import FEATURE_NAMES, HORIZONS
+from multi_timeframe import CONTEXT_FEATURE_NAMES, TIMEFRAME_SPECS
 
 OUT = Path(os.getenv("HORIZON_MODELS_OUTPUT", "/tmp/horizon_models.json"))
 YEARS = max(1, int(os.getenv("HISTORICAL_YEARS", "10")))
 STEP = max(1, int(os.getenv("TRAINING_STEP_MINUTES", "5")))
+CONTEXT_RULES = {
+    "context_30m": "30min",
+    "context_1h": "1h",
+    "context_4h": "4h",
+    "context_12h": "12h",
+    "context_1d": "1D",
+    "context_1w": "W-MON",
+    "context_1mo": "MS",
+}
 
 
 def _sigmoid(values):
@@ -46,11 +56,30 @@ def feature_frame(df):
     stamp = pd.to_datetime(x["time"], utc=True)
     angle = 2.0 * math.pi * (stamp.dt.hour * 60 + stamp.dt.minute) / 1440.0
     out["tod_sin"], out["tod_cos"] = np.sin(angle), np.cos(angle)
+    # A minute observation becomes available at its close. Resampled labels
+    # are the higher-frame close boundary, and merge_asof only carries a bar
+    # backward after that boundary has passed. No partial/future bar is used.
+    source = x.assign(_time=stamp).set_index("_time").sort_index()
+    observation_times = pd.DataFrame({"_observed": stamp + pd.Timedelta(minutes=1)}, index=x.index)
+    scales = {name: scale for name, _interval, scale in TIMEFRAME_SPECS}
+    for name in CONTEXT_FEATURE_NAMES:
+        rule = CONTEXT_RULES[name]
+        bars = source.resample(rule, label="right", closed="left").agg({"open": "first", "close": "last"}).dropna()
+        bars[name] = np.tanh((bars["close"] / bars["open"] - 1.0) / scales[name])
+        available = bars[[name]].reset_index().rename(columns={"_time": "_available"})
+        merged = pd.merge_asof(
+            observation_times.reset_index().sort_values("_observed"),
+            available.sort_values("_available"),
+            left_on="_observed",
+            right_on="_available",
+            direction="backward",
+        ).set_index("index")
+        out[name] = merged[name].reindex(out.index)
     return out.loc[:, FEATURE_NAMES].clip(-5.0, 5.0).replace([np.inf, -np.inf], np.nan)
 
 
-def month_samples(df, horizon):
-    features = feature_frame(df)
+def month_samples(df, horizon, features=None, selection_mask=None):
+    features = feature_frame(df) if features is None else features
     close = df["close"].astype(float)
     target = (close.shift(-horizon) >= close).astype(float)
     # Match the production legacy path, rather than comparing the candidate to
@@ -72,6 +101,8 @@ def month_samples(df, horizon):
     baseline_scale = np.maximum(avg_range * math.sqrt(horizon), close * .00025)
     baseline = _sigmoid((baseline_move / baseline_scale).to_numpy())
     valid = features.notna().all(axis=1) & close.shift(-horizon).notna()
+    if selection_mask is not None:
+        valid &= pd.Series(selection_mask, index=df.index).astype(bool)
     idx = np.flatnonzero(valid.to_numpy())[::STEP]
     return features.iloc[idx].to_numpy(float), target.iloc[idx].to_numpy(float), baseline[idx]
 
@@ -123,6 +154,7 @@ def main():
     calibration_end = max(train_end + 1, int(len(months) * .85))
     states = {h: {"weights": np.zeros(len(FEATURE_NAMES)), "bias": 0.0, "cal": [], "test": []} for h in HORIZONS}
     loaded, failed = [], []
+    carry = pd.DataFrame()
     for index, (year, month) in enumerate(months):
         try:
             frame = fetch_month(year, month)
@@ -130,14 +162,24 @@ def main():
         except Exception as exc:
             failed.append({"month": f"{year}-{month:02d}", "error": str(exc)[:160]})
             continue
+        combined = pd.concat([carry, frame], ignore_index=True)
+        combined["time"] = pd.to_datetime(combined["time"], utc=True)
+        combined = combined.sort_values("time").drop_duplicates("time", keep="last").reset_index(drop=True)
+        features = feature_frame(combined)
+        current_start = pd.to_datetime(frame["time"], utc=True).min()
+        current_end = pd.to_datetime(frame["time"], utc=True).max()
+        current_mask = combined["time"].between(current_start, current_end)
         for horizon in HORIZONS:
-            x, y, baseline = month_samples(frame, horizon)
+            x, y, baseline = month_samples(combined, horizon, features, current_mask)
             state = states[horizon]
             if index < train_end:
                 state["weights"], state["bias"] = fit_batch(state["weights"], state["bias"], x, y)
             else:
                 bucket = "cal" if index < calibration_end else "test"
                 state[bucket].append((x, y, baseline))
+        # A completed prior monthly candle plus rolling minute features remain
+        # available at the next archive boundary.
+        carry = combined.tail(65_000).copy()
 
     models = {}
     trained_through = loaded[-1] if loaded else None
@@ -159,8 +201,10 @@ def main():
             "trained_through": trained_through,
         }
     report = {
-        "version": 1, "generated_at": datetime.now(timezone.utc).isoformat(),
+        "version": 2, "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "Binance Vision BTCUSDT 1m monthly archives",
+        "feature_names": list(FEATURE_NAMES),
+        "context_timeframes": [interval for _name, interval, _scale in TIMEFRAME_SPECS],
         "temporal_split": {"train": .70, "calibration": .15, "untouched_test": .15},
         "years_requested": YEARS, "months_loaded": loaded, "months_failed": failed,
         "models": models,
