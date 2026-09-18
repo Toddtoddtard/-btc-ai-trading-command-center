@@ -1844,6 +1844,7 @@ def master_decision(results, hist, kalshi=None):
         confidence,
         consensus,
         remote_learning.get("forward_outlook_stats", {}),
+        remote_learning.get("horizon_models", {}),
     )
 
     return {
