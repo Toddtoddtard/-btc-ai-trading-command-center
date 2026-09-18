@@ -1,7 +1,7 @@
 # BTC AI Trading Command Center — Architecture
 
 ```text
-Binance spot (price, 1m candles, aggregate trades)
+Binance spot (price, 1m candles, aggregate trades, completed 30m/1h/4h/12h/1d/1w/1M candles)
                  │
                  ├──────────────┐
                  │              │
@@ -58,7 +58,7 @@ Kalshi public BTC markets (KXBTC15M / hourly)
 
 `app.py` and `learner.py` use the same specialist and forecast implementations from `ai_core.py`. This prevents the dashboard from showing one set of formulas while the scheduled learner grades another.
 
-Independent horizon models live in `horizon_models.py`. Predictions are persisted before their labels exist, graded in timestamp order, and updated only after grading. Offline candidates use chronological train/calibration/untouched-test partitions. They must pass historical validation plus repeated live Brier-score gates before a bounded 25% blend can influence the forecast. Until then they are diagnostic shadow models.
+Independent horizon models live in `horizon_models.py`. Their 21-feature schema combines 14 short-horizon features with seven scale-normalized higher-timeframe returns. `multi_timeframe.py` rejects the currently forming candle; historical training reconstructs the same features only after each bar's close boundary. Predictions are persisted before their labels exist, graded in timestamp order, and updated only after grading. Offline candidates use chronological train/calibration/untouched-test partitions. They must pass historical validation plus repeated live Brier-score gates before a bounded 25% blend can influence the forecast. Until then they are diagnostic shadow models.
 
 Kalshi depth is read from the unauthenticated public order-book endpoint. `kalshi_microstructure.py` reconstructs asks from the opposite bid side and exposes midpoint, spread, depth imbalance, and microprice. No credentials or order endpoints are present.
 
