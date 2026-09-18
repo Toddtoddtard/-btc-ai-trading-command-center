@@ -36,6 +36,12 @@ class HistoricalContextTests(unittest.TestCase):
         changed = feature_frame(frame).loc[90, "context_30m"]
         self.assertAlmostEqual(reference, changed)
 
+    def test_mixed_datetime_precision_is_normalized(self):
+        frame = self.frame(121)
+        frame["time"] = frame["time"].astype("datetime64[us, UTC]")
+        features = feature_frame(frame)
+        self.assertTrue(np.isfinite(features.loc[90, "context_30m"]))
+
 
 if __name__ == "__main__":
     unittest.main()
