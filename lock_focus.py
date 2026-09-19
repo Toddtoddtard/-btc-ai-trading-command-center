@@ -1,20 +1,18 @@
-"""Shared paper-only policy for the temporary BTC LOCK-first mode."""
+"""Shared paper-only policy for BTC 15-minute decision mode."""
 
 from __future__ import annotations
 
 import math
 
 
-AUTO_SCALPING_ENABLED = False
+# The Master must publish a directional call for every active 15-minute market.
+# SCALP is the normal directional call; LOCK remains reserved for the strict
+# high-certainty settlement call. Execution safeguards still decide whether a
+# published call is actually paper-entered.
+AUTO_SCALPING_ENABLED = True
 LOCK_FOCUS_ENABLED = True
-# Evaluate from the moment an active market is available. The dashboard reruns
-# this policy every second; the unattended learner also refreshes it every five
-# minutes. Only the final 30 seconds remain blocked for stale/settlement risk.
 LOCK_EARLIEST_SECONDS = 15 * 60
 LOCK_LATEST_SECONDS = 30
-# LOCK is a final settlement-side call, not an ordinary directional lean.
-# Enforce the owner's explicit 95% certainty requirement. Lower-confidence
-# directional opportunities remain HOLD/SCALP candidates, never LOCK calls.
 LOCK_MIN_CONFIDENCE = 0.95
 LOCK_MIN_CONSENSUS = 0.55
 LOCK_MIN_SOURCE_HEALTH = 0.70
@@ -67,7 +65,12 @@ def evaluate_lock_focus(
     target_confirmed,
     edge_floor=0.0,
 ):
-    """Return a guarded LOCK action or WAIT with auditable diagnostics."""
+    """Publish a directional call every window; upgrade only qualified calls to LOCK.
+
+    A failed LOCK check no longer erases the Master's direction into WAIT.
+    It becomes SCALP UP/DOWN. The paper execution engine independently enforces
+    entry-price, fee, profitability, position-size and circuit-breaker rules.
+    """
     base_score = _f(base_score, 0.0)
     confidence = _f(confidence, 0.0)
     consensus = _f(consensus, 0.0)
@@ -98,13 +101,14 @@ def evaluate_lock_focus(
         "entry_price": ask is not None and ask <= LOCK_MAX_ENTRY_PRICE,
         "market_support": market_support is not None and market_support >= LOCK_MIN_MARKET_SUPPORT,
     }
-    action = f"LOCK {direction}" if all(checks.values()) else "WAIT"
+    lock_eligible = all(checks.values())
+    action = f"LOCK {direction}" if lock_eligible else f"SCALP {direction}"
     failed = [name for name, passed in checks.items() if not passed]
     return {
         "action": action,
         "direction": direction,
         "side": side,
-        "eligible": action.startswith("LOCK"),
+        "eligible": lock_eligible,
         "seconds_remaining": seconds_remaining,
         "confidence": confidence,
         "consensus": consensus,
@@ -116,8 +120,8 @@ def evaluate_lock_focus(
         "market_support": market_support,
         "checks": checks,
         "reason": (
-            "Qualified LOCK-first setup"
-            if action.startswith("LOCK")
-            else "WAIT — " + ", ".join(failed)
+            "Qualified LOCK setup"
+            if lock_eligible
+            else "Directional SCALP call; LOCK blocked by: " + ", ".join(failed)
         ),
     }
