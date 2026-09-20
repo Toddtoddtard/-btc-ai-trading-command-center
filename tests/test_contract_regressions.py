@@ -271,12 +271,12 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(reason, 'OFFICIAL_SETTLEMENT:yes')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-    def test_lock_requires_eighty_percent_confidence(self):
-        self.decision['confidence'] = .799
+    def test_lock_requires_sixty_eight_percent_confidence(self):
+        self.decision['confidence'] = .679
         blocked = self.cycle()
         self.assertFalse(blocked['event'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
-        self.decision['confidence'] = .80
+        self.decision['confidence'] = .68
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')
@@ -474,7 +474,7 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('persistent GitHub learning-state ledger', source)
         self.assertIn('Balanced-call mode publishes a directional outlook', source)
         self.assertIn('Paper execution remains separate', source)
-        self.assertIn('at least 80% calibrated confidence', source)
+        self.assertIn('at least 68% calibrated confidence', source)
         self.assertIn('only from that ticker\'s official Kalshi settlement', source)
         self.assertIn('if row["pnl"] is None', paper_tab)
         self.assertNotIn('LOCK sells automatically at a 95%', source)
@@ -642,7 +642,7 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn("currentTarget = NaN;", source)
 
 
-def test_lock_mode_uses_shared_eighty_percent_confidence_and_settlement_exit():
+def test_lock_mode_uses_shared_sixty_eight_percent_confidence_and_settlement_exit():
     from pathlib import Path
     engine_src = Path("kalshi_paper_engine.py").read_text()
     background = Path("background_paper.py").read_text()

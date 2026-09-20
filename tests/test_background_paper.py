@@ -7,7 +7,7 @@ try:
     import kalshi_paper_engine  # noqa: F401
 except ModuleNotFoundError:  # Allows this isolated test artifact to run locally.
     stub = types.ModuleType("kalshi_paper_engine")
-    stub.LOCK_MIN_CONFIDENCE = .80
+    stub.LOCK_MIN_CONFIDENCE = .68
     stub.LOCK_TAKE_PROFIT_PRICE = .95
     stub.MAX_ENTRY_PRICE = .75
     stub.MIN_SCALP_MARKET_PROBABILITY = .15

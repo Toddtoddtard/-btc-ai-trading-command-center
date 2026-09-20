@@ -3651,7 +3651,9 @@ with st.expander("🧾 Recent Updates — Last 24 Hours", expanded=False):
 - **Continuous LOCK evaluation:** LOCK qualification is checked throughout the active 15-minute market instead of only at a single late-window moment.
 - **Three-market outlook:** the research layer now grades directional outlooks for the next three 15-minute markets to provide broader context without changing paper execution by itself.
 - **Authoritative Kalshi entry display:** selected-side paper fills come from the shared Kalshi ledger so the displayed entry percentage matches the actual recorded paper fill.
-- **Balanced call automation:** every healthy BTC 15-minute market gets a directional SCALP outlook; automatic paper entries still require price, fee, data-quality, and reliability approval. LOCK requires at least 80% calibrated confidence plus independent confirmation.
+- **Balanced call automation:** every healthy BTC 15-minute market gets a directional SCALP outlook; automatic paper entries still require price, fee, data-quality, and reliability approval. LOCK requires at least 68% calibrated confidence plus independent confirmation.
+- **Evidence-based LOCK learning:** every LOCK gate is now retained and graded against official settlement, with paper-only comparisons across 64%–80% confidence floors.
+- **Faster unattended execution checks:** the scheduled paper worker retries safe quotes during each run while preserving the 75% entry ceiling and every existing risk gate.
 - **Research calibration safeguards:** walk-forward Brier calibration and JSON-safe learning-state validation were tightened so research updates cannot silently corrupt the learner state.
 - **Responsive validation scorecard:** the Backtest validation metrics now use a readable 3-plus-2 layout instead of five cramped columns.
 
@@ -6004,7 +6006,7 @@ def live_dashboard():
         st.caption(
             "Balanced-call mode publishes a directional outlook for every healthy 15-minute market. "
             "Paper execution remains separate and may reject a visible call for price, fees, feed health, or weak evidence. "
-            "LOCK qualification is evaluated continuously and requires at least 80% calibrated confidence, "
+            "LOCK qualification is evaluated continuously and requires at least 68% calibrated confidence, "
             "strong council agreement, healthy data, "
             "target confirmation, market alignment, and an entry at or below 75%. "
             "LOCK keeps its original direction, "

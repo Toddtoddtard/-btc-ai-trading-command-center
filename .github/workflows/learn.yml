@@ -126,11 +126,14 @@ jobs:
       - name: Run persistent 24/7 Kalshi paper cycle
         env:
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
+          BACKGROUND_PAPER_CYCLES: "4"
+          BACKGROUND_PAPER_INTERVAL_SECONDS: "30"
         shell: bash
         run: |
           # Keep the private-runner workload sustainable. Streamlit evaluates
           # the same paper engine every second while the dashboard is open;
-          # this scheduled cycle provides the unattended checkpoint.
+          # this scheduled cycle provides the unattended checkpoint. Short
+          # retries can capture a safe <=75% quote without changing any gate.
           python background_paper.py
       - name: Run persistent Gold, Gas, ZEC and WTI AUTO PAPER cycles
         run: python multi_asset_paper.py --state /tmp/learning_state.json
@@ -171,11 +174,13 @@ jobs:
           assert mode.get('paper_only') is True
           assert mode.get('auto_scalping_enabled') is True
           assert mode.get('earliest_lock_seconds') == 900
-          assert mode.get('confidence_floor') == 0.80
+          assert mode.get('confidence_floor') == 0.68
           assert mode.get('maximum_entry_price') == 0.75
           assert data.get('status', {}).get('btc_execution_mode') == 'BALANCED_CALLS'
           assert data.get('status', {}).get('auto_scalping_enabled') is True
           assert data.get('status', {}).get('continuous_lock_evaluation') is True
+          assert isinstance(data.get('lock_gate_history', []), list)
+          assert data.get('lock_gate_stats', {}).get('paper_only') is True
           assert data.get('horizon_models', {}).get('paper_only') is True
           assert data.get('status', {}).get('horizon_models_paper_only') is True
           assert data.get('horizon_models', {}).get('version') == 2

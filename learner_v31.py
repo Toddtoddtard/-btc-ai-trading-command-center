@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import copy
+from collections import Counter
 import json
 import os
 import time
@@ -42,6 +43,8 @@ PROMOTION_MIN_SAMPLES = 20
 PROMOTION_REQUIRED_STREAK = 3
 PROMOTION_ACCURACY_MARGIN = 0.05
 PROMOTION_MAX_ERROR_MULTIPLIER = 1.10
+LOCK_GATE_HISTORY_LIMIT = 2000
+LOCK_GATE_COUNTERFACTUAL_THRESHOLDS = (0.64, 0.66, 0.68, 0.70, 0.72, 0.80)
 
 
 def ensure_v31(state):
@@ -54,6 +57,8 @@ def ensure_v31(state):
     state.setdefault("forward_outlook_history", [])
     state.setdefault("forward_outlook_stats", {})
     state.setdefault("next_market_outlooks", [])
+    state.setdefault("lock_gate_history", [])
+    state.setdefault("lock_gate_stats", {})
     state["btc_execution_mode"] = {
         "name": "BALANCED_CALLS",
         "paper_only": True,
@@ -269,7 +274,11 @@ def evaluate_cfg(df, cfg):
     if df is None or len(df) < 120:
         return {"samples": 0, "accuracy": None, "median_error": None}
     outcomes = []
-    start = max(60, len(df) - 420)
+    # Use all locally available closed history (normally 500 rows) instead of
+    # discarding the oldest 80 rows. This yields several additional independent
+    # 15-minute outcomes per challenger evaluation without introducing future
+    # data or relaxing promotion requirements.
+    start = max(60, len(df) - 900)
     for end in range(start, len(df) - 15, 15):
         train = df.iloc[: end + 1]
         rows = legacy.rows_for_forecast(train)
@@ -287,6 +296,133 @@ def evaluate_cfg(df, cfg):
         "accuracy": float(np.mean([x[0] for x in outcomes])),
         "median_error": float(np.median([x[1] for x in outcomes])),
     }
+
+
+def _lock_gate_checks(focus):
+    return {
+        str(name): bool(passed)
+        for name, passed in ((focus or {}).get("checks") or {}).items()
+    }
+
+
+def resolve_lock_gate_history(state):
+    """Attach official resolved Kalshi truth to recorded LOCK evaluations."""
+    resolved = {}
+    for row in state.get("master_history", []):
+        ticker = str((row or {}).get("ticker") or "")
+        result = str((row or {}).get("kalshi_result") or "").lower()
+        if ticker and result in {"yes", "no"}:
+            resolved[ticker] = result
+
+    newly_resolved = 0
+    for row in state.setdefault("lock_gate_history", []):
+        if row.get("resolved"):
+            continue
+        result = resolved.get(str(row.get("ticker") or ""))
+        if result not in {"yes", "no"}:
+            continue
+        direction = str(row.get("direction") or "").upper()
+        row["official_result"] = result
+        row["correct"] = int(
+            (direction == "UP" and result == "yes")
+            or (direction == "DOWN" and result == "no")
+        )
+        row["resolved"] = True
+        newly_resolved += 1
+    return newly_resolved
+
+
+def summarize_lock_gate_history(state):
+    """Build auditable gate and confidence counterfactual statistics.
+
+    Counterfactual rows use the first qualifying evaluation per market, matching
+    the immutable first-LOCK-wins policy instead of counting repeated refreshes
+    as independent evidence.
+    """
+    history = [row for row in state.get("lock_gate_history", []) if isinstance(row, dict)]
+    blocker_counts = Counter()
+    for row in history:
+        blocker_counts.update(row.get("blockers") or [])
+
+    threshold_rows = []
+    for threshold in LOCK_GATE_COUNTERFACTUAL_THRESHOLDS:
+        first_by_ticker = {}
+        for row in history:
+            if not row.get("resolved"):
+                continue
+            checks = row.get("checks") or {}
+            other_checks_pass = all(
+                bool(passed) for name, passed in checks.items() if name != "confidence"
+            )
+            if not other_checks_pass or safe_float(row.get("confidence"), 0.0) < threshold:
+                continue
+            ticker = str(row.get("ticker") or "")
+            if ticker and ticker not in first_by_ticker:
+                first_by_ticker[ticker] = row
+        selected = list(first_by_ticker.values())
+        threshold_rows.append({
+            "confidence_floor": threshold,
+            "markets": len(selected),
+            "correct": sum(int(row.get("correct", 0)) for row in selected),
+            "accuracy": (
+                sum(int(row.get("correct", 0)) for row in selected) / len(selected)
+                if selected else None
+            ),
+        })
+
+    resolved_rows = [row for row in history if row.get("resolved")]
+    eligible_rows = [row for row in resolved_rows if row.get("eligible")]
+    stats = {
+        "evaluations": len(history),
+        "markets": len({str(row.get("ticker")) for row in history if row.get("ticker")}),
+        "resolved_evaluations": len(resolved_rows),
+        "eligible_resolved_evaluations": len(eligible_rows),
+        "eligible_accuracy": (
+            sum(int(row.get("correct", 0)) for row in eligible_rows) / len(eligible_rows)
+            if eligible_rows else None
+        ),
+        "blockers": dict(sorted(blocker_counts.items())),
+        "confidence_counterfactuals": threshold_rows,
+        "paper_only": True,
+    }
+    state["lock_gate_stats"] = stats
+    return stats
+
+
+def record_lock_gate_evaluation(state, live_call, market_info, now=None):
+    """Persist one compact LOCK gate observation per learner run."""
+    focus = (live_call or {}).get("lock_focus") or {}
+    ticker = str((market_info or {}).get("ticker") or (live_call or {}).get("ticker") or "")
+    if not ticker or not focus:
+        summarize_lock_gate_history(state)
+        return False
+    now = time.time() if now is None else float(now)
+    checks = _lock_gate_checks(focus)
+    row = {
+        "observed_at": now,
+        "ticker": ticker,
+        "expires_at": safe_float((market_info or {}).get("expires_at"), None),
+        "action": str(focus.get("action") or ""),
+        "direction": str(focus.get("direction") or ""),
+        "eligible": bool(focus.get("eligible")),
+        "confidence": safe_float(focus.get("confidence"), 0.0),
+        "consensus": safe_float(focus.get("consensus"), 0.0),
+        "source_health": safe_float(focus.get("source_health"), 0.0),
+        "base_score": safe_float(focus.get("base_score"), 0.0),
+        "required_score": safe_float(focus.get("required_score"), 0.0),
+        "selected_bid": safe_float(focus.get("selected_bid"), None),
+        "selected_ask": safe_float(focus.get("selected_ask"), None),
+        "market_support": safe_float(focus.get("market_support"), None),
+        "checks": checks,
+        "blockers": [name for name, passed in checks.items() if not passed],
+        "resolved": False,
+    }
+    history = state.setdefault("lock_gate_history", [])
+    history.append(row)
+    del history[:-LOCK_GATE_HISTORY_LIMIT]
+    resolve_lock_gate_history(state)
+    summarize_lock_gate_history(state)
+    return True
 
 
 def challenger_qualifies(champ, challenger):
@@ -484,6 +620,9 @@ def main():
     official_resolved = legacy.resolve_official_results(state)
     registered = register_with_snapshot(state, df, market_info)
     live_call = current_shadow_call(state, df, market_info)
+    lock_gate_recorded = record_lock_gate_evaluation(state, live_call, market_info)
+    lock_gate_resolved = resolve_lock_gate_history(state)
+    summarize_lock_gate_history(state)
     forecast_rows = legacy.rows_for_forecast(df)
     legacy_forecast = forecast_path_core(
         forecast_rows, (market_info or {}).get("target"), state.get("forecast")
@@ -531,6 +670,8 @@ def main():
         "research_resolved_this_run": research_resolved,
         "research_registered_this_run": research_registered,
         "lock_focus_refreshed_this_run": refreshed_lock_focus,
+        "lock_gate_recorded_this_run": lock_gate_recorded,
+        "lock_gate_resolved_this_run": lock_gate_resolved,
         "continuous_lock_evaluation": True,
         "forward_outlooks_generated": len(forward_outlooks),
         "forward_outlooks_graded_this_run": forward_outlooks_graded,

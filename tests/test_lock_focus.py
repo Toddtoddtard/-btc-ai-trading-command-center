@@ -6,6 +6,7 @@ from lock_focus import (
     evaluate_lock_focus,
 )
 from learner_v31 import refresh_pending_lock_focus
+from learner_v31 import record_lock_gate_evaluation, resolve_lock_gate_history
 
 
 class LockFocusTests(unittest.TestCase):
@@ -47,13 +48,28 @@ class LockFocusTests(unittest.TestCase):
         self.assertEqual(row["action"], "SCALP UP")
         self.assertFalse(row["checks"]["window"])
 
-    def test_lock_requires_eighty_percent_confidence(self):
-        row = self.evaluate(confidence=0.799)
+    def test_lock_requires_sixty_eight_percent_confidence(self):
+        row = self.evaluate(confidence=0.679)
         self.assertEqual(row["action"], "SCALP UP")
         self.assertFalse(row["checks"]["confidence"])
-        qualified = self.evaluate(confidence=0.80)
+        qualified = self.evaluate(confidence=0.68)
         self.assertEqual(qualified["action"], "LOCK UP")
         self.assertTrue(qualified["checks"]["confidence"])
+
+    def test_lock_gate_telemetry_records_and_resolves_official_truth(self):
+        focus = self.evaluate(confidence=0.68)
+        state = {
+            "master_history": [{"ticker": "T", "kalshi_result": "yes"}],
+            "lock_gate_history": [],
+        }
+        live_call = {"ticker": "T", "lock_focus": focus}
+        market = {"ticker": "T", "expires_at": 2000}
+        self.assertTrue(record_lock_gate_evaluation(state, live_call, market, now=1000))
+        self.assertEqual(resolve_lock_gate_history(state), 0)
+        row = state["lock_gate_history"][0]
+        self.assertTrue(row["resolved"])
+        self.assertEqual(row["correct"], 1)
+        self.assertEqual(state["lock_gate_stats"]["confidence_counterfactuals"][2]["markets"], 1)
 
     def test_lock_rejects_entry_above_seventy_five(self):
         market = {"yes_bid": 0.75, "yes_ask": 0.76, "no_bid": 0.24, "no_ask": 0.25}

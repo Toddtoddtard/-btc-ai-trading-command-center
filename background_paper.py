@@ -1026,15 +1026,25 @@ def run_cycle(learning_state, market_reader=_market, now=None):
 def main():
     with open(STATE_INPUT, encoding="utf-8") as handle:
         state = json.load(handle)
-    try:
-        paper = run_cycle(state)
-    except Exception as exc:
-        paper = state.setdefault("background_paper", initial_state())
-        paper["worker_ok"] = False
-        paper["last_cycle_at"] = _now_iso()
-        paper["last_message"] = "Background paper cycle failed safely: " + str(exc)
-    with open(STATE_INPUT, "w", encoding="utf-8") as handle:
-        json.dump(state, handle, indent=2, sort_keys=True)
+    cycles = max(1, min(10, int(_f(os.environ.get("BACKGROUND_PAPER_CYCLES"), 1))))
+    interval = max(
+        0.0,
+        min(120.0, _f(os.environ.get("BACKGROUND_PAPER_INTERVAL_SECONDS"), 0.0)),
+    )
+    for cycle in range(cycles):
+        try:
+            paper = run_cycle(state)
+        except Exception as exc:
+            paper = state.setdefault("background_paper", initial_state())
+            paper["worker_ok"] = False
+            paper["last_cycle_at"] = _now_iso()
+            paper["last_message"] = "Background paper cycle failed safely: " + str(exc)
+        # Checkpoint every pass so a later transient failure cannot erase an
+        # entry or settlement recorded by an earlier retry.
+        with open(STATE_INPUT, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, indent=2, sort_keys=True)
+        if cycle + 1 < cycles and interval:
+            time.sleep(interval)
     print(paper["last_message"])
 
 
