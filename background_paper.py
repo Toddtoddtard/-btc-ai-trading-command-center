@@ -118,14 +118,20 @@ def _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, m
     paper["last_message"] = message
 
 
-def _market(ticker, timeout=4):
-    url = (
-        "https://external-api.kalshi.com/trade-api/v2/markets/"
-        + quote(str(ticker), safe="")
-    )
-    req = Request(url, headers={"Accept": "application/json", "User-Agent": "BTC-AI-Background-Paper/1.0"})
-    with urlopen(req, timeout=timeout) as response:
-        return json.load(response).get("market", {})
+def _market(ticker, timeout=2.5):
+    last_error = None
+    for base in (
+        "https://api.elections.kalshi.com/trade-api/v2",
+        "https://external-api.kalshi.com/trade-api/v2",
+    ):
+        try:
+            url = base + "/markets/" + quote(str(ticker), safe="")
+            req = Request(url, headers={"Accept": "application/json", "User-Agent": "BTC-AI-Background-Paper/1.0"})
+            with urlopen(req, timeout=timeout) as response:
+                return json.load(response).get("market", {})
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(str(last_error) if last_error else "Kalshi endpoints failed")
 
 
 def _price(market, name):
@@ -616,6 +622,7 @@ def _repair_closed_settlements(paper, market_reader, now):
     trade's own ticker and trusts only its official finalized YES/NO result.
     """
     corrected = []
+    checked = 0
     for trade in paper.get("trades", []):
         if (
             not isinstance(trade, dict)
@@ -625,6 +632,13 @@ def _repair_closed_settlements(paper, market_reader, now):
         reason = str(trade.get("exit_reason") or "")
         if not reason.startswith("OFFICIAL_SETTLEMENT:"):
             continue
+        if trade.get("settlement_verified") is True:
+            continue
+        # Historical repairs must never starve the live market cycle. Verify a
+        # small batch per run and remember completed checks permanently.
+        if checked >= 3:
+            break
+        checked += 1
         ticker = str(trade.get("ticker") or "")
         side = str(trade.get("side") or "").upper()
         if not ticker or side not in {"YES", "NO"}:
@@ -639,6 +653,8 @@ def _repair_closed_settlements(paper, market_reader, now):
         result = str(market.get("result") or "").lower()
         if status not in {"settled", "finalized"} or result not in {"yes", "no"}:
             continue
+        trade["settlement_verified"] = True
+        trade["settlement_verified_at"] = now
         exit_price = 1.0 if side.lower() == result else 0.0
         contracts = max(0, int(_f(trade.get("contracts"), 0)))
         amount = _f(trade.get("amount"), 0.0)
@@ -781,7 +797,13 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if not ticker:
         paper["last_message"] = "No active Kalshi learner window."
         return paper
-    market = market_reader(ticker)
+    try:
+        market = market_reader(ticker)
+    except Exception as exc:
+        paper["market_feed_ok"] = False
+        paper["last_message"] = "Kalshi market feed temporarily unavailable; no paper action: " + str(exc)
+        return paper
+    paper["market_feed_ok"] = True
     if str(market.get("ticker") or ticker) != ticker:
         paper["last_message"] = "Kalshi ticker mismatch; no paper action."
         return paper
@@ -891,6 +913,23 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if explicit_action in {"WAIT", "HOLD"}:
         paper["last_message"] = "No paper action: learner selected WAIT."
         return paper
+    if pending.get("execution_approved") is False:
+        side = _action_side(explicit_action)
+        strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"
+        confidence = _f(pending.get("master_confidence"), 0.0)
+        _record_signal_outcome(
+            paper,
+            pending,
+            ticker,
+            side,
+            strategy,
+            confidence,
+            "Directional call published; reliability gate blocked PAPER entry: "
+            + str(pending.get("execution_reason") or "insufficient evidence"),
+            "BLOCKED",
+            now,
+        )
+        return paper
     side = _action_side(explicit_action)
     if side is None:
         paper["last_message"] = "No paper action: master action is not executable."
@@ -905,14 +944,14 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if strategy == "LOCK" and confidence < LOCK_MIN_CONFIDENCE:
         _record_signal_outcome(
             paper, pending, ticker, side, strategy, confidence,
-            f"Skipped PAPER LOCK: confidence {confidence*100:.0f}% is below the {LOCK_MIN_CONFIDENCE*100:.0f}% LOCK-first floor.",
+            f"Skipped PAPER LOCK: confidence {confidence*100:.0f}% is below the {LOCK_MIN_CONFIDENCE*100:.0f}% LOCK confidence floor.",
             "BLOCKED", now,
         )
         return paper
     if strategy == "SCALP" and not auto_scalping_enabled:
         _record_signal_outcome(
             paper, pending, ticker, side, strategy, confidence,
-            "Skipped PAPER SCALP: LOCK-first mode has automatic scalping disabled.",
+            "Skipped PAPER SCALP: the current execution mode has automatic scalping disabled.",
             "BLOCKED", now,
         )
         return paper

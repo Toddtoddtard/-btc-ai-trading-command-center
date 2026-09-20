@@ -271,12 +271,12 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(reason, 'OFFICIAL_SETTLEMENT:yes')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-    def test_lock_requires_top_tail_confidence(self):
-        self.decision['confidence'] = .949
+    def test_lock_requires_eighty_percent_confidence(self):
+        self.decision['confidence'] = .799
         blocked = self.cycle()
         self.assertFalse(blocked['event'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
-        self.decision['confidence'] = .95
+        self.decision['confidence'] = .80
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')
@@ -472,8 +472,9 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('_contract_history = shared_paper_history(_shared_paper', source)
         self.assertNotIn('auto_result = manage_auto_paper(', source)
         self.assertIn('persistent GitHub learning-state ledger', source)
-        self.assertIn('new automatic SCALP entries are disabled', source)
-        self.assertIn('top-tail calibrated confidence', source)
+        self.assertIn('Balanced-call mode publishes a directional outlook', source)
+        self.assertIn('Paper execution remains separate', source)
+        self.assertIn('at least 80% calibrated confidence', source)
         self.assertIn('only from that ticker\'s official Kalshi settlement', source)
         self.assertIn('if row["pnl"] is None', paper_tab)
         self.assertNotIn('LOCK sells automatically at a 95%', source)
@@ -641,14 +642,27 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn("currentTarget = NaN;", source)
 
 
-def test_lock_first_mode_uses_top_tail_confidence_and_ninety_five_exit_target():
+def test_lock_mode_uses_shared_eighty_percent_confidence_and_settlement_exit():
     from pathlib import Path
     engine_src = Path("kalshi_paper_engine.py").read_text()
     background = Path("background_paper.py").read_text()
     assert 'strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE' in engine_src
+    assert 'from lock_focus import LOCK_MAX_ENTRY_PRICE, LOCK_MIN_CONFIDENCE' in engine_src
     assert 'strategy = "LOCK" if confidence >= LOCK_MIN_CONFIDENCE else "SCALP"' not in background
     assert 'strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"' in background
     assert 'LOCK_TAKE_PROFIT_PRICE = 0.95' in engine_src
+
+
+def test_master_publishes_frequent_calls_but_keeps_execution_gate_separate():
+    source = Path("app.py").read_text()
+    learner = Path("learner_v31.py").read_text()
+    background = Path("background_paper.py").read_text()
+    assert 'action = f"SCALP {raw_side}"' in source
+    assert 'direction=raw_side' in source
+    assert '"execution_approved": execution_approved' in source
+    assert 'decision.get("execution_approved") is False' in source
+    assert 'call["execution_approved"] = bool(execution_approved)' in learner
+    assert 'pending.get("execution_approved") is False' in background
 
 
 def test_call_entry_card_uses_shared_ledger_not_local_sqlite_adapter():
@@ -679,7 +693,7 @@ def test_lock_can_bypass_risk_approval_only_when_lock_first_guards_pass():
             action="LOCK UP", kalshi_ticker="KXBTC15M-LOCK-FREE",
             kalshi_close_ts=time.time()+900, target_price=100,
             yes_ask_dollars=.75, yes_bid_dollars=.74,
-            no_ask_dollars=.26, no_bid_dollars=.25, confidence=.68,
+            no_ask_dollars=.26, no_bid_dollars=.25, confidence=.80,
         )
         risk = dict(approved=False, position_pct=.10)
         opened = engine.open_position(db, 500, decision, risk, 100)

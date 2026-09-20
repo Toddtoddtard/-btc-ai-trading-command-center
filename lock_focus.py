@@ -64,6 +64,7 @@ def evaluate_lock_focus(
     market,
     target_confirmed,
     edge_floor=0.0,
+    direction=None,
 ):
     """Publish a directional call every window; upgrade only qualified calls to LOCK.
 
@@ -76,7 +77,12 @@ def evaluate_lock_focus(
     consensus = _f(consensus, 0.0)
     source_health = _f(source_health, 0.0)
     seconds_remaining = _f(seconds_remaining)
-    direction = "UP" if base_score > 0 else "DOWN"
+    requested_direction = str(direction or "").upper().strip()
+    direction = (
+        requested_direction
+        if requested_direction in {"UP", "DOWN"}
+        else ("UP" if base_score > 0 else "DOWN")
+    )
     side = "YES" if direction == "UP" else "NO"
     bid = _quote(market, "yes_bid" if side == "YES" else "no_bid")
     ask = _quote(market, "yes_ask" if side == "YES" else "no_ask")

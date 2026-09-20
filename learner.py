@@ -20,7 +20,10 @@ from time_rewards_v1 import time_reward
 
 SPOT = "https://data-api.binance.vision"
 FUTURES = "https://fapi.binance.com"
-KALSHI = "https://external-api.kalshi.com/trade-api/v2"
+KALSHI_BASES = (
+    "https://api.elections.kalshi.com/trade-api/v2",
+    "https://external-api.kalshi.com/trade-api/v2",
+)
 STATE = "https://raw.githubusercontent.com/Toddtoddtard/-btc-ai-trading-command-center/learning-state/learning_state.json"
 OUT = Path(os.getenv("LEARNING_STATE_OUTPUT", "/tmp/learning_state.json"))
 BOTS = list(SPECIALIST_NAMES)
@@ -39,6 +42,17 @@ def get(url, params=None):
     )
     with urlopen(req, timeout=10) as response:
         return json.loads(response.read().decode())
+
+
+def kalshi_get(endpoint, params=None):
+    """Read public Kalshi data with the working public host first."""
+    last_error = None
+    for base in KALSHI_BASES:
+        try:
+            return get(base.rstrip("/") + endpoint, params)
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(str(last_error) if last_error else "Kalshi endpoints failed")
 
 
 def fresh():
@@ -210,7 +224,7 @@ def strike(market):
 
 def exact_market(ticker):
     try:
-        return get(KALSHI + "/markets/" + ticker).get("market", {})
+        return kalshi_get("/markets/" + ticker).get("market", {})
     except Exception:
         return {}
 
@@ -218,14 +232,17 @@ def exact_market(ticker):
 def orderbook(ticker):
     """Fetch public, read-only depth for executable quote diagnostics."""
     try:
-        return orderbook_features(get(KALSHI + "/markets/" + ticker + "/orderbook"))
+        return orderbook_features(kalshi_get("/markets/" + ticker + "/orderbook"))
     except Exception:
         return orderbook_features({})
 
 
 def market():
     try:
-        markets = get(KALSHI + "/markets", {"limit": 100, "status": "open", "series_ticker": "KXBTC15M"}).get("markets", [])
+        markets = kalshi_get(
+            "/markets",
+            {"limit": 100, "status": "open", "series_ticker": "KXBTC15M"},
+        ).get("markets", [])
     except Exception:
         return None
     now = time.time()

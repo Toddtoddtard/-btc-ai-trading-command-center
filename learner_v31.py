@@ -32,6 +32,7 @@ from reliability_v31 import (
     detect_regime,
     exact_expiry_row,
     learned_policy,
+    learned_trade_gate,
     safe_float,
     source_health_from_specialists,
 )
@@ -54,7 +55,7 @@ def ensure_v31(state):
     state.setdefault("forward_outlook_stats", {})
     state.setdefault("next_market_outlooks", [])
     state["btc_execution_mode"] = {
-        "name": "LOCK_FIRST",
+        "name": "BALANCED_CALLS",
         "paper_only": True,
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "lock_focus_enabled": True,
@@ -427,9 +428,19 @@ def current_shadow_call(state, df, market_info):
         market=market_info,
         target_confirmed=target_confirmed,
         edge_floor=policy["edge_floor"],
+        direction=(
+            "UP" if predicted_end is not None and target is not None and predicted_end >= target
+            else "DOWN" if predicted_end is not None and target is not None
+            else direction
+        ),
     )
     call["master_action"] = focus["action"]
-    call["would_wait"] = not focus["eligible"]
+    execution_approved, execution_reason = learned_trade_gate(
+        focus["action"], confidence, base_score, consensus, policy, source_health
+    )
+    call["execution_approved"] = bool(execution_approved)
+    call["execution_reason"] = execution_reason
+    call["would_wait"] = not execution_approved
     call["lock_focus"] = focus
     return call
 
@@ -447,6 +458,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
     for key in (
         "specialists", "master_confidence", "master_base_score",
         "master_action", "would_wait", "lock_focus",
+        "execution_approved", "execution_reason",
     ):
         pending[key] = live_call.get(key)
     if str(pending.get("master_action") or "").startswith("LOCK"):
@@ -522,7 +534,7 @@ def main():
         "continuous_lock_evaluation": True,
         "forward_outlooks_generated": len(forward_outlooks),
         "forward_outlooks_graded_this_run": forward_outlooks_graded,
-        "btc_execution_mode": "LOCK_FIRST",
+        "btc_execution_mode": "BALANCED_CALLS",
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "champion_promoted": state.get("champion_challenger", {}).get("promoted", False),
         "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),

@@ -5,6 +5,8 @@ from datetime import timezone
 import numpy as np
 import pandas as pd
 
+from lock_focus import LOCK_MIN_CONFIDENCE
+
 
 def safe_float(value, default=0.0):
     try:
@@ -76,10 +78,8 @@ def learned_policy(state, regime="UNKNOWN"):
     edge_floor = float(np.clip(base_edge - 0.035 * reliability, 0.10, 0.24))
     return {
         "trade_confidence_floor": trade_conf,
-        # The live model's 95th-percentile calibrated confidence is about 0.67.
-        # Use 0.68 to select only its strongest tail, then require independent
-        # consensus, feed, target, market and price checks in LOCK-first mode.
-        "lock_confidence_floor": 0.68,
+        # Keep the learned gate aligned with the shared Master/paper LOCK floor.
+        "lock_confidence_floor": LOCK_MIN_CONFIDENCE,
         "edge_floor": edge_floor,
         "regime": regime,
         "regime_samples": samples,

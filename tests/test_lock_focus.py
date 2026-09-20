@@ -29,8 +29,8 @@ class LockFocusTests(unittest.TestCase):
         values.update(updates)
         return evaluate_lock_focus(**values)
 
-    def test_automatic_scalping_is_disabled(self):
-        self.assertFalse(AUTO_SCALPING_ENABLED)
+    def test_automatic_scalping_is_enabled(self):
+        self.assertTrue(AUTO_SCALPING_ENABLED)
 
     def test_qualified_lock_can_fire_at_market_open(self):
         row = self.evaluate(seconds_remaining=LOCK_EARLIEST_SECONDS)
@@ -44,24 +44,32 @@ class LockFocusTests(unittest.TestCase):
 
     def test_lock_stops_in_final_thirty_seconds(self):
         row = self.evaluate(seconds_remaining=30)
-        self.assertEqual(row["action"], "WAIT")
+        self.assertEqual(row["action"], "SCALP UP")
         self.assertFalse(row["checks"]["window"])
 
-    def test_lock_requires_top_tail_confidence(self):
-        row = self.evaluate(confidence=0.949)
-        self.assertEqual(row["action"], "WAIT")
+    def test_lock_requires_eighty_percent_confidence(self):
+        row = self.evaluate(confidence=0.799)
+        self.assertEqual(row["action"], "SCALP UP")
         self.assertFalse(row["checks"]["confidence"])
+        qualified = self.evaluate(confidence=0.80)
+        self.assertEqual(qualified["action"], "LOCK UP")
+        self.assertTrue(qualified["checks"]["confidence"])
 
     def test_lock_rejects_entry_above_seventy_five(self):
         market = {"yes_bid": 0.75, "yes_ask": 0.76, "no_bid": 0.24, "no_ask": 0.25}
         row = self.evaluate(market=market)
-        self.assertEqual(row["action"], "WAIT")
+        self.assertEqual(row["action"], "SCALP UP")
         self.assertFalse(row["checks"]["entry_price"])
 
     def test_lock_requires_market_and_council_alignment(self):
         row = self.evaluate(consensus=0.30)
-        self.assertEqual(row["action"], "WAIT")
+        self.assertEqual(row["action"], "SCALP UP")
         self.assertFalse(row["checks"]["consensus"])
+
+    def test_explicit_settlement_direction_drives_the_call(self):
+        row = self.evaluate(base_score=-0.40, direction="UP")
+        self.assertEqual(row["direction"], "UP")
+        self.assertEqual(row["action"], "LOCK UP")
 
     def test_down_lock_uses_no_contract(self):
         market = {"yes_bid": 0.37, "yes_ask": 0.39, "no_bid": 0.61, "no_ask": 0.63}

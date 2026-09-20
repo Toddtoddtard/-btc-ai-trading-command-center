@@ -100,7 +100,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.18-r82-kalshi-reference-lock-safety"
+APP_VERSION = "2026.09.20-r83-balanced-calls-80-lock"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -1601,6 +1601,7 @@ def master_decision(
     base_score = clamp(v5_council["base_score"])
     consensus = float(v5_council["consensus"])
     council_confidence = float(v5_council["confidence"])
+    source_health = source_health_from_specialists(results)
 
     px = safe_float(settlement_price, float(hist["close"].iloc[-1]))
     atr = safe_float(hist["atr14"].iloc[-1], px * 0.002)
@@ -1695,6 +1696,13 @@ def master_decision(
             0.40,
             min(0.97, max(target_confidence, council_confidence)),
         ))
+        confidence = calibrate_confidence(
+            confidence,
+            consensus,
+            policy,
+            source_health=source_health,
+            state=remote_learning,
+        )
 
         # -----------------------------------------------------------
         # LOCK semantics
@@ -1708,15 +1716,17 @@ def master_decision(
                 or (raw_side == "DOWN" and projected_edge <= -max(atr * 0.35, px * 0.00035))
             )
         )
+        settlement_consensus = specialist_consensus(results, raw_side)
         lock_focus = evaluate_lock_focus(
-            base_score=base_score,
+            base_score=score,
             confidence=confidence,
-            consensus=consensus,
-            source_health=source_health_from_specialists(results),
+            consensus=settlement_consensus,
+            source_health=source_health,
             seconds_remaining=remaining,
             market=kctx.get("market") or {},
             target_confirmed=target_confirmed,
             edge_floor=policy["edge_floor"],
+            direction=raw_side,
         )
         lock_up = lock_focus["action"] == "LOCK UP" and raw_side == "UP"
         lock_down = lock_focus["action"] == "LOCK DOWN" and raw_side == "DOWN"
@@ -1735,7 +1745,9 @@ def master_decision(
             locked_side = "DOWN"
 
         else:
-            action = "HOLD"
+            # Publish one settlement-side directional call for every healthy,
+            # active 15-minute market. Execution remains independently gated.
+            action = f"SCALP {raw_side}"
             locked_side = None
 
         target_price = target
@@ -1760,21 +1772,27 @@ def master_decision(
         scalp_projected_exit_price = np.nan
 
         action = "HOLD"
+        confidence = calibrate_confidence(
+            confidence,
+            consensus,
+            policy,
+            source_health=source_health,
+            state=remote_learning,
+        )
 
         prediction_label = "Kalshi target unavailable"
 
-    source_health = source_health_from_specialists(results)
     gate_note = ""
-    confidence = calibrate_confidence(
-        confidence, consensus, policy, source_health=source_health, state=remote_learning
-    )
+    execution_approved = action not in {"HOLD", "WAIT"}
     if not _lock_was_already_persisted and action not in {"HOLD", "WAIT"}:
         allowed, gated_action = learned_trade_gate(
             action, confidence, base_score, consensus, policy, source_health=source_health
         )
         if not allowed:
-            action = "HOLD"
+            if action.startswith("LOCK"):
+                action = f"SCALP {raw_side}"
             locked_side = None
+            execution_approved = False
             gate_note = f"{gated_action}; learned reliability gate blocked trade"
 
     # Learned precision layer is a final safety veto only. It must not duplicate
@@ -1784,8 +1802,10 @@ def master_decision(
         and action not in {"HOLD", "WAIT"}
         and not bool(v5_council.get("precision_gate_passed"))
     ):
-        action = "HOLD"
+        if action.startswith("LOCK"):
+            action = f"SCALP {raw_side}"
         locked_side = None
+        execution_approved = False
         precision_reason = str(v5_council.get("precision_gate_reason", "WAIT — v5 precision gate"))
         gate_note = (gate_note + "; " if gate_note else "") + precision_reason
 
@@ -1887,8 +1907,9 @@ def master_decision(
         "policy": policy,
         "source_health": source_health,
         "regime": regime_name,
-        "execution_mode": "LOCK_FIRST",
+        "execution_mode": "BALANCED_CALLS",
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
+        "execution_approved": execution_approved,
         "lock_focus": locals().get("lock_focus", {}),
         "next_market_outlooks": _next_market_outlooks,
         "whale_score": safe_float(
@@ -1911,6 +1932,14 @@ def risk_evaluate(decision, account, hist, futures):
 
     if decision["action"] in {"HOLD", "WAIT"}:
         return {"approved": False, "position_pct": 0.0, "risk_score": 1.0, "reason": "No trade signal"}
+
+    if decision.get("execution_approved") is False:
+        return {
+            "approved": False,
+            "position_pct": 0.0,
+            "risk_score": 1.0,
+            "reason": "Directional call published; reliability gate blocked paper entry",
+        }
 
     # Confidence, consensus and source-health are authoritative upstream gates.
     # Do not silently apply a second, conflicting threshold here.  This layer
@@ -3622,7 +3651,7 @@ with st.expander("🧾 Recent Updates — Last 24 Hours", expanded=False):
 - **Continuous LOCK evaluation:** LOCK qualification is checked throughout the active 15-minute market instead of only at a single late-window moment.
 - **Three-market outlook:** the research layer now grades directional outlooks for the next three 15-minute markets to provide broader context without changing paper execution by itself.
 - **Authoritative Kalshi entry display:** selected-side paper fills come from the shared Kalshi ledger so the displayed entry percentage matches the actual recorded paper fill.
-- **LOCK-first automation:** new automatic BTC SCALP entries are disabled while qualified paper LOCK calls are prioritized; historical SCALPs remain available for learning and audit.
+- **Balanced call automation:** every healthy BTC 15-minute market gets a directional SCALP outlook; automatic paper entries still require price, fee, data-quality, and reliability approval. LOCK requires at least 80% calibrated confidence plus independent confirmation.
 - **Research calibration safeguards:** walk-forward Brier calibration and JSON-safe learning-state validation were tightened so research updates cannot silently corrupt the learner state.
 - **Responsive validation scorecard:** the Backtest validation metrics now use a readable 3-plus-2 layout instead of five cramped columns.
 
@@ -5973,9 +6002,9 @@ def live_dashboard():
         )
         st.caption(risk["reason"])
         st.caption(
-            "LOCK-first mode: new automatic SCALP entries are disabled. "
-            "LOCK qualification is evaluated continuously throughout the active market and requires "
-            "top-tail calibrated confidence (68% based on the live distribution), "
+            "Balanced-call mode publishes a directional outlook for every healthy 15-minute market. "
+            "Paper execution remains separate and may reject a visible call for price, fees, feed health, or weak evidence. "
+            "LOCK qualification is evaluated continuously and requires at least 80% calibrated confidence, "
             "strong council agreement, healthy data, "
             "target confirmation, market alignment, and an entry at or below 75%. "
             "LOCK keeps its original direction, "
@@ -6367,9 +6396,9 @@ def live_dashboard():
             "closed post-fix Kalshi trades collected."
         )
         st.caption(
-            "LOCK-first mode is active and new automatic SCALP entries are disabled. "
-            "Historical SCALP results remain in the ledger for learning and audit; "
-            "all specialists continue running to evaluate settlement-side LOCK evidence."
+            "Balanced-call mode is active. Directional calls are frequent, while only risk-approved "
+            "SCALP or LOCK setups may enter the paper ledger. All specialists continue running, and "
+            "blocked calls remain visible for learning and audit."
         )
 
     # ============================================================

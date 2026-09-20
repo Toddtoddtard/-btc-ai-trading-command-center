@@ -54,12 +54,12 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Verify repaired call path exists
         run: |
-          if grep -q '"execution_mode": "LOCK_FIRST"' app.py; then
+          if grep -q '"execution_mode": "BALANCED_CALLS"' app.py; then
             grep -q 'evaluate_lock_focus(' app.py
             grep -q 'AUTO_SCALPING_ENABLED' app.py
             grep -q 'LOCK_EARLIEST_SECONDS = 15 \* 60' lock_focus.py
             grep -q 'seconds_remaining > LOCK_LATEST_SECONDS' lock_focus.py
-            grep -q 'LOCK_MIN_CONFIDENCE = 0.68' lock_focus.py
+            grep -q 'LOCK_MIN_CONFIDENCE = 0.80' lock_focus.py
             grep -q 'LOCK_MAX_ENTRY_PRICE = 0.75' lock_focus.py
           else
             grep -q 'forecast_move >= max(atr \* 0.14, px \* 0.00014)' app.py

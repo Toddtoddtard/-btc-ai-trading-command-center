@@ -7,7 +7,7 @@ try:
     import kalshi_paper_engine  # noqa: F401
 except ModuleNotFoundError:  # Allows this isolated test artifact to run locally.
     stub = types.ModuleType("kalshi_paper_engine")
-    stub.LOCK_MIN_CONFIDENCE = .95
+    stub.LOCK_MIN_CONFIDENCE = .80
     stub.LOCK_TAKE_PROFIT_PRICE = .95
     stub.MAX_ENTRY_PRICE = .75
     stub.MIN_SCALP_MARKET_PROBABILITY = .15
@@ -44,6 +44,18 @@ class BackgroundPaperTests(unittest.TestCase):
         state = self.pending(would_wait=True)
         paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
         self.assertIsNone(paper["open_position"])
+
+    def test_directional_call_can_be_visible_without_unsafe_execution(self):
+        state = self.pending(
+            master_action="SCALP UP",
+            execution_approved=False,
+            execution_reason="WAIT — FEED HEALTH",
+        )
+        paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
+        self.assertIsNone(paper["open_position"])
+        self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
+        self.assertIn("Directional call published", paper["last_message"])
+        self.assertIn("FEED HEALTH", paper["last_message"])
 
     def test_scalp_entry_above_75_is_rejected(self):
         state = self.pending()
@@ -92,7 +104,7 @@ class BackgroundPaperTests(unittest.TestCase):
         state["btc_execution_mode"] = {"auto_scalping_enabled": False}
         paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
         self.assertIsNone(paper["open_position"])
-        self.assertIn("LOCK-first mode", paper["last_message"])
+        self.assertIn("execution mode", paper["last_message"])
 
     def test_lottery_style_low_probability_scalp_is_rejected(self):
         state = self.pending()
@@ -326,6 +338,37 @@ class BackgroundPaperTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_verified_settlement_is_not_refetched_every_cycle(self):
+        paper = bg.initial_state(now=1000)
+        paper["trades"] = [{
+            "status": "CLOSED", "ticker": "OLD", "side": "YES",
+            "strategy": "LOCK", "contracts": 10, "amount": 6.0,
+            "exit_price": 1.0, "pnl": 4.0, "result": "WIN",
+            "exit_reason": "OFFICIAL_SETTLEMENT:yes",
+        }]
+        calls = []
+
+        def reader(ticker):
+            calls.append(ticker)
+            return {"ticker": ticker, "status": "settled", "result": "yes"}
+
+        self.assertEqual(bg._repair_closed_settlements(paper, reader, 2000), [])
+        self.assertTrue(paper["trades"][0]["settlement_verified"])
+        self.assertEqual(bg._repair_closed_settlements(paper, reader, 3000), [])
+        self.assertEqual(calls, ["OLD"])
+
+    def test_live_market_timeout_fails_closed_without_crashing_worker(self):
+        state = self.pending(master_action="SCALP UP")
+
+        def unavailable(_ticker):
+            raise TimeoutError("timed out")
+
+        paper = bg.run_cycle(state, unavailable, now=1000)
+        self.assertTrue(paper["worker_ok"])
+        self.assertFalse(paper["market_feed_ok"])
+        self.assertIsNone(paper["open_position"])
+        self.assertIn("temporarily unavailable", paper["last_message"])
 
 
 if __name__ == "__main__":

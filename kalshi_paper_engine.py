@@ -5,37 +5,42 @@ import time
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from lock_focus import LOCK_MAX_ENTRY_PRICE, LOCK_MIN_CONFIDENCE
+
+
+KALSHI_PUBLIC_BASES = (
+    "https://api.elections.kalshi.com/trade-api/v2",
+    "https://external-api.kalshi.com/trade-api/v2",
+)
+
 
 def fetch_settled_result(ticker):
     """Only an official, final binary result can settle a paper contract."""
-    try:
-        url = "https://external-api.kalshi.com/trade-api/v2/markets/" + quote(
-            ticker, safe=""
-        )
-        with urlopen(
-            Request(url, headers={"Accept": "application/json"}), timeout=4
-        ) as response:
-            market = json.load(response).get("market", {})
-        if market.get("ticker") != ticker or market.get("status") not in {
-            "settled",
-            "finalized",
-        }:
-            return None
-        result = str(market.get("result", "")).lower()
-        return result if result in {"yes", "no"} else None
-    except Exception:
-        return None
+    for base in KALSHI_PUBLIC_BASES:
+        try:
+            url = base + "/markets/" + quote(ticker, safe="")
+            with urlopen(
+                Request(url, headers={"Accept": "application/json"}), timeout=4
+            ) as response:
+                market = json.load(response).get("market", {})
+            if market.get("ticker") != ticker or market.get("status") not in {
+                "settled",
+                "finalized",
+            }:
+                return None
+            result = str(market.get("result", "")).lower()
+            return result if result in {"yes", "no"} else None
+        except Exception:
+            continue
+    return None
 
 
 GENERAL_TAKER_FEE_RATE = 0.07
-MAX_ENTRY_PRICE = 0.75
+MAX_ENTRY_PRICE = LOCK_MAX_ENTRY_PRICE
 # Paper-trading exploration gate: still reject extreme lottery-style odds,
 # but allow more borderline bot calls to collect evidence. The 75% max entry
 # cap, fee checks, loss circuit breaker, and profitability gate remain intact.
 MIN_SCALP_MARKET_PROBABILITY = 0.15
-# LOCK-first entry floor. It is intentionally calibrated to the live model's
-# top confidence tail and is not an early-exit rule for open LOCK positions.
-LOCK_MIN_CONFIDENCE = 0.95
 MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
 MAX_SCALP_LOSSES_PER_MARKET = 2
@@ -823,7 +828,7 @@ def manage_kalshi_paper_cycle(
             "event": False,
             "message": (
                 f"Skipped PAPER LOCK: confidence {_decision_confidence(decision) * 100:.0f}% "
-                f"is below the {LOCK_MIN_CONFIDENCE * 100:.0f}% LOCK-first floor."
+                f"is below the {LOCK_MIN_CONFIDENCE * 100:.0f}% LOCK confidence floor."
             ),
         }
     if (
