@@ -16,10 +16,12 @@ from ai_core import SPECIALIST_NAMES, enrich_history_core, forecast_path_core, r
 from kalshi_microstructure import orderbook_features
 from learning_prices import closed_price_at
 from multi_timeframe import fetch_multi_timeframe_context
+from public_futures import parse_bybit_futures_snapshot
 from time_rewards_v1 import time_reward
 
 SPOT = "https://data-api.binance.vision"
 FUTURES = "https://fapi.binance.com"
+BYBIT = "https://api.bybit.com"
 KALSHI_BASES = (
     "https://api.elections.kalshi.com/trade-api/v2",
     "https://external-api.kalshi.com/trade-api/v2",
@@ -177,23 +179,48 @@ def aggregate_trades():
 
 
 def futures_snapshot():
-    result = {"book_imbalance": 0.0, "funding_rate": 0.0, "open_interest": 0.0}
+    result = {
+        "book_imbalance": 0.0,
+        "funding_rate": 0.0,
+        "open_interest": 0.0,
+        "source": "Unavailable",
+        "ok": False,
+    }
+    received = set()
     try:
         depth = get(FUTURES + "/fapi/v1/depth", {"symbol": "BTCUSDT", "limit": 20})
         bids = sum(float(x[0]) * float(x[1]) for x in depth.get("bids", []))
         asks = sum(float(x[0]) * float(x[1]) for x in depth.get("asks", []))
         denom = bids + asks
         result["book_imbalance"] = (bids - asks) / denom if denom else 0.0
+        received.add("book")
     except Exception:
         pass
     try:
         premium = get(FUTURES + "/fapi/v1/premiumIndex", {"symbol": "BTCUSDT"})
         result["funding_rate"] = float(premium.get("lastFundingRate") or 0.0)
+        received.add("funding")
     except Exception:
         pass
     try:
         oi = get(FUTURES + "/fapi/v1/openInterest", {"symbol": "BTCUSDT"})
         result["open_interest"] = float(oi.get("openInterest") or 0.0)
+        received.add("oi")
+    except Exception:
+        pass
+    if len(received) == 3:
+        result.update({"source": "Binance Futures public BTCUSDT", "ok": True})
+        return result
+    try:
+        ticker = get(
+            BYBIT + "/v5/market/tickers",
+            {"category": "linear", "symbol": "BTCUSDT"},
+        )
+        orderbook = get(
+            BYBIT + "/v5/market/orderbook",
+            {"category": "linear", "symbol": "BTCUSDT", "limit": 50},
+        )
+        result.update(parse_bybit_futures_snapshot(ticker, orderbook))
     except Exception:
         pass
     return result

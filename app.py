@@ -63,6 +63,7 @@ from lock_focus import (
     specialist_consensus,
 )
 from pro_trade_ticket import build_pro_trade_ticket
+from public_futures import parse_bybit_futures_snapshot
 from reliability_v31 import (
     calibrate_confidence, detect_regime, execution_cost_bps,
     learned_policy, learned_trade_gate, regime_specialist_weight,
@@ -94,6 +95,9 @@ SPOT_BASES = [
 FUTURES_BASES = [
     "https://fapi.binance.com",
 ]
+BYBIT_BASES = [
+    "https://api.bybit.com",
+]
 KALSHI_BASES = [
     "https://api.elections.kalshi.com/trade-api/v2",
     "https://external-api.kalshi.com/trade-api/v2",
@@ -101,7 +105,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.21-r84-truthful-accuracy-ledger-patterns"
+APP_VERSION = "2026.09.21-r85-ui-truth-derivatives-fallback"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -783,6 +787,7 @@ def fetch_futures_snapshot():
         "bid_notional": np.nan,
         "ask_notional": np.nan,
         "book_imbalance": 0.0,
+        "source": "Unavailable",
         "feed_ms": np.nan,
         "ok": False,
     }
@@ -801,10 +806,28 @@ def fetch_futures_snapshot():
             "bid_notional": bids,
             "ask_notional": asks,
             "book_imbalance": (bids - asks) / denom if denom else 0.0,
+            "source": "Binance Futures public BTCUSDT",
             "ok": True,
         })
     except Exception as exc:
         out["error"] = str(exc)
+        try:
+            ticker, _ = try_bases(
+                BYBIT_BASES,
+                "/v5/market/tickers",
+                {"category": "linear", "symbol": SYMBOL},
+                timeout=2.2,
+            )
+            orderbook, _ = try_bases(
+                BYBIT_BASES,
+                "/v5/market/orderbook",
+                {"category": "linear", "symbol": SYMBOL, "limit": 50},
+                timeout=2.2,
+            )
+            out.update(parse_bybit_futures_snapshot(ticker, orderbook))
+            out.pop("error", None)
+        except Exception as fallback_exc:
+            out["fallback_error"] = str(fallback_exc)
     out["feed_ms"] = (time.perf_counter() - started) * 1000.0
     return out
 
@@ -5102,7 +5125,11 @@ def live_dashboard():
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("BTC", fmt_money(price))
-    m2.metric("24h", fmt_pct(ticker.get("change_24h")))
+    m2.metric(
+        "BTC 24h Change",
+        fmt_pct(ticker.get("change_24h")),
+        help="Live BTC market change over 24 hours; this is not an AI accuracy statistic.",
+    )
     with m3:
         st.markdown(
             f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Master</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
@@ -5821,7 +5848,14 @@ def live_dashboard():
         q1.metric("Funding", f"{safe_float(futures.get('funding_rate'), 0)*100:.4f}%")
         q2.metric("Open interest", f"{safe_float(futures.get('open_interest'), 0):,.0f} BTC")
         q3.metric("Book imbalance", f"{safe_float(futures.get('book_imbalance'), 0)*100:+.1f}%")
-        q4.metric("Futures status", "LIVE" if futures.get("ok") else "UNAVAILABLE")
+        _futures_status = "UNAVAILABLE"
+        if futures.get("ok"):
+            _futures_status = (
+                "LIVE — BYBIT"
+                if "Bybit" in str(futures.get("source", ""))
+                else "LIVE — BINANCE"
+            )
+        q4.metric("Futures status", _futures_status)
 
         st.divider()
         st.subheader("Kalshi — live BTC 15-minute market")
@@ -6076,8 +6110,8 @@ def live_dashboard():
         stats = prediction_stats()
         j1, j2, j3, j4 = st.columns(4)
         j1.metric("Predictions", stats["n"])
-        j2.metric("Trade calls resolved", stats["trade_resolved"])
-        j3.metric("Trade-call accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
+        j2.metric("Signal calls resolved", stats["trade_resolved"])
+        j3.metric("Signal-call accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
         j4.metric("HOLD/WAIT resolved", stats["wait_resolved"])
         st.caption(
             "Win/loss accuracy counts only SCALP/LOCK calls. HOLD/WAIT decisions are still recorded and resolved for learning, but are not treated as wins or losses."
