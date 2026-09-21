@@ -60,6 +60,7 @@ from learning_prices import closed_price_at
 from lock_focus import (
     AUTO_SCALPING_ENABLED,
     evaluate_lock_focus,
+    specialist_consensus,
 )
 from pro_trade_ticket import build_pro_trade_ticket
 from reliability_v31 import (

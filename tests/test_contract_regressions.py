@@ -665,6 +665,14 @@ def test_master_publishes_frequent_calls_but_keeps_execution_gate_separate():
     assert 'pending.get("execution_approved") is False' in background
 
 
+def test_live_master_imports_shared_specialist_consensus():
+    source = Path("app.py").read_text()
+    lock_import = source[source.index("from lock_focus import ("):]
+    lock_import = lock_import[:lock_import.index(")")]
+    assert "specialist_consensus," in lock_import
+    assert "settlement_consensus = specialist_consensus(results, raw_side)" in source
+
+
 def test_call_entry_card_uses_shared_ledger_not_local_sqlite_adapter():
     app = Path("app.py").read_text()
     adapter = Path("profitability_v5.py").read_text()
