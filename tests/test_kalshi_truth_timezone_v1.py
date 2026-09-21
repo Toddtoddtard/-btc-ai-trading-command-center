@@ -116,7 +116,9 @@ class KalshiTruthTimezoneTests(unittest.TestCase):
     def test_source_grades_kalshi_calls_against_target_and_displays_eastern(self):
         learner = Path("learner.py").read_text(encoding="utf-8")
         app = Path("app.py").read_text(encoding="utf-8")
-        self.assertIn("actual_direction = 1 if actual >= target else -1", learner)
+        self.assertIn('actual_settlement = 1 if actual >= target else -1', learner)
+        self.assertIn('actual_move = 1 if actual > start else -1 if actual < start else 0', learner)
+        self.assertIn('direction_correct = outcome["settlement_correct"]', learner)
         self.assertIn('action in {"SCALP UP", "LOCK UP"}', app)
         self.assertIn('tz_convert("America/New_York")', app)
         self.assertIn("ZoneInfo('America/New_York')", app)

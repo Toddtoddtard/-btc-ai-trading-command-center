@@ -33,6 +33,26 @@ class LockFocusTests(unittest.TestCase):
     def test_automatic_scalping_is_enabled(self):
         self.assertTrue(AUTO_SCALPING_ENABLED)
 
+    def test_pattern_model_migration_resets_only_stale_pattern_evidence(self):
+        from learner_v31 import ensure_v31
+        state = {
+            "status": {},
+            "specialists": {
+                "Pattern AI": {"samples": 80, "direction_hits": 60, "adaptive_weight": 1.4},
+                "Trend AI": {"samples": 90, "direction_hits": 55, "adaptive_weight": 1.1},
+            },
+            "specialist_history": {
+                "Pattern AI": [{"direction_correct": 1}],
+                "Trend AI": [{"direction_correct": 1}],
+            },
+        }
+        migrated = ensure_v31(state)
+        self.assertEqual(migrated["specialists"]["Pattern AI"]["samples"], 0)
+        self.assertEqual(migrated["specialists"]["Pattern AI"]["adaptive_weight"], 0.70)
+        self.assertEqual(migrated["specialist_history"]["Pattern AI"], [])
+        self.assertEqual(migrated["specialists"]["Trend AI"]["samples"], 90)
+        self.assertEqual(migrated["specialist_history"]["Trend AI"], [{"direction_correct": 1}])
+
     def test_qualified_lock_can_fire_at_market_open(self):
         row = self.evaluate(seconds_remaining=LOCK_EARLIEST_SECONDS)
         self.assertEqual(row["action"], "LOCK UP")

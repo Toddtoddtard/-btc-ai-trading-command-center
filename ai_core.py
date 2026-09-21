@@ -27,6 +27,7 @@ SPECIALIST_NAMES = [
     "Cross-Market Research AI",
     "Combination AI",
 ]
+PATTERN_STRUCTURE_VERSION = 2
 
 
 def clamp(x, lo=-1.0, hi=1.0):
@@ -102,6 +103,88 @@ def _specialist(name, score, reason):
     return {"name": name, "signal": signal, "score": score, "confidence": confidence, "reason": reason}
 
 
+def candle_structure_signal(hist):
+    """Return a causal multi-candle structure score and an auditable rationale.
+
+    The detector intentionally uses only completed candles already present in
+    ``hist``.  It combines a small set of mechanically testable structures
+    instead of treating a pattern name as proof that price must continue.
+    Learned specialist weighting still decides how much influence the result
+    earns after outcomes are known.
+    """
+    if hist is None or len(hist) < 8:
+        return 0.0, "Insufficient completed candles for structure analysis"
+
+    frame = hist.tail(40)
+    last = frame.iloc[-1]
+    prev = frame.iloc[-2]
+    px = safe_float(last.get("close"), 0.0)
+    body = safe_float(last.get("close"), 0.0) - safe_float(last.get("open"), 0.0)
+    prev_body = safe_float(prev.get("close"), 0.0) - safe_float(prev.get("open"), 0.0)
+    high = safe_float(last.get("high"), px)
+    low = safe_float(last.get("low"), px)
+    rng = max(high - low, max(px * 1e-6, 1e-9))
+    upper_wick = max(0.0, high - max(safe_float(last.get("open"), px), px))
+    lower_wick = max(0.0, min(safe_float(last.get("open"), px), px) - low)
+    body_abs = max(abs(body), rng * 0.04)
+    pieces = [(0.18 * (body / rng), "bullish body" if body > 0 else "bearish body")]
+
+    bullish_engulf = (
+        body > 0 and prev_body < 0
+        and px >= safe_float(prev.get("open"), px)
+        and safe_float(last.get("open"), px) <= safe_float(prev.get("close"), px)
+    )
+    bearish_engulf = (
+        body < 0 and prev_body > 0
+        and safe_float(last.get("open"), px) >= safe_float(prev.get("close"), px)
+        and px <= safe_float(prev.get("open"), px)
+    )
+    if bullish_engulf:
+        pieces.append((0.55, "bullish engulfing"))
+    elif bearish_engulf:
+        pieces.append((-0.55, "bearish engulfing"))
+
+    close_location = (px - low) / rng
+    if lower_wick >= 2.0 * body_abs and upper_wick <= 1.1 * body_abs and close_location >= 0.62:
+        pieces.append((0.48, "hammer/rejection wick"))
+    if upper_wick >= 2.0 * body_abs and lower_wick <= 1.1 * body_abs and close_location <= 0.38:
+        pieces.append((-0.48, "shooting-star/rejection wick"))
+
+    last3 = frame.tail(3)
+    bodies3 = (last3["close"].astype(float) - last3["open"].astype(float)).to_numpy()
+    closes3 = last3["close"].astype(float).to_numpy()
+    if np.all(bodies3 > 0) and np.all(np.diff(closes3) > 0):
+        pieces.append((0.52, "three-candle bullish continuation"))
+    elif np.all(bodies3 < 0) and np.all(np.diff(closes3) < 0):
+        pieces.append((-0.52, "three-candle bearish continuation"))
+
+    prior = frame.iloc[:-1].tail(20)
+    prior_high = safe_float(prior["high"].max(), high)
+    prior_low = safe_float(prior["low"].min(), low)
+    atr = safe_float(last.get("atr14"), float((prior["high"] - prior["low"]).mean()))
+    atr = max(atr, px * 1e-5, 1e-9)
+    volume_z = safe_float(last.get("volume_z"), 0.0)
+    volume_boost = 1.15 if volume_z >= 1.0 else 1.0
+    if px > prior_high + 0.05 * atr:
+        pieces.append((0.62 * volume_boost, "range breakout"))
+    elif px < prior_low - 0.05 * atr:
+        pieces.append((-0.62 * volume_boost, "range breakdown"))
+
+    # Flag continuation: a clear impulse followed by a smaller opposing drift.
+    closes = frame["close"].astype(float).to_numpy()
+    impulse = closes[-5] - closes[-9]
+    pullback = closes[-1] - closes[-5]
+    if abs(impulse) >= 1.25 * atr and impulse * pullback < 0:
+        retrace = abs(pullback / impulse)
+        if 0.10 <= retrace <= 0.62:
+            pieces.append((0.46 if impulse > 0 else -0.46, "bull flag" if impulse > 0 else "bear flag"))
+
+    score = clamp(math.tanh(sum(value for value, _ in pieces)))
+    strongest = sorted(pieces, key=lambda row: abs(row[0]), reverse=True)[:4]
+    reason = "Completed-candle structures: " + ", ".join(label for _, label in strongest)
+    return score, reason
+
+
 def run_specialists_core(
     hist, agg, futures, kctx, research_snapshot=None, settlement_price=None
 ):
@@ -156,16 +239,8 @@ def run_specialists_core(
     volume_score = clamp(candle_dir * min(abs(volume_z) / 2.5, 1.0))
     out["Volume AI"] = _specialist("Volume AI", volume_score, f"Volume z-score {volume_z:.2f}")
 
-    body = last["close"] - last["open"]
-    rng = max(last["high"] - last["low"], 1e-9)
-    prev_body = prev["close"] - prev["open"]
-    engulf = 0.0
-    if body > 0 and prev_body < 0 and last["close"] >= prev["open"] and last["open"] <= prev["close"]:
-        engulf = 1.0
-    elif body < 0 and prev_body > 0 and last["open"] >= prev["close"] and last["close"] <= prev["open"]:
-        engulf = -1.0
-    pattern_score = clamp(0.55 * (body / rng) + 0.45 * engulf)
-    out["Pattern AI"] = _specialist("Pattern AI", pattern_score, "Candle body/engulfing structure")
+    pattern_score, pattern_reason = candle_structure_signal(hist)
+    out["Pattern AI"] = _specialist("Pattern AI", pattern_score, pattern_reason)
 
     support = safe_float(hist["low"].tail(60).min(), px)
     resistance = safe_float(hist["high"].tail(60).max(), px)

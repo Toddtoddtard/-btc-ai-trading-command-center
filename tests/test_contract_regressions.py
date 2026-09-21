@@ -681,6 +681,16 @@ def test_call_entry_card_uses_shared_ledger_not_local_sqlite_adapter():
     assert 'if normalized == "spot feed":' not in adapter
 
 
+def test_execution_validation_uses_persistent_shared_ledger():
+    app = Path("app.py").read_text()
+    section = app[app.index('st.subheader("Kalshi Execution Validation")'):]
+    section = section[:section.index("# ============================================================")]
+    assert "shared_paper_scorecard(_shared_paper)" in section
+    assert "shared_paper_summary(_shared_paper)" in section
+    assert "paper_performance_since_update(DB_PATH" not in section
+    assert 'v1.metric("Valid closed trades"' in section
+
+
 
 def test_background_paper_follows_explicit_master_action_source():
     from pathlib import Path

@@ -68,6 +68,21 @@ class SpecialistV5Tests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("LEARNING", reason)
 
+    def test_new_pattern_model_rejects_stale_historical_prior(self):
+        state = {
+            "pattern_structure_version": 2,
+            "historical_specialist_knowledge_v7": {
+                "pattern_structure_version": 1,
+                "specialists": {
+                    "Pattern AI": {"accuracy": 0.90, "directional_calls": 1000}
+                },
+            },
+            "specialist_history": {"Pattern AI": []},
+        }
+        posterior = specialist_posterior(state, "Pattern AI")
+        self.assertEqual(posterior["historical_samples"], 0)
+        self.assertIsNone(posterior["historical_accuracy"])
+
 
 if __name__ == "__main__":
     unittest.main()

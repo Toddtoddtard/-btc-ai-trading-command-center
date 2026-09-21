@@ -101,7 +101,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.20-r83-balanced-calls-80-lock"
+APP_VERSION = "2026.09.21-r84-truthful-accuracy-ledger-patterns"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -2110,6 +2110,8 @@ def get_learning_state():
                 "learning_rate": 0.08,
                 "samples": 0,
                 "direction_hits": 0,
+                "btc_move_samples": 0,
+                "btc_move_hits": 0,
                 "avg_abs_error": 0.0,
                 "avg_path_error": 0.0,
                 "kalshi_samples": 0,
@@ -2121,6 +2123,12 @@ def get_learning_state():
             state["direction_accuracy"] = (
                 state["direction_hits"] / state["samples"]
                 if state["samples"] else np.nan
+            )
+            state["btc_move_samples"] = int(state.get("btc_move_samples", 0))
+            state["btc_move_hits"] = int(state.get("btc_move_hits", 0))
+            state["btc_move_accuracy"] = (
+                state["btc_move_hits"] / state["btc_move_samples"]
+                if state["btc_move_samples"] else np.nan
             )
             state["horizon_models"] = remote.get("horizon_models", {})
             return state
@@ -3649,6 +3657,9 @@ render_market_guide()
 with st.expander("🧾 Recent Updates — Last 24 Hours", expanded=False):
     st.markdown(
         """
+- **Truthful accuracy labels:** official Kalshi settlement accuracy and BTC 15-minute movement accuracy are now graded and displayed separately; the prior mixed 57.8% label is retired without deleting historical learning.
+- **Expanded Pattern AI:** completed-candle analysis now recognizes engulfing candles, rejection wicks, three-candle continuation, range breakouts/breakdowns, and bull/bear flags; learned weighting still controls its influence.
+- **Persistent execution validation:** the Backtest scorecard now reads the shared GitHub paper ledger instead of Streamlit's temporary local database, so its closed-trade count agrees with Automatic Paper Trading.
 - **Continuous LOCK evaluation:** LOCK qualification is checked throughout the active 15-minute market instead of only at a single late-window moment.
 - **Three-market outlook:** the research layer now grades directional outlooks for the next three 15-minute markets to provide broader context without changing paper execution by itself.
 - **Authoritative Kalshi entry display:** selected-side paper fills come from the shared Kalshi ledger so the displayed entry percentage matches the actual recorded paper fill.
@@ -4963,17 +4974,27 @@ persistent_kalshi_market_chart(
 )
 
 if _learning_state["samples"] > 0:
-    _acc = _learning_state["direction_accuracy"] * 100
+    _kalshi_samples = int(_learning_state.get("kalshi_samples", 0))
+    _kalshi_accuracy = (
+        _learning_state.get("kalshi_hits", 0) / _kalshi_samples * 100.0
+        if _kalshi_samples else np.nan
+    )
+    _btc_move_samples = int(_learning_state.get("btc_move_samples", 0))
+    _btc_move_text = (
+        f"BTC 15m move accuracy {_learning_state.get('btc_move_hits', 0) / _btc_move_samples * 100:.1f}% "
+        f"({_btc_move_samples} new-format)"
+        if _btc_move_samples else "BTC 15m move accuracy collecting new-format results"
+    )
     st.caption(
         f"Self-learning model: {_learning_state['samples']} completed windows • "
-        f"next-close direction accuracy {_acc:.1f}% • "
+        + (
+            f"official Kalshi settlement accuracy {_kalshi_accuracy:.1f}% "
+            f"({_kalshi_samples} settled) • "
+            if _kalshi_samples else "official Kalshi settlement accuracy collecting • "
+        )
+        + _btc_move_text + " • "
         f"avg final-price error ${_learning_state['avg_abs_error']:,.2f} • "
         f"avg path error ${_learning_state['avg_path_error']:,.2f}"
-        + (
-            f" • Kalshi settlement-side accuracy {_learning_state.get('kalshi_hits', 0) / _learning_state.get('kalshi_samples', 1) * 100:.1f}% "
-            f"({_learning_state.get('kalshi_samples', 0)} settled)"
-            if _learning_state.get('kalshi_samples', 0) else ""
-        )
     )
 else:
     st.caption(
@@ -6370,13 +6391,16 @@ def live_dashboard():
             "at a time, and official Kalshi settlement. No overlapping BTC spot "
             "signals are presented as simulated Kalshi profit."
         )
-        validation = paper_performance_since_update(DB_PATH, STARTING_CASH)
-        validation_gate = scalp_profitability_gate(DB_PATH, STARTING_CASH)
+        # Streamlit's local SQLite file is ephemeral and previously made this
+        # card show only one trade. Use the same persistent GitHub ledger as
+        # the Automatic Paper Trading tab so counts and P/L cannot disagree.
+        validation, validation_gate = shared_paper_scorecard(_shared_paper)
+        lifetime_validation = shared_paper_summary(_shared_paper)
         # Keep the validation scorecard readable on the owner's iPhone. Five
         # equal columns compress the labels and values until they overlap, so
         # present the primary outcome metrics first and costs/risk below them.
         v1, v2, v3 = st.columns(3)
-        v1.metric("Closed trades", validation["samples"])
+        v1.metric("Valid closed trades", validation["samples"])
         v2.metric(
             "Win rate",
             "Learning" if validation["win_rate"] is None
@@ -6396,9 +6420,11 @@ def live_dashboard():
         st.info(
             f"{validation_gate['status']} • "
             f"{validation['samples']}/{validation['validation_sample_target']} "
-            "closed post-fix Kalshi trades collected."
+            "valid post-fix Kalshi trades collected from the persistent ledger."
         )
         st.caption(
+            f"Persistent paper equity: ${lifetime_validation['equity']:,.2f}. "
+            "VOID/ARCHIVED legacy rows are excluded from validation. "
             "Balanced-call mode is active. Directional calls are frequent, while only risk-approved "
             "SCALP or LOCK setups may enter the paper ledger. All specialists continue running, and "
             "blocked calls remain visible for learning and audit."

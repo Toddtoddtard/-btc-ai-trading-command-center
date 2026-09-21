@@ -33,6 +33,15 @@ def _history_rows(state, name):
 def _historical_prior(state, name, regime=None):
     state = state or {}
     report = state.get("historical_specialist_knowledge_v7", {}) or {}
+    if (
+        name == "Pattern AI"
+        and int(_f(state.get("pattern_structure_version"), 1)) >= 2
+        and int(_f(report.get("pattern_structure_version"), 1))
+            != int(_f(state.get("pattern_structure_version"), 1))
+    ):
+        # Historical scores from the prior candle-body-only detector are not
+        # evidence for the new multi-candle structure model.
+        return 0.50, 0
     specialists = report.get("specialists", {}) or {}
     holdout = report.get("holdout", {}) or {}
     if isinstance(holdout, dict) and isinstance(holdout.get("specialists"), dict):

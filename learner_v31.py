@@ -12,7 +12,7 @@ import pandas as pd
 
 import learner as legacy
 import learner_v3 as v3
-from ai_core import forecast_path_core
+from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from forward_outlook import build_next_market_outlooks
 from horizon_models import (
     baseline_probabilities,
@@ -50,6 +50,32 @@ LOCK_GATE_COUNTERFACTUAL_THRESHOLDS = (0.64, 0.66, 0.68, 0.70, 0.72, 0.80)
 def ensure_v31(state):
     state = v3.ensure_v3(state)
     state["version"] = 31
+    if int(state.get("pattern_structure_version", 1)) != PATTERN_STRUCTURE_VERSION:
+        old_pattern = dict((state.get("specialists", {}) or {}).get("Pattern AI", {}) or {})
+        old_rows = list((state.get("specialist_history", {}) or {}).get("Pattern AI", []) or [])
+        state.setdefault("model_migration_history", []).append({
+            "model": "Pattern AI",
+            "from_version": int(state.get("pattern_structure_version", 1)),
+            "to_version": PATTERN_STRUCTURE_VERSION,
+            "prior_samples": int(old_pattern.get("samples", 0) or 0),
+            "prior_hits": int(old_pattern.get("direction_hits", 0) or 0),
+            "prior_history_rows": len(old_rows),
+            "reason": "FEATURE_DEFINITION_CHANGED_TO_MULTI_CANDLE_STRUCTURE",
+        })
+        state["model_migration_history"] = state["model_migration_history"][-20:]
+        state.setdefault("specialist_history", {})["Pattern AI"] = []
+        state.setdefault("specialists", {})["Pattern AI"] = {
+            "adaptive_weight": 0.70,
+            "samples": 0,
+            "direction_hits": 0,
+            "ewma_accuracy": 0.5,
+            "ewma_edge": 0.0,
+            "ewma_calibration": 0.0,
+            "reward_points": 0.0,
+            "reward_ewma": 0.0,
+            "rewarded_correct_calls": 0,
+        }
+        state["pattern_structure_version"] = PATTERN_STRUCTURE_VERSION
     state.setdefault("champion_challenger", {})
     state.setdefault("data_quality", {})
     state.setdefault("wait_counterfactual", {"samples": 0, "profitable_waits": 0, "avoided_losses": 0})
@@ -69,6 +95,7 @@ def ensure_v31(state):
         "maximum_entry_price": LOCK_MAX_ENTRY_PRICE,
     }
     state["status"].setdefault("learning_version", 31)
+    state["status"]["pattern_structure_version"] = PATTERN_STRUCTURE_VERSION
     ensure_research_lab(state)
     ensure_horizon_state(state)
     return state

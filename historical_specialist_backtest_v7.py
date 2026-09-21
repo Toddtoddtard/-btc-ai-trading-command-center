@@ -21,7 +21,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 import pandas as pd
 
-from ai_core import enrich_history_core, run_specialists_core
+from ai_core import PATTERN_STRUCTURE_VERSION, enrich_history_core, run_specialists_core
 from council_v4 import council_vote
 from reliability_v31 import detect_regime
 
@@ -251,6 +251,7 @@ def main():
 
     report = {
         "version": 10,
+        "pattern_structure_version": PATTERN_STRUCTURE_VERSION,
         "methodology": "fresh-row-only cross-month walk-forward with final-period holdout and live-like OHLCV qualification",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source": "Binance Vision monthly BTCUSDT 1m archives",

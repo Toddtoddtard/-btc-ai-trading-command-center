@@ -80,6 +80,8 @@ def fresh():
             "learning_rate": 0.08,
             "samples": 0,
             "direction_hits": 0,
+            "btc_move_samples": 0,
+            "btc_move_hits": 0,
             "avg_abs_error": 0.0,
             "avg_path_error": 0.0,
             "kalshi_samples": 0,
@@ -369,6 +371,21 @@ def register(state, df, market_info):
     return True
 
 
+def score_forecast_outcome(start, target, predicted_end, predicted_direction, actual):
+    """Score BTC movement and Kalshi settlement as two distinct questions."""
+    predicted_move = 1 if int(predicted_direction or 0) > 0 else -1 if int(predicted_direction or 0) < 0 else 0
+    actual_move = 1 if actual > start else -1 if actual < start else 0
+    predicted_settlement = 1 if predicted_end >= target else -1
+    actual_settlement = 1 if actual >= target else -1
+    return {
+        "btc_move_correct": int(predicted_move != 0 and predicted_move == actual_move),
+        "btc_move_direction": actual_move,
+        "settlement_correct": int(predicted_settlement == actual_settlement),
+        "settlement_direction": actual_settlement,
+        "predicted_settlement_direction": predicted_settlement,
+    }
+
+
 def grade(state, df):
     pending = state.get("pending")
     if not pending or time.time() < pending["expires_at"]:
@@ -380,10 +397,14 @@ def grade(state, df):
     start = float(pending["start_price"])
     predicted_end = float(pending["predicted_end"])
     target = float(pending.get("target", start))
-    # Kalshi KXBTC15M direction is defined by settlement versus the contract
-    # target/strike, not simply whether BTC rose or fell from the window open.
-    actual_direction = 1 if actual >= target else -1
-    direction_correct = int(actual_direction == int(pending["predicted_direction"]))
+    outcome = score_forecast_outcome(
+        start, target, predicted_end, pending.get("predicted_direction"), actual
+    )
+    # Specialist and Master rewards answer the Kalshi question: settlement
+    # above/below the strike. BTC movement from the opening price is tracked
+    # separately so the dashboard never combines two different labels again.
+    actual_direction = outcome["settlement_direction"]
+    direction_correct = outcome["settlement_correct"]
     master_reward = time_reward(
         pending.get("opened_at"),
         pending.get("expires_at"),
@@ -430,6 +451,8 @@ def grade(state, df):
 
     forecast_state["samples"] += 1
     forecast_state["direction_hits"] += direction_correct
+    forecast_state["btc_move_samples"] = int(forecast_state.get("btc_move_samples", 0)) + 1
+    forecast_state["btc_move_hits"] = int(forecast_state.get("btc_move_hits", 0)) + outcome["btc_move_correct"]
     sample_count = forecast_state["samples"]
     forecast_state["avg_abs_error"] = abs_error if sample_count == 1 else forecast_state["avg_abs_error"] + (abs_error - forecast_state["avg_abs_error"]) / sample_count
     forecast_state["avg_path_error"] = path_error if sample_count == 1 else forecast_state["avg_path_error"] + (path_error - forecast_state["avg_path_error"]) / sample_count
@@ -438,6 +461,9 @@ def grade(state, df):
         "ticker": pending["ticker"],
         "expires_at": pending["expires_at"],
         "direction_correct": direction_correct,
+        "btc_move_correct": outcome["btc_move_correct"],
+        "btc_move_direction": outcome["btc_move_direction"],
+        "predicted_settlement_direction": outcome["predicted_settlement_direction"],
         "abs_error": abs_error,
         "path_error": path_error,
         "kalshi_correct": None,
