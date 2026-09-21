@@ -105,7 +105,7 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.21-r85-ui-truth-derivatives-fallback"
+APP_VERSION = "2026.09.21-r86-ui-truth-derivatives-fallback"
 
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
@@ -5517,8 +5517,9 @@ def live_dashboard():
         c1.metric("RSI 14", f"{safe_float(last['rsi'], 50):.1f}")
         c2.metric("ATR 14", f"${safe_float(last['atr14'], 0):,.2f}")
         c3.metric(
-            "24h quote volume",
+            "BTC 24h Volume",
             f"${safe_float(ticker.get('quote_volume_24h'), 0):,.0f}",
+            help="Live Binance BTC quote volume over 24 hours; this is not an AI accuracy statistic.",
         )
         c4.metric(
             "Kalshi target",

@@ -9,6 +9,7 @@ class TruthfulDashboardLabelTests(unittest.TestCase):
 
     def test_top_market_change_is_not_labeled_as_accuracy(self):
         self.assertIn('"BTC 24h Change"', self.source)
+        self.assertIn('"BTC 24h Volume"', self.source)
         self.assertNotIn('"Lifetime Accuracy"', self.source)
 
     def test_signal_journal_is_distinct_from_paper_ledger(self):
