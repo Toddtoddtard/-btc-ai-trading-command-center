@@ -184,6 +184,7 @@ jobs:
           assert data.get('horizon_models', {}).get('paper_only') is True
           assert data.get('status', {}).get('horizon_models_paper_only') is True
           assert data.get('horizon_models', {}).get('version') == 2
+          assert data.get('horizon_models', {}).get('minimum_directional_accuracy') == 0.70
           assert data.get('status', {}).get('higher_timeframes_requested') == 7
           context=data.get('horizon_models', {}).get('latest_context', {})
           assert len(context.get('features', {})) == 7

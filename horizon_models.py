@@ -27,6 +27,7 @@ FEATURE_NAMES = BASE_FEATURE_NAMES + CONTEXT_FEATURE_NAMES
 MODEL_VERSION = 2
 MIN_LIVE_SAMPLES = 200
 PROMOTION_REQUIRED_STREAK = 3
+MIN_DIRECTIONAL_ACCURACY = 0.70
 MIN_BRIER_EDGE = 0.005
 MIN_RECENT_BRIER_EDGE = 0.003
 MAX_PENDING = 120
@@ -161,6 +162,7 @@ def ensure_horizon_state(state):
     root.setdefault("affects_execution", False)
     root.setdefault("minimum_live_samples", MIN_LIVE_SAMPLES)
     root.setdefault("required_streak", PROMOTION_REQUIRED_STREAK)
+    root["minimum_directional_accuracy"] = MIN_DIRECTIONAL_ACCURACY
     root.setdefault("pending", [])
     root.setdefault("last_registered_minute", None)
     models = root.setdefault("models", {})
@@ -311,20 +313,28 @@ def _evaluate_promotion(model):
         and samples >= MIN_LIVE_SAMPLES
         and baseline_brier - brier >= MIN_BRIER_EDGE
         and recent_baseline - recent_brier >= MIN_RECENT_BRIER_EDGE
+        and accuracy >= MIN_DIRECTIONAL_ACCURACY
         and accuracy >= baseline_accuracy
     )
     streak = int(model.get("qualification_streak", 0)) + 1 if qualifies else 0
     model["qualification_streak"] = streak
     if streak >= PROMOTION_REQUIRED_STREAK:
         model["enabled"] = True
-    if model.get("enabled") and len(recent) >= 50 and recent_brier - recent_baseline > 0.01:
-        model["enabled"] = False
-        model["qualification_streak"] = 0
-        model["disabled_reason"] = "Recent Brier score fell behind the baseline"
+    if model.get("enabled"):
+        disabled_reason = None
+        if accuracy < MIN_DIRECTIONAL_ACCURACY:
+            disabled_reason = "Directional accuracy fell below the 70% execution floor"
+        elif len(recent) >= 50 and recent_brier - recent_baseline > 0.01:
+            disabled_reason = "Recent Brier score fell behind the baseline"
+        if disabled_reason:
+            model["enabled"] = False
+            model["qualification_streak"] = 0
+            model["disabled_reason"] = disabled_reason
     model["metrics"] = {
         "samples": samples,
         "accuracy": accuracy,
         "baseline_accuracy": baseline_accuracy,
+        "minimum_directional_accuracy": MIN_DIRECTIONAL_ACCURACY,
         "brier": brier,
         "baseline_brier": baseline_brier,
         "brier_edge": baseline_brier - brier,

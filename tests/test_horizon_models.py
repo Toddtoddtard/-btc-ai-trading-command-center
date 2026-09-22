@@ -5,6 +5,9 @@ import pandas as pd
 
 from horizon_models import (
     FEATURE_NAMES,
+    MIN_DIRECTIONAL_ACCURACY,
+    _evaluate_promotion,
+    default_model,
     ensure_horizon_state,
     feature_vector,
     register_horizon_predictions,
@@ -79,6 +82,66 @@ class HorizonModelTests(unittest.TestCase):
             model["enabled"] = False
             model["historical_validated"] = False
         self.assertFalse(root["affects_execution"])
+
+    def test_model_below_seventy_percent_accuracy_stays_shadow_only(self):
+        model = default_model(15)
+        model.update({
+            "historical_validated": True,
+            "samples": 200,
+            "hits": 120,
+            "baseline_hits": 100,
+            "brier_sum": 40.0,
+            "baseline_brier_sum": 50.0,
+            "recent": [
+                {"brier": .20, "baseline_brier": .25, "hit": 1, "baseline_hit": 1}
+                for _ in range(50)
+            ],
+        })
+        for _ in range(4):
+            self.assertFalse(_evaluate_promotion(model))
+        self.assertFalse(model["enabled"])
+        self.assertEqual(model["qualification_streak"], 0)
+        self.assertEqual(model["metrics"]["minimum_directional_accuracy"], .70)
+
+    def test_model_needs_three_seventy_percent_qualifying_evaluations(self):
+        model = default_model(15)
+        model.update({
+            "historical_validated": True,
+            "samples": 200,
+            "hits": int(200 * MIN_DIRECTIONAL_ACCURACY),
+            "baseline_hits": 100,
+            "brier_sum": 40.0,
+            "baseline_brier_sum": 50.0,
+            "recent": [
+                {"brier": .20, "baseline_brier": .25, "hit": 1, "baseline_hit": 1}
+                for _ in range(50)
+            ],
+        })
+        self.assertTrue(_evaluate_promotion(model))
+        self.assertFalse(model["enabled"])
+        self.assertTrue(_evaluate_promotion(model))
+        self.assertFalse(model["enabled"])
+        self.assertTrue(_evaluate_promotion(model))
+        self.assertTrue(model["enabled"])
+
+    def test_enabled_model_is_disabled_below_seventy_percent_accuracy(self):
+        model = default_model(15)
+        model.update({
+            "enabled": True,
+            "historical_validated": True,
+            "samples": 200,
+            "hits": 139,
+            "baseline_hits": 100,
+            "brier_sum": 40.0,
+            "baseline_brier_sum": 50.0,
+            "recent": [
+                {"brier": .20, "baseline_brier": .25, "hit": 1, "baseline_hit": 1}
+                for _ in range(50)
+            ],
+        })
+        self.assertFalse(_evaluate_promotion(model))
+        self.assertFalse(model["enabled"])
+        self.assertIn("70%", model["disabled_reason"])
 
     def test_kalshi_bid_only_book_is_reconstructed(self):
         features = orderbook_features({
