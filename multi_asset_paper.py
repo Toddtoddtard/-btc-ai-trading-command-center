@@ -44,9 +44,13 @@ BASE_SPECIALISTS = (
 
 STARTING_CASH = 500.0
 POSITION_FRACTION = 0.05
+PROBATION_POSITION_FRACTION = 0.02
 FEE_RATE = 0.00065
 MIN_CONFIDENCE = 0.66
 MIN_CONSENSUS = 0.60
+PROBATION_MIN_CONFIDENCE = 0.75
+PROBATION_MIN_CONSENSUS = 0.70
+PROBATION_MIN_TRADES = 50
 MAX_HOLD_SECONDS = 15 * 60
 REENTRY_COOLDOWN_SECONDS = 60
 HISTORY_LIMIT = 250
@@ -243,12 +247,14 @@ def default_asset_state():
         "last_action": "WAIT",
         "last_message": "AUTO PAPER ready.",
         "history": [],
+        "risk_mode": "LEARNING",
+        "risk_reason": "Collecting initial paper evidence.",
     }
 
 
 def ensure_multi_asset_state(root):
     multi = root.setdefault("multi_asset_paper", {})
-    multi["version"] = 1
+    multi["version"] = 2
     multi["paper_only"] = True
     multi["real_money_execution"] = False
     multi["enabled"] = True
@@ -269,6 +275,65 @@ def _position_return(bucket, price):
         return 0.0
     raw = (price / entry) - 1.0
     return raw if bucket["side"] == "LONG" else -raw
+
+
+def performance_risk_mode(bucket):
+    """Return adaptive paper-entry controls from the asset's own settled ledger.
+
+    Losing ledgers keep learning, but only through smaller, higher-quality paper
+    entries. Existing positions are always managed normally so this gate cannot
+    strand a simulated trade.
+    """
+    history = list(bucket.get("history") or [])
+    samples = int(bucket.get("trades") or len(history))
+    if samples < PROBATION_MIN_TRADES:
+        return {
+            "mode": "LEARNING",
+            "reason": f"Collecting evidence ({samples}/{PROBATION_MIN_TRADES} settled trades).",
+            "position_fraction": POSITION_FRACTION,
+            "min_confidence": MIN_CONFIDENCE,
+            "min_consensus": MIN_CONSENSUS,
+        }
+
+    recent = history[-min(PROBATION_MIN_TRADES, len(history)):]
+    recent_pnl = sum(_safe_float(row.get("net_pnl"), 0.0) for row in recent)
+    recent_wins = sum(1 for row in recent if _safe_float(row.get("net_pnl"), 0.0) > 0)
+    recent_win_rate = recent_wins / len(recent) if recent else 0.0
+    gross_wins = sum(
+        max(0.0, _safe_float(row.get("net_pnl"), 0.0)) for row in recent
+    )
+    gross_losses = abs(sum(
+        min(0.0, _safe_float(row.get("net_pnl"), 0.0)) for row in recent
+    ))
+    recent_profit_factor = gross_wins / gross_losses if gross_losses > 0 else float("inf")
+    lifetime_pnl = _safe_float(bucket.get("realized"), 0.0)
+    # Profitability matters more than raw hit rate because targets and stops
+    # are asymmetric. A sub-50% strategy may still be sound when its winners
+    # are materially larger than its losses.
+    losing = lifetime_pnl <= 0.0 or recent_pnl <= 0.0 or recent_profit_factor < 1.05
+    if losing:
+        return {
+            "mode": "PROBATION",
+            "reason": (
+                f"Ledger is not proven: lifetime P/L {lifetime_pnl:+.2f}, "
+                f"recent P/L {recent_pnl:+.2f}, recent PF {recent_profit_factor:.2f}, "
+                f"recent wins {recent_win_rate:.0%}."
+            ),
+            "position_fraction": PROBATION_POSITION_FRACTION,
+            "min_confidence": PROBATION_MIN_CONFIDENCE,
+            "min_consensus": PROBATION_MIN_CONSENSUS,
+        }
+    return {
+        "mode": "STANDARD",
+        "reason": (
+            f"Positive paper evidence: lifetime P/L {lifetime_pnl:+.2f}, "
+            f"recent P/L {recent_pnl:+.2f}, recent PF {recent_profit_factor:.2f}, "
+            f"recent wins {recent_win_rate:.0%}."
+        ),
+        "position_fraction": POSITION_FRACTION,
+        "min_confidence": MIN_CONFIDENCE,
+        "min_consensus": MIN_CONSENSUS,
+    }
 
 
 def paper_cycle(bucket, price, decision, atr_pct, now=None, feed_fresh=True):
@@ -292,6 +357,9 @@ def paper_cycle(bucket, price, decision, atr_pct, now=None, feed_fresh=True):
     consensus = _safe_float(decision.get("consensus"), 0.0)
     target_pct = float(np.clip(max(0.004, atr_pct * 1.25), 0.004, 0.025))
     stop_pct = float(np.clip(max(0.003, atr_pct * 0.75), 0.003, 0.015))
+    risk = performance_risk_mode(bucket)
+    bucket["risk_mode"] = risk["mode"]
+    bucket["risk_reason"] = risk["reason"]
 
     if side in {"LONG", "SHORT"}:
         held = max(0.0, now - _safe_float(bucket.get("opened_at"), now))
@@ -363,11 +431,11 @@ def paper_cycle(bucket, price, decision, atr_pct, now=None, feed_fresh=True):
 
     if (
         action in {"SCALP UP", "SCALP DOWN"}
-        and confidence >= MIN_CONFIDENCE
-        and consensus >= MIN_CONSENSUS
+        and confidence >= risk["min_confidence"]
+        and consensus >= risk["min_consensus"]
     ):
         cash = max(0.0, _safe_float(bucket.get("cash"), STARTING_CASH))
-        notional = cash * POSITION_FRACTION
+        notional = cash * risk["position_fraction"]
         if notional <= 0:
             bucket["last_message"] = "AUTO PAPER paused: simulated cash exhausted."
             return "WAIT"
@@ -388,6 +456,14 @@ def paper_cycle(bucket, price, decision, atr_pct, now=None, feed_fresh=True):
             ),
         )
         return "OPEN"
+
+    if risk["mode"] == "PROBATION" and action in {"SCALP UP", "SCALP DOWN"}:
+        bucket["last_message"] = (
+            "AUTO PAPER probation blocked entry: requires "
+            f"{risk['min_confidence']:.0%} confidence and "
+            f"{risk['min_consensus']:.0%} consensus."
+        )
+        return "PROBATION"
 
     bucket["last_message"] = "AUTO PAPER scanning; no approved council entry."
     return "WAIT"

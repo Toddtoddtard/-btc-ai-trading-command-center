@@ -11,7 +11,7 @@ def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
-def require_owner_approval():
+def require_owner_approval(build_version=None):
     """Block the app unless a user enters an owner-issued access code.
 
     Codes are stored only in Streamlit secrets under [access_codes].
@@ -27,6 +27,8 @@ def require_owner_approval():
 
     st.title("🔒 Private Access")
     st.caption("This BTC AI Command Center is private. Access requires approval from the owner.")
+    if build_version:
+        st.caption(f"Deployed build: {build_version}")
 
     failures = int(st.session_state.get("access_failures", 0))
     locked_until = float(st.session_state.get("access_locked_until", 0.0))

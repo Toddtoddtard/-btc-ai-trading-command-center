@@ -178,6 +178,9 @@ jobs:
           assert mode.get('maximum_entry_price') == 0.75
           assert data.get('status', {}).get('btc_execution_mode') == 'BALANCED_CALLS'
           assert data.get('status', {}).get('auto_scalping_enabled') is True
+          assert data.get('status', {}).get('schedule_target_minutes') == 10.0
+          assert data.get('status', {}).get('schedule_late_after_minutes') == 20.0
+          assert data.get('status', {}).get('scheduler') == 'GitHub Actions best effort'
           assert data.get('status', {}).get('continuous_lock_evaluation') is True
           assert isinstance(data.get('lock_gate_history', []), list)
           assert data.get('lock_gate_stats', {}).get('paper_only') is True
@@ -216,12 +219,14 @@ jobs:
           assert data.get('background_paper', {}).get('paper_only') is True
           assert data.get('background_paper', {}).get('worker_ok') is True
           multi=data.get('multi_asset_paper', {})
+          assert multi.get('version') == 2
           assert multi.get('paper_only') is True
           assert multi.get('real_money_execution') is False
           assert multi.get('enabled') is True
           assert set(multi.get('assets', {})) == {'gold', 'gas', 'zec', 'wti'}
           assert all(row.get('enabled') is True for row in multi.get('assets', {}).values())
           assert all(row.get('starting_cash') == 500.0 for row in multi.get('assets', {}).values())
+          assert all(row.get('risk_mode') in {'LEARNING', 'STANDARD', 'PROBATION'} for row in multi.get('assets', {}).values())
           assert isinstance(data.get('bot_intelligence_v4', {}).get('ranking', []), list)
           assert 'specialist_knowledge_v5' in data
           assert isinstance(data.get('specialist_knowledge_v5', {}).get('bots', {}), dict)

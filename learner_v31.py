@@ -632,8 +632,33 @@ def refresh_pending_lock_focus(state, live_call, market_info):
     return True
 
 
+def cadence_health(previous_updated_at, now):
+    """Describe the observed unattended interval without claiming exact cron timing."""
+    target_minutes = 10.0
+    late_after_minutes = 20.0
+    observed = None
+    if previous_updated_at:
+        try:
+            previous = datetime.fromisoformat(
+                str(previous_updated_at).replace("Z", "+00:00")
+            )
+            if previous.tzinfo is None:
+                previous = previous.replace(tzinfo=timezone.utc)
+            observed = max(0.0, (now - previous).total_seconds() / 60.0)
+        except (TypeError, ValueError):
+            observed = None
+    return {
+        "schedule_target_minutes": target_minutes,
+        "schedule_late_after_minutes": late_after_minutes,
+        "observed_interval_minutes": observed,
+        "schedule_late": observed is not None and observed > late_after_minutes,
+        "scheduler": "GitHub Actions best effort",
+    }
+
+
 def main():
     state = ensure_v31(load_previous_state())
+    previous_updated_at = state.get("updated_at")
     before_samples = int(state.get("forecast", {}).get("samples", 0))
     df = legacy.history()
     market_info = legacy.market()
@@ -683,7 +708,8 @@ def main():
     champion_challenger(state, df)
     update_wait_counterfactual(state)
     update_lifecycles(state)
-    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    updated_now = datetime.now(timezone.utc)
+    state["updated_at"] = updated_now.isoformat()
     current_regime = detect_regime(df)
     state["status"].update({
         "worker_ok": True,
@@ -717,6 +743,7 @@ def main():
         "samples_after_run": int(state.get("forecast", {}).get("samples", 0)),
         "current_regime": current_regime,
         "regime_tagged_specialist_history": True,
+        **cadence_health(previous_updated_at, updated_now),
     })
     legacy.OUT.parent.mkdir(parents=True, exist_ok=True)
     legacy.OUT.write_text(json.dumps(state, indent=2, sort_keys=True))
