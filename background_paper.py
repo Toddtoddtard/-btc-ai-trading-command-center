@@ -88,8 +88,86 @@ def initial_state(now=None):
         "last_signal_at": None,
         "last_signal_message": "No approved signal has reached execution yet.",
         "signal_attempts": [],
+        "ledger_events": [],
+        "reconciliation": {"ok": True, "issues": [], "cash_difference": 0.0},
         "worker_ok": True,
     }
+
+
+def _position_key(position):
+    return f"{position.get('ticker', '')}:{_f(position.get('opened_at'), 0.0):.6f}"
+
+
+def _record_ledger_event(paper, event_type, position, now, **details):
+    """Append an idempotent immutable lifecycle event to the shared ledger."""
+    if not isinstance(position, dict):
+        return False
+    event_id = f"{str(event_type).upper()}:{_position_key(position)}"
+    events = paper.setdefault("ledger_events", [])
+    if any(event.get("event_id") == event_id for event in events if isinstance(event, dict)):
+        return False
+    event = {
+        "event_id": event_id,
+        "event_type": str(event_type).upper(),
+        "position_key": _position_key(position),
+        "ticker": str(position.get("ticker") or ""),
+        "at": float(now),
+        "at_utc": _now_iso(now),
+    }
+    event.update({key: value for key, value in details.items() if value is not None})
+    events.append(event)
+    del events[:-2000]
+    return True
+
+
+def reconcile_shared_paper_ledger(paper, tolerance=0.011):
+    """Rebuild cash from lifecycle rows and report duplicates/inconsistencies."""
+    paper = paper if isinstance(paper, dict) else {}
+    issues = []
+    closed = [
+        row for row in paper.get("trades", [])
+        if isinstance(row, dict) and str(row.get("status", "CLOSED")).upper() == "CLOSED"
+    ]
+    closed_keys = {_position_key(row) for row in closed}
+    active = []
+    if isinstance(paper.get("open_position"), dict):
+        active.append(paper["open_position"])
+    active.extend(row for row in paper.get("pending_settlements", []) if isinstance(row, dict))
+    active = [row for row in active if _position_key(row) not in closed_keys]
+
+    keys = [_position_key(row) for row in closed]
+    duplicates = sorted({key for key in keys if keys.count(key) > 1})
+    if duplicates:
+        issues.append("duplicate closed positions: " + ", ".join(duplicates[:5]))
+    if sum(str(row.get("status", "OPEN")).upper() == "OPEN" for row in active) > 1:
+        issues.append("more than one open position")
+
+    expected_cash = _f(paper.get("starting_cash"), STARTING_CASH) + _f(
+        paper.get("legacy_realized_pnl"), 0.0
+    )
+    for row in closed:
+        expected_cash -= _f(row.get("amount"), 0.0)
+        expected_cash += max(0, int(_f(row.get("contracts"), 0))) * _f(
+            row.get("exit_price"), 0.0
+        ) - _f(row.get("exit_fee"), 0.0)
+    for row in active:
+        expected_cash -= _f(row.get("amount"), 0.0)
+    actual_cash = _f(paper.get("cash"), expected_cash)
+    difference = actual_cash - expected_cash
+    if abs(difference) > float(tolerance):
+        issues.append(f"cash differs from ledger by ${difference:+.2f}")
+    result = {
+        "ok": not issues,
+        "issues": issues,
+        "expected_cash": expected_cash,
+        "actual_cash": actual_cash,
+        "cash_difference": difference,
+        "closed_positions": len(closed),
+        "active_positions": len(active),
+        "event_count": len(paper.get("ledger_events", [])),
+    }
+    paper["reconciliation"] = result
+    return result
 
 
 def _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, outcome, now):
@@ -270,6 +348,7 @@ def shared_paper_summary(paper):
     wins = [pnl for pnl in all_known_pnls if pnl > 0]
     losses = [pnl for pnl in all_known_pnls if pnl < 0]
     equity = starting_cash + realized + unrealized
+    reconciliation = reconcile_shared_paper_ledger(paper)
     return {
         "cash": _f(paper.get("cash"), starting_cash + realized),
         "starting_cash": starting_cash,
@@ -292,6 +371,8 @@ def shared_paper_summary(paper):
         "open_position": open_position,
         "pending_settlements": len(paper.get("pending_settlements", [])),
         "ledger_source": "github-learning-state",
+        "ledger_reconciled": bool(reconciliation.get("ok")),
+        "ledger_issues": list(reconciliation.get("issues") or []),
     }
 
 
@@ -476,6 +557,17 @@ def _close(paper, position, exit_price, reason, now, charge_fee=True):
     ):
         paper["open_position"] = None
     paper.setdefault("rearm", {})[position["ticker"] + ":" + position["side"]] = False
+    _record_ledger_event(
+        paper,
+        "SETTLED" if str(reason).startswith("OFFICIAL_SETTLEMENT:") else "CLOSED",
+        trade,
+        now,
+        exit_price=exit_price,
+        exit_fee=exit_fee,
+        pnl=pnl,
+        reason=reason,
+    )
+    reconcile_shared_paper_ledger(paper)
     paper["last_message"] = (
         f"Settled PAPER {position['strategy']} {position['side']} "
         f"@ {exit_price*100:.0f}% | P/L ${pnl:+.2f}"
@@ -835,6 +927,11 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 )
                 paper.setdefault("pending_settlements", []).append(ended)
                 paper["open_position"] = None
+                _record_ledger_event(
+                    paper, "PENDING_SETTLEMENT", ended, now,
+                    boundary=boundary,
+                )
+                reconcile_shared_paper_ledger(paper)
                 paper["last_message"] = "Window ended — settlement pending: " + ticker
             paper["metrics"] = _post_fix_metrics(paper)
             paper["gate"] = _gate(paper["metrics"])
@@ -1018,6 +1115,11 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     position = {"ticker": ticker, "side": side, "direction": "UP" if side == "YES" else "DOWN", "strategy": strategy, "status": "OPEN", "opened_at": now, "expires_at": expires, "entry_price": ask, "spot_entry_price": _f(pending.get("start_price")), "contracts": contracts, "entry_fee": fee, "amount": amount, "last_mark": bid}
     paper["cash"] -= amount
     paper["open_position"] = position
+    _record_ledger_event(
+        paper, "OPENED", position, now,
+        entry_price=ask, entry_fee=fee, contracts=contracts, amount=amount,
+    )
+    reconcile_shared_paper_ledger(paper)
     message = f"Opened PAPER {strategy} {position['direction']} • Amount: ${amount:.2f} • Kalshi entry: {ask*100:.0f}%"
     _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, "OPENED", now)
     return paper

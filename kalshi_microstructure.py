@@ -61,6 +61,18 @@ def orderbook_features(payload, depth=5):
         microprice = (
             yes_ask * best_yes_size + yes_bid * best_no_size
         ) / best_total
+    top_imbalance = (
+        (best_yes_size - best_no_size) / best_total if best_total else 0.0
+    )
+    weighted_yes = sum(quantity / (index + 1.0) for index, (_, quantity) in enumerate(yes[:depth]))
+    weighted_no = sum(quantity / (index + 1.0) for index, (_, quantity) in enumerate(no[:depth]))
+    weighted_total = weighted_yes + weighted_no
+    weighted_depth_imbalance = (
+        (weighted_yes - weighted_no) / weighted_total if weighted_total else 0.0
+    )
+    depth_concentration = (
+        best_total / total_depth if total_depth else 0.0
+    )
     return {
         "yes_bid": yes_bid,
         "yes_ask": yes_ask,
@@ -71,7 +83,19 @@ def orderbook_features(payload, depth=5):
         "yes_depth_top5": yes_depth,
         "no_depth_top5": no_depth,
         "depth_imbalance": depth_imbalance,
+        "top_level_imbalance": top_imbalance,
+        "weighted_depth_imbalance": weighted_depth_imbalance,
+        "depth_concentration": depth_concentration,
         "microprice": microprice,
+        "microprice_edge": (
+            microprice - midpoint
+            if microprice is not None and midpoint is not None else 0.0
+        ),
+        # A YES ask consumes the best NO bid, and vice versa, in a binary book.
+        "yes_bid_size": best_yes_size,
+        "yes_ask_size": best_no_size,
+        "no_bid_size": best_no_size,
+        "no_ask_size": best_yes_size,
         "levels": len(yes) + len(no),
         "available": bool(yes or no),
     }

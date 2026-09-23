@@ -153,6 +153,9 @@ class HorizonModelTests(unittest.TestCase):
         self.assertAlmostEqual(features["yes_bid"], .47)
         self.assertAlmostEqual(features["yes_ask"], .49)
         self.assertAlmostEqual(features["spread"], .02)
+        self.assertIn("weighted_depth_imbalance", features)
+        self.assertIn("microprice_edge", features)
+        self.assertAlmostEqual(features["yes_ask_size"], 12.0)
         self.assertTrue(features["available"])
 
 

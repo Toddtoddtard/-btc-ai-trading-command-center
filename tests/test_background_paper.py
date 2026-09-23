@@ -29,6 +29,21 @@ import background_paper as bg
 
 
 class BackgroundPaperTests(unittest.TestCase):
+    def test_ledger_events_are_idempotent_and_cash_reconciles(self):
+        paper = bg.initial_state(now=1000)
+        position = {
+            "ticker": "KXBTC15M-A", "opened_at": 1000.0,
+            "status": "OPEN", "amount": 10.0, "contracts": 20,
+        }
+        paper["open_position"] = position
+        paper["cash"] -= 10.0
+        self.assertTrue(bg._record_ledger_event(paper, "OPENED", position, 1000))
+        self.assertFalse(bg._record_ledger_event(paper, "OPENED", position, 1001))
+        result = bg.reconcile_shared_paper_ledger(paper)
+        self.assertTrue(result["ok"])
+        paper["cash"] += 1.0
+        self.assertFalse(bg.reconcile_shared_paper_ledger(paper)["ok"])
+
     def pending(self, **updates):
         p = {"ticker": "KXBTC15M-TEST", "expires_at": 2000, "start_price": 100000, "predicted_end": 100300, "target": 100000, "predicted_direction": 1, "master_confidence": .70, "would_wait": False}
         p.update(updates)

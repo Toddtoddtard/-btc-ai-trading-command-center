@@ -84,6 +84,18 @@ def ensure_research_lab(state):
     lab.setdefault("pending", [])
     lab.setdefault("history", [])
     lab.setdefault("calibration", {"samples": 0, "model_brier": None, "market_brier": None})
+    lab.setdefault("window_scorecard", {
+        "independent_markets": 0,
+        "directional_accuracy": None,
+        "model_brier": None,
+        "contract_brier": None,
+        "guarded_brier": None,
+        "market_brier": None,
+        "model_edge_vs_market": None,
+        "contract_edge_vs_market": None,
+        "log_loss": None,
+        "calibration_bins": [],
+    })
     calibration = lab["calibration"]
     calibration.setdefault("guarded", {
         "samples": 0,
@@ -343,6 +355,11 @@ def register_shadow(state, pending, market_info):
         "guarded_yes_probability": model_yes,
         "probability_model_version": "guarded-market-residual-v1",
         "calibrator_active": bool(calibrator.get("active")),
+        "contract_probability_up": _f(pending.get("contract_probability_up")),
+        "contract_probability_edge": _f(pending.get("contract_probability_edge")),
+        "strike_distance_sigma": _f(pending.get("strike_distance_sigma")),
+        "microstructure_signal": _f(pending.get("microstructure_signal"), 0.0),
+        "late_window_stress": bool(pending.get("late_window_stress", False)),
         "market_yes_probability": market_yes,
         "yes_ask": yes_ask,
         "no_ask": no_ask,
@@ -357,6 +374,83 @@ def register_shadow(state, pending, market_info):
 
 def _running_average(old, value, n):
     return value if n == 1 or old is None else old + (value - old) / n
+
+
+def independent_window_scorecard(history, bins=5):
+    """Score one causal forecast per ticker so refreshes are not fake samples."""
+    earliest = {}
+    for original in history or []:
+        row = _calibration_row(original)
+        if row is None or not row["ticker"]:
+            continue
+        candidate = dict(row)
+        candidate["opened_at"] = _f(original.get("opened_at"), float("inf"))
+        candidate["guarded"] = _f(original.get("guarded_yes_probability"))
+        candidate["contract"] = _f(original.get("contract_probability_up"))
+        prior = earliest.get(row["ticker"])
+        if prior is None or candidate["opened_at"] < prior["opened_at"]:
+            earliest[row["ticker"]] = candidate
+
+    rows = list(earliest.values())
+    if not rows:
+        return {
+            "independent_markets": 0, "directional_accuracy": None,
+            "model_brier": None, "guarded_brier": None, "market_brier": None,
+            "contract_brier": None, "model_edge_vs_market": None,
+            "contract_edge_vs_market": None, "log_loss": None,
+            "calibration_bins": [],
+        }
+
+    def average(values):
+        values = [value for value in values if value is not None]
+        return sum(values) / len(values) if values else None
+
+    model_brier = average((row["raw_model"] - row["outcome"]) ** 2 for row in rows)
+    market_brier = average((row["market"] - row["outcome"]) ** 2 for row in rows)
+    guarded_brier = average(
+        (row["guarded"] - row["outcome"]) ** 2 if row["guarded"] is not None else None
+        for row in rows
+    )
+    contract_brier = average(
+        (row["contract"] - row["outcome"]) ** 2 if row["contract"] is not None else None
+        for row in rows
+    )
+    log_loss = average(
+        -(row["outcome"] * math.log(max(row["raw_model"], 1e-12))
+          + (1.0 - row["outcome"]) * math.log(max(1.0 - row["raw_model"], 1e-12)))
+        for row in rows
+    )
+    bin_count = max(2, min(10, int(bins)))
+    calibration_bins = []
+    for index in range(bin_count):
+        low, high = index / bin_count, (index + 1) / bin_count
+        members = [
+            row for row in rows
+            if low <= row["raw_model"] <= high
+            and (index == bin_count - 1 or row["raw_model"] < high)
+        ]
+        if members:
+            calibration_bins.append({
+                "low": low, "high": high, "samples": len(members),
+                "mean_probability": average(row["raw_model"] for row in members),
+                "observed_frequency": average(row["outcome"] for row in members),
+            })
+    return {
+        "independent_markets": len(rows),
+        "directional_accuracy": average(
+            float((row["raw_model"] >= 0.5) == bool(row["outcome"])) for row in rows
+        ),
+        "model_brier": model_brier,
+        "contract_brier": contract_brier,
+        "guarded_brier": guarded_brier,
+        "market_brier": market_brier,
+        "model_edge_vs_market": market_brier - model_brier,
+        "contract_edge_vs_market": (
+            market_brier - contract_brier if contract_brier is not None else None
+        ),
+        "log_loss": log_loss,
+        "calibration_bins": calibration_bins,
+    }
 
 
 def _ewma(old, value, alpha=LEAGUE_EWMA_ALPHA):
@@ -569,6 +663,7 @@ def resolve_shadows(state, result_reader):
         resolved += 1
     lab["pending"] = unresolved[-200:]
     lab["history"] = lab["history"][-1000:]
+    lab["window_scorecard"] = independent_window_scorecard(lab["history"])
     strategy_leaderboard(lab)
     teacher_leaderboard(lab)
     return resolved

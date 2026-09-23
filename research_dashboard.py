@@ -22,6 +22,7 @@ def render_research_dashboard(learning_state):
         return
 
     calibration = lab.get("calibration", {}) or {}
+    window_score = lab.get("window_scorecard", {}) or {}
     guarded = calibration.get("guarded", {}) or {}
     calibrator = lab.get("guarded_calibrator", {}) or {}
     wait = lab.get("wait_counterfactual", {}) or {}
@@ -40,6 +41,29 @@ def render_research_dashboard(learning_state):
         f"Kalshi {'—' if validation_market is None else f'{float(validation_market):.3f}'}. "
         f"Legacy raw-model Brier {('—' if calibration.get('model_brier') is None else f'{float(calibration.get("model_brier")):.3f}')} "
         f"on {int(calibration.get('samples') or 0)} historical shadows."
+    )
+    st.markdown("#### Independent 15-minute market scorecard")
+    st.caption(
+        "One earliest forecast per ticker; repeated page refreshes and later phases do not inflate this sample."
+    )
+    w1, w2, w3, w4, w5 = st.columns(5)
+    w1.metric("Markets", int(window_score.get("independent_markets") or 0))
+    w2.metric("Accuracy", _pct(window_score.get("directional_accuracy")))
+    w3.metric(
+        "Contract Brier",
+        "—" if window_score.get("contract_brier") is None
+        else f"{float(window_score['contract_brier']):.3f}",
+    )
+    w4.metric(
+        "Kalshi Brier",
+        "—" if window_score.get("market_brier") is None
+        else f"{float(window_score['market_brier']):.3f}",
+    )
+    contract_edge = window_score.get("contract_edge_vs_market")
+    w5.metric(
+        "Contract edge",
+        "—" if contract_edge is None else f"{float(contract_edge):+.3f}",
+        "positive beats market",
     )
 
     league = lab.get("strategy_league", {}) or {}
