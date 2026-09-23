@@ -5,13 +5,14 @@ import time
 import streamlit as st
 
 # Deployment touch: keep Streamlit synced to the latest private-access build.
+DEPLOYED_BUILD = "2026.09.23-r87-parity-cadence-risk"
 
 
 def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
-def require_owner_approval(build_version=None):
+def require_owner_approval():
     """Block the app unless a user enters an owner-issued access code.
 
     Codes are stored only in Streamlit secrets under [access_codes].
@@ -27,8 +28,7 @@ def require_owner_approval(build_version=None):
 
     st.title("🔒 Private Access")
     st.caption("This BTC AI Command Center is private. Access requires approval from the owner.")
-    if build_version:
-        st.caption(f"Deployed build: {build_version}")
+    st.caption(f"Deployed build: {DEPLOYED_BUILD}")
 
     failures = int(st.session_state.get("access_failures", 0))
     locked_until = float(st.session_state.get("access_locked_until", 0.0))
