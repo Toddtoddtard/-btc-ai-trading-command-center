@@ -87,7 +87,7 @@ st.set_page_config(
 )
 
 
-require_owner_approval(APP_VERSION)
+require_owner_approval()
 
 SYMBOL = "BTCUSDT"
 SPOT_BASES = [
