@@ -1,10 +1,12 @@
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 import kalshi_paper_engine as engine
+from learner_v31 import cadence_health
 
 
 class ContractRegressionTests(unittest.TestCase):
@@ -18,6 +20,18 @@ class ContractRegressionTests(unittest.TestCase):
                              no_ask_dollars=.52, no_bid_dollars=.50,
                              confidence=.95, scalp_projected_exit_price=.80)
         self.risk = dict(approved=True, position_pct=.1)
+
+    def test_learner_cadence_reports_normal_best_effort_interval(self):
+        now = datetime(2026, 9, 23, 17, 20, tzinfo=timezone.utc)
+        health = cadence_health("2026-09-23T17:06:00+00:00", now)
+        self.assertEqual(health["schedule_target_minutes"], 10.0)
+        self.assertEqual(health["observed_interval_minutes"], 14.0)
+        self.assertFalse(health["schedule_late"])
+
+    def test_learner_cadence_flags_material_delay(self):
+        now = datetime(2026, 9, 23, 17, 30, tzinfo=timezone.utc)
+        health = cadence_health("2026-09-23T17:00:00Z", now)
+        self.assertTrue(health["schedule_late"])
 
     def open(self):
         result = engine.open_position(self.db, 500, self.decision, self.risk, 100)

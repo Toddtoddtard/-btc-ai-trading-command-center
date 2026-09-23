@@ -70,6 +70,8 @@ from reliability_v31 import (
     source_health_from_specialists,
 )
 
+APP_VERSION = "2026.09.23-r87-parity-cadence-risk"
+
 # ============================================================
 # BTC AI TRADING COMMAND CENTER — PAPER TRADING ONLY
 # Single-file build. No exchange keys. No live order endpoints.
@@ -85,7 +87,7 @@ st.set_page_config(
 )
 
 
-require_owner_approval()
+require_owner_approval(APP_VERSION)
 
 SYMBOL = "BTCUSDT"
 SPOT_BASES = [
@@ -105,8 +107,6 @@ KALSHI_BASES = [
 DB_PATH = "btc_ai_command_center.db"
 STARTING_CASH = 500.0
 PREDICTION_HORIZON_MIN = 15
-APP_VERSION = "2026.09.21-r86-ui-truth-derivatives-fallback"
-
 REMOTE_LEARNING_URL = (
     "https://raw.githubusercontent.com/"
     "Toddtoddtard/-btc-ai-trading-command-center/"

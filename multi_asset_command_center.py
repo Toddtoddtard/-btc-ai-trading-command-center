@@ -471,11 +471,16 @@ def _paper_panel(market_key, price, decision, shared_state):
     wins = int(state.get("wins") or 0)
     losses = int(state.get("losses") or 0)
     win_rate = wins / trades if trades else None
+    risk_mode = str(state.get("risk_mode") or "LEARNING")
+    risk_reason = str(state.get("risk_reason") or "Collecting initial paper evidence.")
     st.success(
         "Automatic paper trading is permanently ON for this market. The GitHub learner scans and "
         "manages it about every 10 minutes, even when this page is closed."
     )
-    st.info(str(state.get("last_message") or "AUTO PAPER is initializing its persistent $500 ledger."))
+    st.info(
+        f"Risk mode: {risk_mode} — {risk_reason}\n\n"
+        f"{state.get('last_message') or 'AUTO PAPER is initializing its persistent $500 ledger.'}"
+    )
     st.caption(
         f"Council now: {decision['action']} • confidence {decision['confidence']:.0%} • "
         f"consensus {decision['consensus']:.0%} • completed {trades} • "

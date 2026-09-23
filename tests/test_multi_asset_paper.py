@@ -6,6 +6,7 @@ from multi_asset_paper import (
     STARTING_CASH,
     decision_from_specialists,
     ensure_multi_asset_state,
+    performance_risk_mode,
     paper_cycle,
 )
 
@@ -21,6 +22,7 @@ class MultiAssetPaperTests(unittest.TestCase):
     def test_all_four_markets_are_automatic_and_paper_only(self):
         root = {}
         multi = ensure_multi_asset_state(root)
+        self.assertEqual(multi["version"], 2)
         self.assertEqual(set(multi["assets"]), set(MARKETS))
         self.assertTrue(multi["paper_only"])
         self.assertFalse(multi["real_money_execution"])
@@ -93,6 +95,56 @@ class MultiAssetPaperTests(unittest.TestCase):
         self.assertEqual(decision["action"], "SCALP UP")
         self.assertGreaterEqual(decision["confidence"], 0.66)
         self.assertGreaterEqual(decision["consensus"], 0.60)
+
+    def test_losing_mature_ledger_enters_probation(self):
+        bucket = ensure_multi_asset_state({})["assets"]["zec"]
+        bucket["trades"] = 50
+        bucket["realized"] = -4.0
+        bucket["history"] = [
+            {"net_pnl": 0.2 if index < 20 else -0.2}
+            for index in range(50)
+        ]
+        risk = performance_risk_mode(bucket)
+        self.assertEqual(risk["mode"], "PROBATION")
+        self.assertEqual(risk["position_fraction"], 0.02)
+        self.assertEqual(risk["min_confidence"], 0.75)
+        self.assertEqual(risk["min_consensus"], 0.70)
+
+    def test_probation_blocks_marginal_signal_but_allows_strong_smaller_entry(self):
+        bucket = ensure_multi_asset_state({})["assets"]["gas"]
+        bucket["trades"] = 50
+        bucket["realized"] = -2.0
+        bucket["history"] = [{"net_pnl": -0.1} for _ in range(50)]
+        marginal = {"action": "SCALP UP", "confidence": 0.74, "consensus": 0.72}
+        self.assertEqual(paper_cycle(bucket, 2.0, marginal, 0.01, now=4_000.0), "PROBATION")
+        self.assertEqual(bucket["side"], "NONE")
+
+        strong = {"action": "SCALP UP", "confidence": 0.80, "consensus": 0.75}
+        self.assertEqual(paper_cycle(bucket, 2.0, strong, 0.01, now=4_100.0), "OPEN")
+        self.assertEqual(bucket["risk_mode"], "PROBATION")
+        self.assertAlmostEqual(bucket["qty"], (STARTING_CASH * 0.02) / 2.0)
+
+    def test_positive_asymmetric_ledger_is_not_penalized_for_sub_fifty_win_rate(self):
+        bucket = ensure_multi_asset_state({})["assets"]["wti"]
+        bucket["trades"] = 50
+        bucket["realized"] = 1.0
+        bucket["history"] = (
+            [{"net_pnl": 0.30} for _ in range(20)]
+            + [{"net_pnl": -0.15} for _ in range(30)]
+        )
+        risk = performance_risk_mode(bucket)
+        self.assertEqual(risk["mode"], "STANDARD")
+        self.assertEqual(risk["position_fraction"], 0.05)
+
+    def test_open_position_is_managed_even_when_ledger_is_in_probation(self):
+        bucket = ensure_multi_asset_state({})["assets"]["gold"]
+        self.assertEqual(paper_cycle(bucket, 100.0, APPROVED_UP, 0.004, now=5_000.0), "OPEN")
+        bucket["trades"] = 50
+        bucket["realized"] = -3.0
+        bucket["history"] = [{"net_pnl": -0.1} for _ in range(50)]
+        action = paper_cycle(bucket, 100.1, APPROVED_UP, 0.004, now=5_060.0)
+        self.assertEqual(action, "MANAGE")
+        self.assertEqual(bucket["side"], "LONG")
 
 
 if __name__ == "__main__":
