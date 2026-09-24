@@ -6,6 +6,7 @@ from research_lab import (
     ensure_research_lab,
     fit_guarded_calibrator,
     guarded_probability,
+    independent_window_scorecard,
     register_shadow,
     resolve_shadows,
     strategy_leaderboard,
@@ -16,6 +17,30 @@ from research_lab import (
 
 
 class ResearchLabTests(unittest.TestCase):
+    def test_scorecard_counts_each_market_once(self):
+        history = [
+            {
+                "ticker": "A", "opened_at": 1, "result": "yes",
+                "market_yes_probability": .55, "model_yes_probability": .70,
+                "guarded_yes_probability": .60, "contract_probability_up": .65,
+            },
+            {
+                "ticker": "A", "opened_at": 2, "result": "yes",
+                "market_yes_probability": .80, "model_yes_probability": .95,
+                "guarded_yes_probability": .80,
+            },
+            {
+                "ticker": "B", "opened_at": 3, "result": "no",
+                "market_yes_probability": .45, "model_yes_probability": .30,
+                "guarded_yes_probability": .40, "contract_probability_up": .35,
+            },
+        ]
+        score = independent_window_scorecard(history)
+        self.assertEqual(score["independent_markets"], 2)
+        self.assertEqual(score["directional_accuracy"], 1.0)
+        self.assertIsNotNone(score["contract_brier"])
+        self.assertGreater(len(score["calibration_bins"]), 0)
+
     def test_window_phase_boundaries(self):
         self.assertEqual(window_phase(0, 900), "OPEN")
         self.assertEqual(window_phase(300, 900), "MIDDLE")

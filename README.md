@@ -11,8 +11,9 @@ A paper-trading-only Bitcoin and Kalshi prediction dashboard built with Streamli
 - `horizon_models.py` — separate leakage-safe 1-, 5-, and 15-minute probability models enriched with completed 30m, 1h, 4h, 12h, 1d, 1w, and 1M context, prequential grading, and strict promotion gates.
 - `multi_timeframe.py` — concurrent public Binance higher-timeframe reads, closed-candle enforcement, and bounded scale-normalized context features.
 - `kalshi_microstructure.py` — reconstructs executable bid/ask, spread, depth imbalance, and microprice from Kalshi's public bid-only order book.
+- `contract_probability.py` — estimates the actual KXBTC15M terminal-above-strike probability from normalized strike distance, time remaining, robust realized volatility, model score, and weighted book pressure while conservatively anchoring to Kalshi.
 - `learner.py` — scheduled online learner. It grades completed windows, adapts specialist weights, measures final-price and 15-candle path error, and separately tracks official Kalshi YES/NO settlement accuracy.
-- `research_lab.py` — paper-only multi-phase shadow calls, Kalshi-baseline Brier scoring, fee-aware policy trials, WAIT counterfactuals, and advisory specialist lifecycle states.
+- `research_lab.py` — paper-only multi-phase shadow calls, Kalshi-baseline Brier scoring, one-sample-per-market calibration scorecards, fee-aware policy trials, WAIT counterfactuals, and advisory specialist lifecycle states.
 - `.github/workflows/learn.yml` — runs the learner every 5 minutes and publishes `learning_state.json` to the `learning-state` branch.
 
 ## Data sources
@@ -34,6 +35,8 @@ The 15-minute action vocabulary is `SCALP UP`, `SCALP DOWN`, `LOCK UP`, `LOCK DO
 ## Learning
 
 The dashboard and background learner now import the same `ai_core.py`, preventing formula drift between what the app displays and what the worker grades. The learner records true 15-candle forecast-path error for newly registered windows and retains bounded adaptive specialist weights. Existing pre-upgrade windows are preserved and migrate forward safely.
+
+The persistent paper ledger records idempotent OPENED, PENDING_SETTLEMENT, CLOSED, and SETTLED lifecycle events. Every summary rebuilds expected cash from the ledger and exposes a reconciliation failure instead of silently displaying inconsistent trade counts or P/L.
 
 ## Safety
 

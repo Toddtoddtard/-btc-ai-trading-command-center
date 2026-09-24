@@ -37,6 +37,7 @@ from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
+from contract_probability import realized_minute_volatility, terminal_above_probability
 from research_dashboard import render_research_dashboard
 from background_paper import (
     latest_shared_call_entry,
@@ -70,7 +71,7 @@ from reliability_v31 import (
     source_health_from_specialists,
 )
 
-APP_VERSION = "2026.09.23-r87-parity-cadence-risk"
+APP_VERSION = "2026.09.23-r88-contract-probability-reliability"
 
 # ============================================================
 # BTC AI TRADING COMMAND CENTER — PAPER TRADING ONLY
@@ -1639,6 +1640,10 @@ def master_decision(
     remaining = kctx["seconds_remaining"]
     up_prob = kctx["up_probability"]
     down_prob = (1.0 - up_prob) if pd.notna(up_prob) else np.nan
+    minute_volatility = realized_minute_volatility(
+        hist["close"].astype(float).tail(61).tolist()
+    )
+    contract_view = {"available": False, "probability_up": None}
 
     # The decision lock is independent of paper execution. Once a side is
     # registered for a still-open ticker, every refresh and every downstream
@@ -1663,45 +1668,55 @@ def master_decision(
             if pd.notna(up_prob) else 0.0
         )
 
+        contract_view = terminal_above_probability(
+            spot=px,
+            strike=target,
+            seconds_remaining=remaining,
+            volatility_per_minute=minute_volatility,
+            market_probability=up_prob if pd.notna(up_prob) else None,
+            model_score=base_score,
+            orderbook=kctx.get("orderbook") or {},
+            source_health=source_health,
+        )
+        contract_up_probability = safe_float(
+            contract_view.get("probability_up"), up_prob
+        )
+        contract_score = (
+            clamp((contract_up_probability - 0.5) * 2.0)
+            if pd.notna(contract_up_probability) else 0.0
+        )
+
         # Translate the projected BTC move into a selected-side Kalshi fair
         # value. Confidence measures model reliability; it is not a contract
         # price and must never be used as the paper trade's projected exit.
-        if pd.notna(up_prob):
-            market_up = float(np.clip(up_prob, 0.01, 0.99))
-            projected_move_units = float(
-                np.clip(forecast_move / max(target_scale, 1.0), -3.0, 3.0)
-            )
-            projected_log_odds = (
-                np.log(market_up / (1.0 - market_up))
-                + 1.25 * projected_move_units
-            )
-            projected_up_value = float(1.0 / (1.0 + np.exp(-projected_log_odds)))
-            # Retain some weight on the executable market estimate so one
-            # model update cannot manufacture a large paper-trading edge.
-            projected_up_value = float(
-                np.clip(0.75 * projected_up_value + 0.25 * market_up, 0.01, 0.99)
-            )
-        else:
-            projected_up_value = np.nan
-
-        score = clamp(
-            0.48 * base_score
-            + 0.30 * projected_target_score
-            + 0.14 * current_target_score
-            + 0.08 * market_score
+        projected_up_value = (
+            float(contract_up_probability)
+            if pd.notna(contract_up_probability) else np.nan
         )
 
-        raw_side = "UP" if projected_end >= target else "DOWN"
+        score = clamp(
+            0.40 * base_score
+            + 0.24 * projected_target_score
+            + 0.12 * current_target_score
+            + 0.08 * market_score
+            + 0.16 * contract_score
+        )
+
+        raw_side = (
+            "UP" if projected_up_value >= 0.5 else "DOWN"
+        ) if pd.notna(projected_up_value) else (
+            "UP" if projected_end >= target else "DOWN"
+        )
         scalp_projected_exit_price = (
             projected_up_value
             if raw_side == "UP"
             else (1.0 - projected_up_value if pd.notna(projected_up_value) else np.nan)
         )
 
-        distance_strength = min(
-            1.0,
-            abs(projected_edge) / max(target_scale, 1.0),
-        )
+        distance_strength = min(1.0, abs(safe_float(
+            contract_view.get("normalized_strike_distance"),
+            projected_edge / max(target_scale, 1.0),
+        )) / 2.0)
 
         target_confidence = min(
             0.97,
@@ -1926,6 +1941,22 @@ def master_decision(
         "seconds_remaining": remaining,
         "up_probability": up_prob,
         "down_probability": down_prob,
+        "contract_probability_up": safe_float(
+            contract_view.get("probability_up"), np.nan
+        ),
+        "contract_probability_edge": safe_float(
+            contract_view.get("edge_vs_market"), np.nan
+        ),
+        "strike_distance_sigma": safe_float(
+            contract_view.get("normalized_strike_distance"), np.nan
+        ),
+        "minute_volatility": safe_float(
+            contract_view.get("volatility_per_minute"), np.nan
+        ),
+        "microstructure_signal": safe_float(
+            contract_view.get("microstructure_signal"), 0.0
+        ),
+        "late_window_stress": bool(contract_view.get("late_window_stress", False)),
         "scalp_projected_exit_price": scalp_projected_exit_price,
         "kalshi_available": kctx["available"],
         "policy": policy,
@@ -5914,6 +5945,13 @@ def live_dashboard():
             "PRIMARY P/L EVIDENCE — every balance, position and trade below "
             "comes from the persistent GitHub learning-state ledger."
         )
+        if _kp.get("ledger_reconciled"):
+            st.caption("Ledger reconciliation: PASS — recorded cash matches immutable paper lifecycle events.")
+        else:
+            st.error(
+                "Ledger reconciliation failed: "
+                + "; ".join(_kp.get("ledger_issues") or ["unknown mismatch"])
+            )
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")
         k2.metric("Total P/L", f"${_kp['total_pnl']:+,.2f}")
@@ -6459,6 +6497,7 @@ def live_dashboard():
         )
         st.caption(
             f"Persistent paper equity: ${lifetime_validation['equity']:,.2f}. "
+            f"Ledger reconciliation: {'PASS' if lifetime_validation.get('ledger_reconciled') else 'FAIL'}. "
             "VOID/ARCHIVED legacy rows are excluded from validation. "
             "Balanced-call mode is active. Directional calls are frequent, while only risk-approved "
             "SCALP or LOCK setups may enter the paper ledger. All specialists continue running, and "

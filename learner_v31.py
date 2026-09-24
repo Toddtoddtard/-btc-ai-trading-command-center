@@ -13,6 +13,7 @@ import pandas as pd
 import learner as legacy
 import learner_v3 as v3
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
+from contract_probability import realized_minute_volatility, terminal_above_probability
 from forward_outlook import build_next_market_outlooks
 from horizon_models import (
     baseline_probabilities,
@@ -568,17 +569,50 @@ def current_shadow_call(state, df, market_info):
     confidence, base_score = v3.weighted_master_confidence(call, state)
     call["master_confidence"] = confidence
     call["master_base_score"] = base_score
-    direction = "UP" if base_score > 0 else "DOWN"
-    consensus = specialist_consensus(specialists, direction)
     source_health = source_health_from_specialists(specialists)
     seconds_remaining = safe_float(market_info.get("expires_at"), 0.0) - time.time()
     predicted_end = safe_float(forecast.get("predicted_end"))
     target = safe_float(market_info.get("target"))
+    contract_view = terminal_above_probability(
+        spot=price,
+        strike=target,
+        seconds_remaining=seconds_remaining,
+        volatility_per_minute=realized_minute_volatility(
+            df.close.astype(float).tail(61).tolist()
+        ),
+        market_probability=safe_float(market_info.get("prob")),
+        model_score=base_score,
+        orderbook=market_info.get("orderbook") or {},
+        source_health=source_health,
+    )
+    contract_probability_up = safe_float(contract_view.get("probability_up"))
+    direction = (
+        "UP" if contract_probability_up >= 0.5 else "DOWN"
+    ) if contract_probability_up is not None else (
+        "UP" if base_score > 0 else "DOWN"
+    )
+    consensus = specialist_consensus(specialists, direction)
+    call["contract_probability_up"] = contract_probability_up
+    call["contract_probability_edge"] = safe_float(contract_view.get("edge_vs_market"))
+    call["strike_distance_sigma"] = safe_float(
+        contract_view.get("normalized_strike_distance")
+    )
+    call["microstructure_signal"] = safe_float(
+        contract_view.get("microstructure_signal"), 0.0
+    )
+    call["late_window_stress"] = bool(contract_view.get("late_window_stress"))
     price_floor = price * 0.00035
     target_confirmed = bool(
         predicted_end is not None
         and target is not None
-        and ((predicted_end - target) * base_score) > 0
+        and (
+            (direction == "UP" and predicted_end >= target)
+            or (direction == "DOWN" and predicted_end < target)
+        )
+        and (
+            contract_probability_up is None
+            or abs(contract_probability_up - 0.5) >= 0.05
+        )
         and abs(predicted_end - target) >= price_floor
     )
     policy = learned_policy(state, detect_regime(df))
@@ -591,11 +625,7 @@ def current_shadow_call(state, df, market_info):
         market=market_info,
         target_confirmed=target_confirmed,
         edge_floor=policy["edge_floor"],
-        direction=(
-            "UP" if predicted_end is not None and target is not None and predicted_end >= target
-            else "DOWN" if predicted_end is not None and target is not None
-            else direction
-        ),
+        direction=direction,
     )
     call["master_action"] = focus["action"]
     execution_approved, execution_reason = learned_trade_gate(

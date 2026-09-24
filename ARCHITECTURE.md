@@ -68,6 +68,8 @@ The shared specialist council contains Trend, Momentum, Volume, Pattern, Support
 
 `Kalshi Context AI` is intentionally named this way because its inputs are Kalshi market probability and BTC distance from the active target; it is not a news/event feed.
 
+`contract_probability.py` converts the settlement question into a calibrated binary probability using strike distance measured in remaining-window volatility, the council score, and weighted order-book pressure. Kalshi's midpoint remains the dominant anchor until independent walk-forward evidence proves incremental Brier value.
+
 ## Kalshi target handling
 
 The current KXBTC15M contract is chosen deterministically and then re-fetched by exact ticker. The target remains pinned to that contract until expiration. The app, chart, decision engine, and learner use the same target semantics.
@@ -80,6 +82,10 @@ GitHub Actions runs `.github/workflows/learn.yml` every five minutes. The worker
 
 The research lab can record one independent shadow call in each `OPEN`, `MIDDLE`, `FINAL 5`, and `FINAL 2` phase. It grades model Brier score against the contemporaneous Kalshi midpoint, counterfactual WAIT outcomes, fee-aware one-contract paper P/L, and simultaneous entry-policy candidates. Specialist lifecycle labels are advisory and never disable execution.
 
+Evaluation also publishes an independent-market scorecard that retains only the earliest forecast per ticker. This prevents multiple refreshes or phase observations from being misreported as independent samples. The scorecard reports directional accuracy, Brier score, log loss, calibration bins, and paired edge versus Kalshi.
+
 ## Safety boundary
 
 The application remains paper trading only. There are no live exchange order endpoints, no private exchange credentials, and no real-money execution path in this architecture.
+
+The background paper engine appends idempotent lifecycle events and reconciles cash against positions and settlements. A mismatch is surfaced in both the Paper Trading and Kalshi Execution Validation tabs rather than being hidden by a derived UI total.
