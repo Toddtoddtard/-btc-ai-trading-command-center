@@ -13,7 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
-from access_control import require_owner_approval
+from access_control import DEPLOYED_BUILD, require_owner_approval
 from market_guide import render_market_guide
 from shared_learning import fetch_shared_learning_state
 
@@ -71,7 +71,7 @@ from reliability_v31 import (
     source_health_from_specialists,
 )
 
-APP_VERSION = "2026.09.23-r88-contract-probability-reliability"
+APP_VERSION = DEPLOYED_BUILD
 
 # ============================================================
 # BTC AI TRADING COMMAND CENTER — PAPER TRADING ONLY
