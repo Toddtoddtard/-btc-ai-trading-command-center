@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 import pandas as pd
+import learner
 
 from learner_v3 import ensure_v3
 from learner_v31 import _historical_expiry_frame, challenger_qualifies
@@ -16,6 +17,25 @@ from reliability_v31 import (
 
 
 class ReliabilityTests(unittest.TestCase):
+    def test_registration_rejects_expired_market_before_fetching(self):
+        with patch.object(learner.time, "time", return_value=1000), patch.object(learner, "aggregate_trades") as fetch:
+            self.assertFalse(learner.register({}, None, {"expires_at": 1000}))
+            fetch.assert_not_called()
+
+    def test_registration_rechecks_deadline_after_fetching(self):
+        for finished_at in (999.0, 1000.0, 1000.947662):
+            with self.subTest(finished_at=finished_at):
+                state = {"forecast": {}}
+                frame = pd.DataFrame({"close": [100.0]})
+                market = {"ticker": "TEST", "target": 100.0, "expires_at": 1000.0}
+                forecast = {"inputs": {"ret3": 0, "ret8": 0, "ret15": 0}, "predicted_end": 101, "predicted_direction": 1, "forecast": []}
+                with patch.object(learner.time, "time", side_effect=[990.0, finished_at]), patch.object(learner, "aggregate_trades", return_value={}), patch.object(learner, "futures_snapshot", return_value={}), patch.object(learner, "run_specialists_core", return_value={}), patch.object(learner, "kalshi_context", return_value={}), patch.object(learner, "rows_for_forecast", return_value=[]), patch.object(learner, "forecast_path_core", return_value=forecast):
+                    self.assertEqual(learner.register(state, frame, market), finished_at < 1000.0)
+                if finished_at < 1000.0:
+                    self.assertEqual(state["pending"]["opened_at"], finished_at)
+                else:
+                    self.assertNotIn("pending", state)
+
     def test_execution_cost_positive(self):
         self.assertAlmostEqual(execution_cost_bps(10000), 6.5, places=6)
 
