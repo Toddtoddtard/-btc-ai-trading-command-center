@@ -371,6 +371,8 @@ def rows_for_forecast(df):
 def register(state, df, market_info):
     if not market_info or state.get("pending") is not None:
         return False
+    if time.time() >= market_info["expires_at"]:
+        return False
     price = float(df.close.iloc[-1])
     agg = aggregate_trades()
     futures = futures_snapshot()
@@ -380,10 +382,15 @@ def register(state, df, market_info):
     )
     if not forecast:
         return False
+    # Public data fetches can cross the market boundary. Never register a
+    # prediction after its outcome window has closed or backdate its creation.
+    opened_at = time.time()
+    if opened_at >= market_info["expires_at"]:
+        return False
     inputs = forecast["inputs"]
     state["pending"] = {
         "ticker": market_info["ticker"],
-        "opened_at": time.time(),
+        "opened_at": opened_at,
         "expires_at": market_info["expires_at"],
         "target": market_info["target"],
         "start_price": price,
