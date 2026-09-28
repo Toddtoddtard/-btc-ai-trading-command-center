@@ -55,6 +55,8 @@ POST_FIX_VALIDATION_TRADES = 100
 POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
 POST_FIX_MAX_DRAWDOWN_PCT = 0.10
 UNPROVEN_POSITION_CAP = 0.02
+RECOVERY_POSITION_CAP = 0.005
+RECOVERY_MAX_ENTRIES_PER_MARKET = 1
 
 # Paper SCALPs only need a 5% projected gross move before fees. This is
 # intentionally looser so the paper trader can follow more of the bot's calls
@@ -361,40 +363,67 @@ def paper_performance_since_update(
         conn.close()
 
 
-def scalp_profitability_gate(db_path, starting_cash=500.0):
-    """Pause new SCALPs only after a meaningful post-fix Kalshi sample."""
-    performance = paper_performance_since_update(
-        db_path, starting_cash, strategy="SCALP"
-    )
+def scalp_execution_policy(performance, recent=None):
+    """Share paper recovery rules across SQLite and the persistent worker.
+
+    Weak profitability reduces exposure instead of waiting forever for fills
+    that the pause itself prevents. The historical drawdown circuit breaker
+    remains hard; recovery is not a profitability validation pass.
+    """
+    recent = recent or performance
     samples = performance["samples"]
     reasons = []
+    hard_pause = performance["max_drawdown_pct"] > POST_FIX_MAX_DRAWDOWN_PCT
+    if hard_pause:
+        reasons.append("drawdown above 10%; manual review required")
     if samples >= POST_FIX_GATE_TRADES:
-        pf = performance["profit_factor"]
-        if pf is None or pf < POST_FIX_PROFIT_FACTOR_FLOOR:
-            reasons.append(
-                f"profit factor below {POST_FIX_PROFIT_FACTOR_FLOOR:.2f}"
-            )
-        if performance["expectancy"] is None or performance["expectancy"] <= 0:
-            reasons.append("expectancy is not positive")
-        if performance["max_drawdown_pct"] > POST_FIX_MAX_DRAWDOWN_PCT:
-            reasons.append(
-                f"drawdown above {POST_FIX_MAX_DRAWDOWN_PCT * 100:.0f}%"
-            )
-    approved = samples < POST_FIX_GATE_TRADES or not reasons
-    if samples < POST_FIX_GATE_TRADES:
-        status = "COLLECTING EVIDENCE"
-    elif reasons:
-        status = "SCALPS PAUSED"
-    elif samples < POST_FIX_VALIDATION_TRADES:
-        status = "PROVISIONAL PASS"
-    else:
-        status = "VALIDATED PASS"
+        if recent["profit_factor"] is None or recent["profit_factor"] < POST_FIX_PROFIT_FACTOR_FLOOR:
+            reasons.append("recent SCALP profit factor below 1.15")
+        if recent["expectancy"] is None or recent["expectancy"] <= 0:
+            reasons.append("recent SCALP expectancy is not positive")
+    recovery = bool(reasons) and not hard_pause
+    status = (
+        "SCALPS PAUSED" if hard_pause else
+        "PAPER RECOVERY" if recovery else
+        "COLLECTING EVIDENCE" if samples < POST_FIX_GATE_TRADES else
+        "PROVISIONAL PASS" if samples < POST_FIX_VALIDATION_TRADES else
+        "VALIDATED PASS"
+    )
+    reason = "; ".join(reasons) or "Kalshi safeguards satisfied"
+    if recovery:
+        reason += "; paper recovery capped at 0.5% cash and one SCALP per market"
     return {
-        "approved": approved,
+        "approved": not hard_pause,
         "status": status,
-        "reason": "; ".join(reasons) if reasons else "Kalshi safeguards satisfied",
+        "reason": reason,
+        "recovery": recovery,
+        "position_cap": RECOVERY_POSITION_CAP if recovery else UNPROVEN_POSITION_CAP,
+        "max_entries_per_market": RECOVERY_MAX_ENTRIES_PER_MARKET if recovery else MAX_SCALPS_PER_MARKET,
         "performance": performance,
+        "recent_performance": recent,
     }
+
+
+def scalp_profitability_gate(db_path, starting_cash=500.0):
+    performance = paper_performance_since_update(db_path, starting_cash, strategy="SCALP")
+    conn = _connect(db_path, starting_cash)
+    try:
+        rows = conn.execute(
+            """SELECT ticker,pnl,entry_fee,exit_fee FROM kalshi_paper_positions
+               WHERE status='CLOSED' AND pnl IS NOT NULL AND strategy='SCALP'
+               AND opened_at>=? ORDER BY closed_at DESC,id DESC LIMIT ?""",
+            (POST_FIX_START_TS, POST_FIX_GATE_TRADES),
+        ).fetchall()
+    finally:
+        conn.close()
+    recent = _performance_from_rows(list(reversed(rows)), starting_cash)
+    return scalp_execution_policy(performance, recent)
+
+
+def projected_net_pnl(contracts, entry, projected_exit):
+    return (contracts * (projected_exit - entry)
+            - kalshi_taker_fee(contracts, entry)
+            - kalshi_taker_fee(contracts, projected_exit))
 
 
 def open_position(db_path, starting_cash, decision, risk, spot_price):
@@ -413,9 +442,8 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     ticker = str(decision.get("kalshi_ticker") or "")
     if not ticker:
         return None
-    if strategy == "SCALP" and not scalp_profitability_gate(
-        db_path, starting_cash
-    )["approved"]:
+    scalp_gate = scalp_profitability_gate(db_path, starting_cash)
+    if strategy == "SCALP" and not scalp_gate["approved"]:
         return None
     entry = _quote(decision, side, ask=True)
     if entry is None or entry > MAX_ENTRY_PRICE:
@@ -444,6 +472,8 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         if post_fix["samples"] < POST_FIX_VALIDATION_TRADES
         else 0.25
     )
+    if strategy == "SCALP" and scalp_gate["recovery"]:
+        exposure_cap = min(exposure_cap, scalp_gate["position_cap"])
     conn = _connect(db_path, starting_cash)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -452,7 +482,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         ).fetchone():
             return None
         prior_entries = _strategy_entry_count(conn, ticker, strategy)
-        if strategy == "SCALP" and prior_entries >= MAX_SCALPS_PER_MARKET:
+        if strategy == "SCALP" and prior_entries >= scalp_gate["max_entries_per_market"]:
             return None
         if strategy == "LOCK" and prior_entries >= MAX_LOCKS_PER_MARKET:
             return None
@@ -478,6 +508,8 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         ):
             contracts -= 1
         if contracts < 1:
+            return None
+        if strategy == "SCALP" and projected_net_pnl(contracts, entry, projected_exit) <= 0:
             return None
         fee = kalshi_taker_fee(contracts, entry)
         total_cost = entry * contracts + fee
@@ -888,7 +920,7 @@ def manage_kalshi_paper_cycle(
         finally:
             count_conn.close()
         limit = (
-            MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET
+            MAX_LOCKS_PER_MARKET if strategy == "LOCK" else profitability_gate["max_entries_per_market"]
         )
         if prior_entries >= limit:
             noun = "LOCK" if strategy == "LOCK" else "SCALPs"

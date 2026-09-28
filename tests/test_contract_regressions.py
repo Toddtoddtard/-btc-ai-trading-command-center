@@ -89,7 +89,7 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertTrue(gate['approved'])
         self.assertEqual(gate['status'], 'COLLECTING EVIDENCE')
 
-    def test_profitability_gate_pauses_losing_scalps_after_fifty(self):
+    def test_profitability_gate_uses_small_recovery_after_fifty(self):
         with engine._connect(self.db) as conn:
             now = time.time()
             for index in range(50):
@@ -105,16 +105,20 @@ class ContractRegressionTests(unittest.TestCase):
                     ),
                 )
         gate = engine.scalp_profitability_gate(self.db)
-        self.assertFalse(gate['approved'])
-        self.assertEqual(gate['status'], 'SCALPS PAUSED')
+        self.assertTrue(gate['approved'])
+        self.assertEqual(gate['status'], 'PAPER RECOVERY')
         self.assertIn('profit factor', gate['reason'])
         self.decision['action'] = 'SCALP UP'
-        skipped = self.cycle()
-        self.assertFalse(skipped['event'])
-        self.assertIn('profitability gate is active', skipped['message'])
-        self.assertIsNone(
-            engine.open_position(self.db, 500, self.decision, self.risk, 100)
-        )
+        opened = self.cycle()
+        self.assertTrue(opened['event'])
+        position = engine.paper_summary(self.db)['open_position']
+        self.assertLessEqual(position['amount_down'], 500 * .005)
+        with engine._connect(self.db) as conn:
+            row = conn.execute("SELECT * FROM kalshi_paper_positions WHERE status='OPEN'").fetchone()
+            engine._close(conn, row, .55, 'TEST')
+            engine._set_scalp_armed(conn, self.decision['kalshi_ticker'], 'YES', True)
+            conn.commit()
+        self.assertIsNone(engine.open_position(self.db, 500, self.decision, self.risk, 100))
 
     def test_delayed_settlement_ignores_spot(self):
         self.open()
@@ -202,8 +206,10 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('5% gross-return target', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-        # At a 50% entry, a 53% forecast clears the 5% gross-return floor.
+        # A 53% forecast clears gross return but cannot cover both fees.
         self.decision['scalp_projected_exit_price'] = .53
+        self.assertIsNone(engine.open_position(self.db, 500, self.decision, self.risk, 100))
+        self.decision['scalp_projected_exit_price'] = .55
         opened = self.cycle()
         self.assertTrue(opened['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['entry_price'], .50)

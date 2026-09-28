@@ -2,6 +2,18 @@ from pathlib import Path
 import re
 import runpy
 
+# This one-time installer predates the persistent background ledger. Never
+# reapply legacy substitutions to the current integration on an engine push.
+current_app = Path("app.py").read_text()
+if all(marker in current_app for marker in (
+    "from background_paper import (",
+    'shared_paper_scorecard(_shared_paper)',
+    'shared_paper_summary(_shared_paper)',
+    '"execution_mode": "BALANCED_CALLS"',
+)):
+    print("Persistent Kalshi paper integration already installed; no legacy changes.")
+    raise SystemExit(0)
+
 # First apply the external-review phase-1 fixes (raw grading + duplicate gate cleanup).
 runpy.run_path("tools/apply_external_review_phase1.py", run_name="__main__")
 
