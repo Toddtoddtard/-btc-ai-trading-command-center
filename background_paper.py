@@ -34,6 +34,8 @@ from kalshi_paper_engine import (
     UNPROVEN_POSITION_CAP,
     kalshi_taker_fee,
     lock_target_pnl,
+    scalp_execution_policy,
+    projected_net_pnl,
 )
 
 STATE_INPUT = os.environ.get("LEARNING_STATE_OUTPUT", "/tmp/learning_state.json")
@@ -268,8 +270,12 @@ def _projected_side_value(pending, market, side):
     return projected_up if side == "YES" else 1.0 - projected_up
 
 
-def _post_fix_metrics(paper):
-    closed = [t for t in paper.get("trades", []) if t.get("status") == "CLOSED"]
+def _post_fix_metrics(paper, strategy=None, limit=None):
+    closed = [t for t in paper.get("trades", []) if t.get("status") == "CLOSED"
+              and (strategy is None or t.get("strategy") == strategy)]
+    closed.sort(key=lambda t: (_f(t.get("closed_at"), 0.0), _f(t.get("opened_at"), 0.0)))
+    if limit:
+        closed = closed[-limit:]
     pnls = [_f(t.get("pnl"), 0.0) for t in closed]
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
@@ -296,23 +302,14 @@ def _post_fix_metrics(paper):
 
 
 def _gate(metrics):
-    reasons = []
-    if metrics["samples"] >= POST_FIX_GATE_TRADES:
-        if metrics["profit_factor"] is None or metrics["profit_factor"] < POST_FIX_PROFIT_FACTOR_FLOOR:
-            reasons.append("profit factor below 1.15")
-        if metrics["expectancy"] is None or metrics["expectancy"] <= 0:
-            reasons.append("expectancy is not positive")
-        if metrics["max_drawdown_pct"] > POST_FIX_MAX_DRAWDOWN_PCT:
-            reasons.append("drawdown above 10%")
-    if metrics["samples"] < POST_FIX_GATE_TRADES:
-        status = "COLLECTING EVIDENCE"
-    elif reasons:
-        status = "SCALPS PAUSED"
-    elif metrics["samples"] < POST_FIX_VALIDATION_TRADES:
-        status = "PROVISIONAL PASS"
-    else:
-        status = "VALIDATED PASS"
-    return {"approved": not reasons, "status": status, "reason": "; ".join(reasons) or "Kalshi safeguards satisfied"}
+    return scalp_execution_policy(metrics)
+
+
+def _paper_gate(paper):
+    return scalp_execution_policy(
+        _post_fix_metrics(paper, strategy="SCALP"),
+        _post_fix_metrics(paper, strategy="SCALP", limit=POST_FIX_GATE_TRADES),
+    )
 
 
 def shared_paper_summary(paper):
@@ -380,7 +377,7 @@ def shared_paper_scorecard(paper):
     """Recalculate post-fix metrics and validation from persisted trades."""
     paper = paper if isinstance(paper, dict) else {}
     metrics = _post_fix_metrics(paper)
-    return metrics, _gate(metrics)
+    return metrics, _paper_gate(paper)
 
 
 def shared_paper_history(paper, limit=100):
@@ -698,7 +695,7 @@ def _reset_paper_account_to_post_fix_500(paper, now):
         "reason": "CLEAN_POST_FIX_PAPER_BASELINE",
     }
     paper["metrics"] = _post_fix_metrics(paper)
-    paper["gate"] = _gate(paper["metrics"])
+    paper["gate"] = _paper_gate(paper)
     paper["last_message"] = (
         f"Paper account reset from ${STARTING_CASH:.2f}; carried forward "
         f"{carried_wins} verified win(s) and archived {archived} old trade(s)."
@@ -830,7 +827,8 @@ def _repair_master_learning_credit(learning_state, corrected_tickers):
 
 
 def run_cycle(learning_state, market_reader=_market, now=None):
-    now = float(now or time.time())
+    live_clock = now is None
+    now = float(time.time() if live_clock else now)
     paper = learning_state.get("background_paper")
     if not isinstance(paper, dict) or paper.get("version") != 1:
         paper = initial_state(now)
@@ -934,7 +932,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 reconcile_shared_paper_ledger(paper)
                 paper["last_message"] = "Window ended — settlement pending: " + ticker
             paper["metrics"] = _post_fix_metrics(paper)
-            paper["gate"] = _gate(paper["metrics"])
+            paper["gate"] = _paper_gate(paper)
             return paper
         if bid is not None:
             position["last_mark"] = bid
@@ -956,7 +954,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                         f"Promoted PAPER position to LOCK {position['side']} {ticker}"
                     )
                     paper["metrics"] = _post_fix_metrics(paper)
-                    paper["gate"] = _gate(paper["metrics"])
+                    paper["gate"] = _paper_gate(paper)
                     return paper
                 projected_exit = _projected_side_value(
                     pending, market, position["side"]
@@ -1000,11 +998,19 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 else:
                     paper["last_message"] = f"Holding PAPER SCALP {position['side']} {ticker}"
         paper["metrics"] = _post_fix_metrics(paper)
-        paper["gate"] = _gate(paper["metrics"])
+        paper["gate"] = _paper_gate(paper)
+        return paper
+
+    # Refresh the wall clock after network reads: retries can cross expiry.
+    if live_clock:
+        now = time.time()
+    expires = _f(pending.get("expires_at"))
+    if expires is None or expires <= now or str(market.get("status", "")).lower() not in {"open", "active"}:
+        paper["last_message"] = "Skipped PAPER entry: market expired, closed, or expiry unavailable."
         return paper
 
     metrics = _post_fix_metrics(paper)
-    gate = _gate(metrics)
+    gate = _paper_gate(paper)
     paper["metrics"], paper["gate"] = metrics, gate
     explicit_action = _resolved_master_action(pending)
     if explicit_action in {"WAIT", "HOLD"}:
@@ -1075,7 +1081,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         and t.get("strategy") == strategy
         and str(t.get("status", "CLOSED")).upper() in {"CLOSED", "PENDING_SETTLEMENT"}
     ]
-    if len(same_market) >= (MAX_LOCKS_PER_MARKET if strategy == "LOCK" else MAX_SCALPS_PER_MARKET):
+    if len(same_market) >= (MAX_LOCKS_PER_MARKET if strategy == "LOCK" else gate["max_entries_per_market"]):
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: per-market limit reached.", "BLOCKED", now)
         return paper
     if strategy == "SCALP":
@@ -1102,17 +1108,29 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER SCALP: waiting for a fresh signal before re-entry.", "BLOCKED", now)
             return paper
 
-    budget = max(0.0, paper["cash"]) * UNPROVEN_POSITION_CAP
+    position_cap = gate["position_cap"] if strategy == "SCALP" else UNPROVEN_POSITION_CAP
+    budget = max(0.0, paper["cash"]) * position_cap
     contracts = int(budget // max(ask, 0.01))
     while contracts and contracts * ask + kalshi_taker_fee(contracts, ask) > budget:
         contracts -= 1
     if contracts < 1:
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER entry: paper allocation is too small.", "BLOCKED", now)
         return paper
+    if strategy == "SCALP" and projected_net_pnl(contracts, ask, projected) <= 0:
+        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
+                              "Skipped PAPER SCALP: projected profit is not positive after entry and exit fees.", "BLOCKED", now)
+        return paper
+    # A final deadline check protects the actual fill, not just the forecast.
+    if live_clock:
+        now = time.time()
+    if expires <= now:
+        paper["last_message"] = "Skipped PAPER entry: market expired before fill."
+        return paper
     fee = kalshi_taker_fee(contracts, ask)
     amount = contracts * ask + fee
     expires = _f(pending.get("expires_at"))
     position = {"ticker": ticker, "side": side, "direction": "UP" if side == "YES" else "DOWN", "strategy": strategy, "status": "OPEN", "opened_at": now, "expires_at": expires, "entry_price": ask, "spot_entry_price": _f(pending.get("start_price")), "contracts": contracts, "entry_fee": fee, "amount": amount, "last_mark": bid}
+    position["risk_mode"] = "PAPER RECOVERY" if strategy == "SCALP" and gate["recovery"] else "STANDARD"
     paper["cash"] -= amount
     paper["open_position"] = position
     _record_ledger_event(
@@ -1121,6 +1139,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     )
     reconcile_shared_paper_ledger(paper)
     message = f"Opened PAPER {strategy} {position['direction']} • Amount: ${amount:.2f} • Kalshi entry: {ask*100:.0f}%"
+    if position["risk_mode"] == "PAPER RECOVERY":
+        message += " • PAPER RECOVERY (0.5% cash cap)"
     _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, "OPENED", now)
     return paper
 

@@ -1970,6 +1970,7 @@ def master_decision(
         "execution_mode": "BALANCED_CALLS",
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "execution_approved": execution_approved,
+        "execution_reason": gate_note,
         "lock_focus": locals().get("lock_focus", {}),
         "next_market_outlooks": _next_market_outlooks,
         "whale_score": safe_float(
@@ -1998,7 +1999,7 @@ def risk_evaluate(decision, account, hist, futures):
             "approved": False,
             "position_pct": 0.0,
             "risk_score": 1.0,
-            "reason": "Directional call published; reliability gate blocked paper entry",
+            "reason": "Directional call published; reliability gate blocked paper entry: " + str(decision.get("execution_reason") or "insufficient evidence"),
         }
 
     # Confidence, consensus and source-health are authoritative upstream gates.
@@ -2014,8 +2015,12 @@ def risk_evaluate(decision, account, hist, futures):
 
     # Keep every specialist active, including rare-event specialists.  This
     # gate judges only realized Kalshi SCALP execution after the loss-loop fix.
-    post_fix = paper_performance_since_update(DB_PATH, STARTING_CASH)
-    scalp_gate = scalp_profitability_gate(DB_PATH, STARTING_CASH)
+    persistent_paper = (fetch_remote_learning_state() or {}).get("background_paper")
+    if isinstance(persistent_paper, dict):
+        post_fix, scalp_gate = shared_paper_scorecard(persistent_paper)
+    else:
+        post_fix = paper_performance_since_update(DB_PATH, STARTING_CASH)
+        scalp_gate = scalp_profitability_gate(DB_PATH, STARTING_CASH)
     if not is_lock and not scalp_gate["approved"]:
         return {
             "approved": False,
@@ -2034,8 +2039,9 @@ def risk_evaluate(decision, account, hist, futures):
     # exposure.  Older fills remain visible in the lifetime ledger.
     try:
         strategy = "LOCK" if is_lock else "SCALP"
-        strategy_performance = paper_performance_since_update(
-            DB_PATH, STARTING_CASH, strategy=strategy
+        strategy_performance = (
+            scalp_gate["performance"] if not is_lock else
+            paper_performance_since_update(DB_PATH, STARTING_CASH, strategy=strategy)
         )
         if strategy_performance["samples"] >= 5:
             execution_pf = strategy_performance["profit_factor"]
@@ -2045,6 +2051,9 @@ def risk_evaluate(decision, account, hist, futures):
             sizing_note += f"; execution P/F {execution_pf:.2f} adjusted size"
     except Exception:
         pass
+    if not is_lock and scalp_gate.get("recovery"):
+        position_pct = min(position_pct, scalp_gate["position_cap"])
+        sizing_note += "; " + scalp_gate["reason"]
     risk_score = clamp(0.6 - confidence * 0.35 - consensus * 0.15 + volatility_penalty, 0, 1)
 
     state = get_auto_state()
@@ -5996,7 +6005,9 @@ def live_dashboard():
         st.info(
             f"Validation: {_scalp_gate['status']} • "
             f"SCALP safety gate begins after {_post_fix['gate_sample_target']} "
-            "closed post-fix SCALPs. Every specialist remains active."
+            f"closed post-fix SCALPs ({_scalp_gate['performance']['samples']} collected). "
+            "Recovery uses the latest 50 SCALP results. Every specialist remains active. "
+            + _scalp_gate["reason"]
         )
 
         _open_contract = _kp.get("open_position")
@@ -6499,7 +6510,8 @@ def live_dashboard():
         st.info(
             f"{validation_gate['status']} • "
             f"{validation['samples']}/{validation['validation_sample_target']} "
-            "valid post-fix Kalshi trades collected from the persistent ledger."
+            "valid post-fix Kalshi trades collected from the persistent ledger. "
+            + validation_gate["reason"]
         )
         st.caption(
             f"Persistent paper equity: ${lifetime_validation['equity']:,.2f}. "
