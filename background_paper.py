@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 from kalshi_paper_engine import (
     LOCK_MIN_CONFIDENCE,
     LOCK_TAKE_PROFIT_PRICE,
-    MAX_ENTRY_PRICE,
+    entry_price_limit,
     MIN_SCALP_MARKET_PROBABILITY,
     MAX_LOCKS_PER_MARKET,
     MAX_SCALP_LOSSES_PER_MARKET,
@@ -1058,8 +1058,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             "BLOCKED", now,
         )
         return paper
-    if ask > MAX_ENTRY_PRICE:
-        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: Kalshi price {ask*100:.0f}% is above the 75% maximum.", "BLOCKED", now)
+    if ask > entry_price_limit(strategy):
+        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: Kalshi price {ask*100:.0f}% is above the {entry_price_limit(strategy)*100:.0f}% maximum.", "BLOCKED", now)
         return paper
     if strategy == "SCALP":
         market_probability = (bid + ask) / 2.0

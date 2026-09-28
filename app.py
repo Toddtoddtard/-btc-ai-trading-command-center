@@ -3733,7 +3733,7 @@ with st.expander("🧾 Recent Updates — Last 24 Hours", expanded=False):
 - **Authoritative Kalshi entry display:** selected-side paper fills come from the shared Kalshi ledger so the displayed entry percentage matches the actual recorded paper fill.
 - **Balanced call automation:** every healthy BTC 15-minute market gets a directional SCALP outlook; automatic paper entries still require price, fee, data-quality, and reliability approval. LOCK requires at least 68% calibrated confidence plus independent confirmation.
 - **Evidence-based LOCK learning:** every LOCK gate is now retained and graded against official settlement, with paper-only comparisons across 64%–80% confidence floors.
-- **Faster unattended execution checks:** the scheduled paper worker retries safe quotes during each run while preserving the 75% entry ceiling and every existing risk gate.
+- **Faster unattended execution checks:** the scheduled paper worker retries safe quotes during each run while preserving the LOCK 93% / SCALP 75% entry ceilings and other risk gates.
 - **Research calibration safeguards:** walk-forward Brier calibration and JSON-safe learning-state validation were tightened so research updates cannot silently corrupt the learner state.
 - **Responsive validation scorecard:** the Backtest validation metrics now use a readable 3-plus-2 layout instead of five cramped columns.
 
@@ -6120,7 +6120,7 @@ def live_dashboard():
             "Paper execution remains separate and may reject a visible call for price, fees, feed health, or weak evidence. "
             "LOCK qualification is evaluated continuously and requires at least 68% calibrated confidence, "
             "strong council agreement, healthy data, "
-            "target confirmation, market alignment, and an entry at or below 75%. "
+            "target confirmation, market alignment, and a LOCK entry at or below 93%. SCALPs remain capped at 75%. "
             "LOCK keeps its original direction, "
             "stays open through the exact 15-minute window, and is finalized "
             "only from that ticker's official Kalshi settlement."

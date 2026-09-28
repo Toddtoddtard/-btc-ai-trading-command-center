@@ -60,6 +60,10 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - Both paper engines use `scalp_execution_policy` in `kalshi_paper_engine.py`.
 - The SCALP gate uses SCALP fills only; the visible overall scorecard still includes LOCKs. The previous background gate incorrectly used all strategies and paused at 50 total fills despite only 46 SCALPs.
 - After 50 SCALPs, weak profitability enters PAPER RECOVERY: at most 0.5% cash per entry and one SCALP per market. The latest 50 completed SCALPs decide recovery; historical maximum drawdown above 10% remains a hard pause requiring review.
-- Confidence, signal-strength, 75% price ceiling, and LOCK rules remain in force. Both entry paths require positive projected SCALP P/L after rounded entry/exit fees.
+- Confidence, signal-strength, and strategy-specific price ceilings remain in force. Both entry paths require positive projected SCALP P/L after rounded entry/exit fees.
 - The background worker checks market status and expiry after reads and immediately before entry. No fills or historical results are fabricated or reset.
 - `tests/test_paper_recovery.py` covers recovery, limits, mixed-strategy accounting, fees, and expiry crossed during a fetch.
+
+## Entry caps (user update 2026-09-28)
+
+- LOCK calls and paper entries accept asks up to and including 93%; SCALPs remain capped at 75%. `entry_price_limit` is shared by both execution paths and the ticket. Confidence and immutable LOCK settlement behavior are unchanged.

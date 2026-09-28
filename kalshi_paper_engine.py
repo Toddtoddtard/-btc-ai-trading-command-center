@@ -6,6 +6,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from lock_focus import LOCK_MAX_ENTRY_PRICE, LOCK_MIN_CONFIDENCE
+from lock_focus import SCALP_MAX_ENTRY_PRICE
 
 
 KALSHI_PUBLIC_BASES = (
@@ -36,7 +37,7 @@ def fetch_settled_result(ticker):
 
 
 GENERAL_TAKER_FEE_RATE = 0.07
-MAX_ENTRY_PRICE = LOCK_MAX_ENTRY_PRICE
+MAX_ENTRY_PRICE = SCALP_MAX_ENTRY_PRICE
 # Paper-trading exploration gate: still reject extreme lottery-style odds,
 # but allow more borderline bot calls to collect evidence. The 75% max entry
 # cap, fee checks, loss circuit breaker, and profitability gate remain intact.
@@ -73,6 +74,10 @@ OPPOSITE_SIGNAL_CONFIRM_SECONDS = 10.0
 # Legacy compatibility constant only. LOCK positions no longer exit early at 95%;
 # they hold through the exact 15-minute Kalshi window and settle afterward.
 LOCK_TAKE_PROFIT_PRICE = 0.95
+
+
+def entry_price_limit(strategy):
+    return LOCK_MAX_ENTRY_PRICE if str(strategy).upper().startswith("LOCK") else MAX_ENTRY_PRICE
 
 
 def _f(value, default=None):
@@ -446,7 +451,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if strategy == "SCALP" and not scalp_gate["approved"]:
         return None
     entry = _quote(decision, side, ask=True)
-    if entry is None or entry > MAX_ENTRY_PRICE:
+    if entry is None or entry > entry_price_limit(strategy):
         return None
     if strategy == "SCALP":
         market_probability = _selected_side_market_probability(decision, side)
@@ -867,13 +872,13 @@ def manage_kalshi_paper_cycle(
         entry_side
         and strategy in {"SCALP", "LOCK"}
         and entry_price is not None
-        and entry_price > MAX_ENTRY_PRICE
+        and entry_price > entry_price_limit(strategy)
     ):
         return {
             "event": False,
             "message": (
                 f"Skipped PAPER {strategy}: Kalshi price {entry_price * 100:.0f}% "
-                f"is above the {MAX_ENTRY_PRICE * 100:.0f}% maximum."
+                f"is above the {entry_price_limit(strategy) * 100:.0f}% maximum."
             ),
         }
 
