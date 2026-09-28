@@ -93,16 +93,16 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertIn("above the 75%", paper["last_signal_message"])
         self.assertEqual(len(paper["signal_attempts"]), 1)
 
-    def test_lock_entry_above_75_is_rejected(self):
+    def test_lock_entry_above_93_is_rejected(self):
         state = self.pending(master_confidence=.95, master_action="LOCK UP")
         paper = bg.run_cycle(
             state,
-            lambda _: self.market(yes_bid_dollars=.84, yes_ask_dollars=.85),
+            lambda _: self.market(yes_bid_dollars=.93, yes_ask_dollars=.94),
             now=1000,
         )
         self.assertIsNone(paper["open_position"])
         self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
-        self.assertIn("above the 75%", paper["last_message"])
+        self.assertIn("above the 93%", paper["last_message"])
 
     def test_lock_entry_at_95_is_rejected(self):
         state = self.pending(master_confidence=.95, master_action="LOCK UP")
@@ -112,7 +112,7 @@ class BackgroundPaperTests(unittest.TestCase):
             now=1000,
         )
         self.assertIsNone(paper["open_position"])
-        self.assertIn("above the 75%", paper["last_message"])
+        self.assertIn("above the 93%", paper["last_message"])
 
     def test_lock_first_mode_disables_new_scalps(self):
         state = self.pending()

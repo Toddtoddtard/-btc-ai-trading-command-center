@@ -133,7 +133,7 @@ jobs:
           # Keep the private-runner workload sustainable. Streamlit evaluates
           # the same paper engine every second while the dashboard is open;
           # this scheduled cycle provides the unattended checkpoint. Short
-          # retries can capture a safe <=75% quote without changing any gate.
+          # retries can capture a strategy-eligible quote (LOCK <=93%, SCALP <=75%) without changing any gate.
           python background_paper.py
       - name: Run persistent Gold, Gas, ZEC and WTI AUTO PAPER cycles
         run: python multi_asset_paper.py --state /tmp/learning_state.json
@@ -175,7 +175,9 @@ jobs:
           assert mode.get('auto_scalping_enabled') is True
           assert mode.get('earliest_lock_seconds') == 900
           assert mode.get('confidence_floor') == 0.68
-          assert mode.get('maximum_entry_price') == 0.75
+          assert mode.get('maximum_entry_price') == 0.93
+          assert mode.get('maximum_lock_entry_price') == 0.93
+          assert mode.get('maximum_scalp_entry_price') == 0.75
           assert data.get('status', {}).get('btc_execution_mode') == 'BALANCED_CALLS'
           assert data.get('status', {}).get('auto_scalping_enabled') is True
           assert data.get('status', {}).get('schedule_target_minutes') == 10.0

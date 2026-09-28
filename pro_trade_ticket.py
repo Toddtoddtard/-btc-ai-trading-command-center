@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 
 from kalshi_paper_engine import (
-    MAX_ENTRY_PRICE,
+    entry_price_limit,
     SCALP_MIN_GROSS_RETURN,
     SCALP_STOP_LOSS_POINTS,
     UNPROVEN_POSITION_CAP,
@@ -148,8 +148,8 @@ def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=Fals
         blockers.append("selected-side Kalshi ask is unavailable")
     if strategy == "SCALP" and not bool((risk or {}).get("approved")):
         blockers.append("risk manager has not approved the SCALP")
-    if strategy == "SCALP" and entry is not None and entry > MAX_ENTRY_PRICE:
-        blockers.append(f"SCALP entry is above the {MAX_ENTRY_PRICE * 100:.0f}% cap")
+    if strategy in {"SCALP", "LOCK"} and entry is not None and entry > entry_price_limit(strategy):
+        blockers.append(f"{strategy} entry is above the {entry_price_limit(strategy) * 100:.0f}% cap")
     if side is not None and contracts < 1:
         blockers.append("paper allocation is too small for one contract")
 

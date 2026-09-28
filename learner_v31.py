@@ -26,6 +26,7 @@ from lock_focus import (
     AUTO_SCALPING_ENABLED,
     LOCK_EARLIEST_SECONDS,
     LOCK_MAX_ENTRY_PRICE,
+    SCALP_MAX_ENTRY_PRICE,
     LOCK_MIN_CONFIDENCE,
     evaluate_lock_focus,
     specialist_consensus,
@@ -94,6 +95,8 @@ def ensure_v31(state):
         "earliest_lock_seconds": LOCK_EARLIEST_SECONDS,
         "confidence_floor": LOCK_MIN_CONFIDENCE,
         "maximum_entry_price": LOCK_MAX_ENTRY_PRICE,
+        "maximum_lock_entry_price": LOCK_MAX_ENTRY_PRICE,
+        "maximum_scalp_entry_price": SCALP_MAX_ENTRY_PRICE,
     }
     state["status"].setdefault("learning_version", 31)
     state["status"]["pattern_structure_version"] = PATTERN_STRUCTURE_VERSION

@@ -574,16 +574,16 @@ class ContractRegressionTests(unittest.TestCase):
             .75,
         )
 
-    def test_lock_above_seventy_five_percent_is_rejected(self):
+    def test_lock_above_ninety_three_percent_is_rejected(self):
         self.decision.update(
             action='LOCK UP',
             confidence=.95,
-            yes_ask_dollars=.85,
-            yes_bid_dollars=.84,
+            yes_ask_dollars=.94,
+            yes_bid_dollars=.93,
         )
         opened = self.cycle()
         self.assertFalse(opened['event'])
-        self.assertIn('above the 75%', opened['message'])
+        self.assertIn('above the 93%', opened['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_at_ninety_five_percent_is_rejected(self):

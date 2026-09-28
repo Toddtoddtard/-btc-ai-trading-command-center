@@ -91,8 +91,8 @@ class LockFocusTests(unittest.TestCase):
         self.assertEqual(row["correct"], 1)
         self.assertEqual(state["lock_gate_stats"]["confidence_counterfactuals"][2]["markets"], 1)
 
-    def test_lock_rejects_entry_above_seventy_five(self):
-        market = {"yes_bid": 0.75, "yes_ask": 0.76, "no_bid": 0.24, "no_ask": 0.25}
+    def test_lock_rejects_entry_above_ninety_three(self):
+        market = {"yes_bid": 0.93, "yes_ask": 0.94, "no_bid": 0.06, "no_ask": 0.07}
         row = self.evaluate(market=market)
         self.assertEqual(row["action"], "SCALP UP")
         self.assertFalse(row["checks"]["entry_price"])
