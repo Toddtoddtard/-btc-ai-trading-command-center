@@ -30,7 +30,7 @@ from dashboard_ui import (
     fmt_pct,
     render_dashboard_table,
 )
-from live_feeds import load_live_feeds
+from live_feeds import load_live_feeds, parallel_calls
 from kalshi_reference import fetch_kalshi_reference
 from macd_engine import project_macd_path
 from council_v4 import council_vote
@@ -794,9 +794,14 @@ def fetch_futures_snapshot():
     }
     started = time.perf_counter()
     try:
-        premium, _ = try_bases(FUTURES_BASES, "/fapi/v1/premiumIndex", {"symbol": SYMBOL}, timeout=2.2)
-        oi, _ = try_bases(FUTURES_BASES, "/fapi/v1/openInterest", {"symbol": SYMBOL}, timeout=2.2)
-        depth, _ = try_bases(FUTURES_BASES, "/fapi/v1/depth", {"symbol": SYMBOL, "limit": 50}, timeout=2.2)
+        payloads = parallel_calls({
+            "premium": lambda: try_bases(FUTURES_BASES, "/fapi/v1/premiumIndex", {"symbol": SYMBOL}, timeout=2.2),
+            "oi": lambda: try_bases(FUTURES_BASES, "/fapi/v1/openInterest", {"symbol": SYMBOL}, timeout=2.2),
+            "depth": lambda: try_bases(FUTURES_BASES, "/fapi/v1/depth", {"symbol": SYMBOL, "limit": 50}, timeout=2.2),
+        })
+        premium, _ = payloads["premium"]
+        oi, _ = payloads["oi"]
+        depth, _ = payloads["depth"]
         bids = sum(float(p) * float(q) for p, q in depth.get("bids", []))
         asks = sum(float(p) * float(q) for p, q in depth.get("asks", []))
         denom = bids + asks
@@ -813,18 +818,18 @@ def fetch_futures_snapshot():
     except Exception as exc:
         out["error"] = str(exc)
         try:
-            ticker, _ = try_bases(
-                BYBIT_BASES,
-                "/v5/market/tickers",
-                {"category": "linear", "symbol": SYMBOL},
-                timeout=2.2,
-            )
-            orderbook, _ = try_bases(
-                BYBIT_BASES,
-                "/v5/market/orderbook",
-                {"category": "linear", "symbol": SYMBOL, "limit": 50},
-                timeout=2.2,
-            )
+            payloads = parallel_calls({
+                "ticker": lambda: try_bases(
+                    BYBIT_BASES, "/v5/market/tickers",
+                    {"category": "linear", "symbol": SYMBOL}, timeout=2.2,
+                ),
+                "orderbook": lambda: try_bases(
+                    BYBIT_BASES, "/v5/market/orderbook",
+                    {"category": "linear", "symbol": SYMBOL, "limit": 50}, timeout=2.2,
+                ),
+            })
+            ticker, _ = payloads["ticker"]
+            orderbook, _ = payloads["orderbook"]
             out.update(parse_bybit_futures_snapshot(ticker, orderbook))
             out.pop("error", None)
         except Exception as fallback_exc:
@@ -5224,7 +5229,8 @@ def live_dashboard():
         )
 
     st.caption(
-        f"Dashboard cycle {full_cycle_ms:.0f} ms • kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "
+        f"Data + decision {full_cycle_ms:.0f} ms • feed load {feeds['load_ms']:.0f} ms • "
+        f"kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "
         f"futures snapshot {futures.get('feed_ms', np.nan):.0f} ms • Kalshi target cache 3s"
     )
 
@@ -6524,6 +6530,9 @@ def live_dashboard():
                 "auto_paper": get_auto_state(),
                 "auto_cycle": auto_result,
                 "full_cycle_ms": full_cycle_ms,
+                "feed_load_ms": feeds["load_ms"],
+                "feed_call_ms": feeds["call_ms"],
+                "timing_note": "Server-side data and decision time before chart rendering; not end-to-end market latency. Feed call timings include cache lookups.",
             })
 
     st.divider()

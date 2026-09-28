@@ -1,9 +1,23 @@
 """Concurrent loading for independent dashboard market-data feeds."""
 
 from concurrent.futures import ThreadPoolExecutor
+from time import perf_counter
 
 import numpy as np
 import pandas as pd
+
+
+def parallel_calls(calls):
+    """Run a small batch of independent reads, preserving errors and keys.
+
+    Callers must bound network timeouts. Wait for all workers before returning
+    or raising so failures cannot leave overlapping request batches behind.
+    """
+    if not calls:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(len(calls), 7), thread_name_prefix="feed-batch") as pool:
+        jobs = {name: pool.submit(fetch) for name, fetch in calls.items()}
+        return {name: job.result() for name, job in jobs.items()}
 
 
 def load_live_feeds(
@@ -22,18 +36,28 @@ def load_live_feeds(
     network access. Feed freshness, values, and exception behavior match the
     former inline implementation in ``app.py``.
     """
+    started = perf_counter()
     errors = []
+    call_ms = {}
+
+    def timed(name, fetch, *args):
+        call_started = perf_counter()
+        try:
+            return fetch(*args)
+        finally:
+            call_ms[name] = (perf_counter() - call_started) * 1000.0
+
     with ThreadPoolExecutor(max_workers=7, thread_name_prefix="live-feed") as pool:
         jobs = {
-            "ticker": pool.submit(fetch_spot_ticker),
-            "klines": pool.submit(fetch_klines, "1m", 500),
-            "trades": pool.submit(fetch_agg_trades, 600),
-            "futures": pool.submit(fetch_futures_snapshot),
-            "kalshi": pool.submit(fetch_kalshi_markets),
-            "hourly_kalshi": pool.submit(fetch_hourly_kalshi_markets),
+            "ticker": pool.submit(timed, "ticker", fetch_spot_ticker),
+            "klines": pool.submit(timed, "klines", fetch_klines, "1m", 500),
+            "trades": pool.submit(timed, "trades", fetch_agg_trades, 600),
+            "futures": pool.submit(timed, "futures", fetch_futures_snapshot),
+            "kalshi": pool.submit(timed, "kalshi", fetch_kalshi_markets),
+            "hourly_kalshi": pool.submit(timed, "hourly_kalshi", fetch_hourly_kalshi_markets),
         }
         if fetch_kalshi_reference is not None:
-            jobs["kalshi_reference"] = pool.submit(fetch_kalshi_reference)
+            jobs["kalshi_reference"] = pool.submit(timed, "kalshi_reference", fetch_kalshi_reference)
 
         try:
             ticker = jobs["ticker"].result()
@@ -88,4 +112,6 @@ def load_live_feeds(
         "hourly_kalshi": hourly_kalshi,
         "kalshi_reference": kalshi_reference,
         "errors": errors,
+        "load_ms": (perf_counter() - started) * 1000.0,
+        "call_ms": call_ms,
     }
