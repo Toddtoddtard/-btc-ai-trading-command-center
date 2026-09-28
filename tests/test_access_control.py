@@ -13,7 +13,7 @@ class AccessControlSourceTests(unittest.TestCase):
     def test_login_displays_the_deployed_build_when_provided(self):
         source = (Path(__file__).resolve().parents[1] / "access_control.py").read_text()
         app_source = (Path(__file__).resolve().parents[1] / "app.py").read_text()
-        self.assertIn('DEPLOYED_BUILD = "2026.09.28-r90-lock-entry-93"', source)
+        self.assertIn('DEPLOYED_BUILD = "2026.09.28-r91-import-refresh"', source)
         self.assertIn('st.caption(f"Deployed build: {DEPLOYED_BUILD}")', source)
         self.assertIn('from access_control import DEPLOYED_BUILD, require_owner_approval', app_source)
         self.assertIn('APP_VERSION = DEPLOYED_BUILD', app_source)
