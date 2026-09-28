@@ -1,4 +1,5 @@
 import json
+import importlib
 import math
 import re
 import sqlite3
@@ -7,6 +8,15 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+# Streamlit can rerun the updated entrypoint while retaining older imported
+# modules. Refresh these stateless modules in dependency order before binding
+# their exports, so a deployment cannot mix old helpers or price caps with new UI.
+for _runtime_module in (
+    "access_control", "lock_focus", "kalshi_paper_engine",
+    "background_paper", "pro_trade_ticket", "live_feeds",
+):
+    importlib.reload(importlib.import_module(_runtime_module))
 
 import numpy as np
 import pandas as pd
