@@ -468,7 +468,7 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('a[aria-label="Link to heading"]', source)
         self.assertIn('load_live_feeds(', source)
         self.assertIn('with ThreadPoolExecutor(max_workers=7', feed_source)
-        self.assertEqual(feed_source.count('pool.submit(fetch_'), 7)
+        self.assertEqual(feed_source.count('pool.submit(timed,'), 7)
         self.assertIn('ticker = jobs["ticker"].result()', feed_source)
         self.assertIn('raw_history, kline_ms = jobs["klines"].result()', feed_source)
         self.assertIn('aggregate_trades, aggregate_ms = jobs["trades"].result()', feed_source)

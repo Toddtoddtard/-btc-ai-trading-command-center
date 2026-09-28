@@ -76,3 +76,14 @@ def test_load_live_feeds_starts_independent_reads_concurrently():
         fetch_kalshi_markets=synchronized({}),
         fetch_hourly_kalshi_markets=synchronized({}),
     )
+
+
+def test_feed_timings_cover_successful_and_failed_calls():
+    def fail(_limit):
+        raise RuntimeError('offline')
+    feeds = _load(fetch_agg_trades=fail, fetch_kalshi_reference=lambda: {'healthy': True})
+    assert set(feeds['call_ms']) == {
+        'ticker', 'klines', 'trades', 'futures', 'kalshi', 'hourly_kalshi', 'kalshi_reference',
+    }
+    assert all(0 <= duration <= feeds['load_ms'] for duration in feeds['call_ms'].values())
+    assert feeds['errors'] == ['Aggregate trades: offline']
