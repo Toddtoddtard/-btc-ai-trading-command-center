@@ -67,3 +67,9 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 ## Entry caps (user update 2026-09-28)
 
 - LOCK calls and paper entries accept asks up to and including 93%; SCALPs remain capped at 75%. `entry_price_limit` is shared by both execution paths and the ticket. Confidence and immutable LOCK settlement behavior are unchanged.
+
+## Horizon learning labels (2026-10-01)
+
+- The 1m/5m/15m online models now use the last candle closed at or before their deadline, less than 60 seconds old. The previous nearest-candle lookup could use a later or still-forming candle and train on the wrong direction.
+- Missing deadline coverage stays pending. Delayed grading cannot borrow later prices. Tests cover all three horizons, a direction-flipping future candle, missing coverage, and no duplicate training.
+- Existing weights and historical metrics are preserved; old scores are not retroactively corrected. This fixes feedback quality, not a demonstrated win-rate increase. The broader forecast-chart learning upgrade remains separate unfinished work.

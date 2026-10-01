@@ -6,6 +6,7 @@ import pandas as pd
 from horizon_models import (
     FEATURE_NAMES,
     MIN_DIRECTIONAL_ACCURACY,
+    _closed_price_at_target,
     _evaluate_promotion,
     default_model,
     ensure_horizon_state,
@@ -30,6 +31,45 @@ def candles(count=100, start="2026-01-01T00:00:00Z"):
 
 
 class HorizonModelTests(unittest.TestCase):
+    def test_deadline_label_excludes_future_and_forming_candles(self):
+        frame = candles(3)
+        frame["close"] = [99.0, 200.0, 300.0]
+        target = pd.Timestamp("2026-01-01T00:01:45Z").timestamp()
+        # The 00:01 bar closes at 00:02, closer to the target but too late.
+        self.assertEqual(_closed_price_at_target(frame, target), 99.0)
+        self.assertEqual(_closed_price_at_target(frame.iloc[::-1], target), 99.0)
+        self.assertIsNone(_closed_price_at_target(frame.iloc[1:], target))
+        self.assertIsNone(_closed_price_at_target(frame.iloc[:1], target + 60))
+        self.assertEqual(_closed_price_at_target(frame, target + 15), 200.0)
+
+    def test_all_horizons_train_on_deadline_outcome_only_once(self):
+        for horizon in (1, 5, 15):
+            with self.subTest(horizon=horizon):
+                state = {}
+                root = ensure_horizon_state(state)
+                target = pd.Timestamp("2026-01-01T00:01:45Z").timestamp()
+                root["pending"] = [{
+                    "start_price": 100.0,
+                    "features": [1.0] * len(FEATURE_NAMES),
+                    "predictions": {str(horizon): {
+                        "target_at": target, "probability_up": .8,
+                        "baseline_probability_up": .5,
+                    }},
+                }]
+                frame = candles(3)
+                frame["close"] = [99.0, 200.0, 300.0]
+                self.assertEqual(resolve_horizon_predictions(state, frame, now=target - 1), 0)
+                self.assertEqual(resolve_horizon_predictions(state, frame.iloc[1:], now=target), 0)
+                self.assertEqual(len(root["pending"]), 1)
+                # A late grading run must still exclude post-deadline prices.
+                self.assertEqual(resolve_horizon_predictions(state, frame, now=target + 120), 1)
+                model = root["models"][str(horizon)]
+                self.assertEqual(model["hits"], 0)
+                self.assertAlmostEqual(model["brier_sum"], .64)
+                self.assertLess(model["weights"][0], 0)
+                self.assertEqual(resolve_horizon_predictions(state, frame, now=target + 120), 0)
+                self.assertEqual(model["samples"], 1)
+
     def test_features_are_finite_and_past_only(self):
         frame = candles()
         before = feature_vector(frame.iloc[:80].to_dict("records"))
