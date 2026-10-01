@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from profit_policy import entry_economics, selected_probability
 
 
 # The Master must publish a directional call for every active 15-minute market.
@@ -13,17 +14,14 @@ AUTO_SCALPING_ENABLED = True
 LOCK_FOCUS_ENABLED = True
 LOCK_EARLIEST_SECONDS = 15 * 60
 LOCK_LATEST_SECONDS = 30
-# The retained calibrated history contains no observations at 0.80, while the
-# original 0.68 tail produced 28 correct Kalshi directions in 29 resolved
-# observations. Keep the independent score, consensus, feed, target, quote and
-# entry-price checks below; 0.68 is the evidence-supported confidence gate.
+# Legacy thresholds retained for historical telemetry, not eligibility.
 LOCK_MIN_CONFIDENCE = 0.68
 LOCK_MIN_CONSENSUS = 0.55
 LOCK_MIN_SOURCE_HEALTH = 0.70
 LOCK_MIN_ABS_SCORE = 0.20
 LOCK_MIN_MARKET_SUPPORT = 0.52
-LOCK_MAX_ENTRY_PRICE = 0.93
-SCALP_MAX_ENTRY_PRICE = 0.75
+LOCK_MAX_ENTRY_PRICE = 1.0
+SCALP_MAX_ENTRY_PRICE = 1.0
 
 
 def _f(value, default=None):
@@ -70,12 +68,13 @@ def evaluate_lock_focus(
     target_confirmed,
     edge_floor=0.0,
     direction=None,
+    probability_up=None,
 ):
     """Publish a directional call every window; upgrade only qualified calls to LOCK.
 
     A failed LOCK check no longer erases the Master's direction into WAIT.
-    It becomes SCALP UP/DOWN. The paper execution engine independently enforces
-    entry-price, fee, profitability, position-size and circuit-breaker rules.
+    It becomes SCALP UP/DOWN. Engines independently enforce sized net economics,
+    position-size and circuit-breaker rules.
     """
     base_score = _f(base_score, 0.0)
     confidence = _f(confidence, 0.0)
@@ -101,16 +100,13 @@ def evaluate_lock_focus(
     market_support = None if bid is None or ask is None else (bid + ask) / 2.0
     required_score = max(LOCK_MIN_ABS_SCORE, _f(edge_floor, 0.0))
 
+    economics = entry_economics("LOCK", 1, ask, selected_probability(probability_up, side))
     checks = {
         "window": seconds_remaining is not None and seconds_remaining > LOCK_LATEST_SECONDS,
-        "confidence": confidence >= LOCK_MIN_CONFIDENCE,
-        "score": abs(base_score) >= required_score,
-        "consensus": consensus >= LOCK_MIN_CONSENSUS,
         "source_health": source_health >= LOCK_MIN_SOURCE_HEALTH,
         "target_confirmed": bool(target_confirmed),
-        "quote": ask is not None and bid is not None,
-        "entry_price": ask is not None and ask <= LOCK_MAX_ENTRY_PRICE,
-        "market_support": market_support is not None and market_support >= LOCK_MIN_MARKET_SUPPORT,
+        "quote": ask is not None and bid is not None and 0 <= bid <= ask < 1 and ask > 0,
+        "expected_profit": economics["approved"],
     }
     lock_eligible = all(checks.values())
     action = f"LOCK {direction}" if lock_eligible else f"SCALP {direction}"
@@ -130,6 +126,7 @@ def evaluate_lock_focus(
         "selected_ask": ask,
         "market_support": market_support,
         "checks": checks,
+        "economics": economics,
         "reason": (
             "Qualified LOCK setup"
             if lock_eligible

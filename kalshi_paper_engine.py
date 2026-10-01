@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 
 from lock_focus import LOCK_MAX_ENTRY_PRICE, LOCK_MIN_CONFIDENCE
 from lock_focus import SCALP_MAX_ENTRY_PRICE
+from profit_policy import entry_economics, selected_probability
 
 
 KALSHI_PUBLIC_BASES = (
@@ -38,10 +39,8 @@ def fetch_settled_result(ticker):
 
 GENERAL_TAKER_FEE_RATE = 0.07
 MAX_ENTRY_PRICE = SCALP_MAX_ENTRY_PRICE
-# Paper-trading exploration gate: still reject extreme lottery-style odds,
-# but allow more borderline bot calls to collect evidence. The 75% max entry
-# cap, fee checks, loss circuit breaker, and profitability gate remain intact.
-MIN_SCALP_MARKET_PROBABILITY = 0.15
+# Entry eligibility is now determined by net economics, not market odds.
+MIN_SCALP_MARKET_PROBABILITY = 0.0
 MAX_SCALPS_PER_MARKET = 10
 MAX_LOCKS_PER_MARKET = 1
 MAX_SCALP_LOSSES_PER_MARKET = 2
@@ -59,9 +58,7 @@ UNPROVEN_POSITION_CAP = 0.02
 RECOVERY_POSITION_CAP = 0.005
 RECOVERY_MAX_ENTRIES_PER_MARKET = 1
 
-# Paper SCALPs only need a 5% projected gross move before fees. This is
-# intentionally looser so the paper trader can follow more of the bot's calls
-# while the 75% max entry, fee accounting, drawdown gate and stop rules stay on.
+# Retained 5% management trigger for existing SCALPs; not an entry minimum.
 SCALP_MIN_GROSS_RETURN = 0.05
 # After the minimum return is reached, hold only when the live forecast still
 # shows meaningful additional upside beyond the executable exit bid.
@@ -442,7 +439,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     # bot's actual LOCK decisions. Hard execution constraints still apply.
     if strategy == "SCALP" and not bool(risk.get("approved")):
         return None
-    if strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
+    if decision.get("execution_approved") is False:
         return None
     ticker = str(decision.get("kalshi_ticker") or "")
     if not ticker:
@@ -451,7 +448,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if strategy == "SCALP" and not scalp_gate["approved"]:
         return None
     entry = _quote(decision, side, ask=True)
-    if entry is None or entry > entry_price_limit(strategy):
+    if entry is None or not 0 < entry < 1:
         return None
     if strategy == "SCALP":
         market_probability = _selected_side_market_probability(decision, side)
@@ -461,7 +458,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         ):
             return None
         projected_exit = _projected_scalp_exit(decision)
-        required_exit = entry * (1.0 + SCALP_MIN_GROSS_RETURN)
+        required_exit = entry
         if projected_exit is None or projected_exit < required_exit - 1e-12:
             return None
     now = time.time()
@@ -514,7 +511,9 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
             contracts -= 1
         if contracts < 1:
             return None
-        if strategy == "SCALP" and projected_net_pnl(contracts, entry, projected_exit) <= 0:
+        value = (selected_probability(decision.get("contract_probability_up"), side)
+                 if strategy == "LOCK" else projected_exit)
+        if not entry_economics(strategy, contracts, entry, value)["approved"]:
             return None
         fee = kalshi_taker_fee(contracts, entry)
         total_cost = entry * contracts + fee
@@ -860,14 +859,6 @@ def manage_kalshi_paper_cycle(
 
     action = str(decision.get("action", "")).upper()
     strategy = "LOCK" if action.startswith("LOCK") else "SCALP"
-    if entry_side and strategy == "LOCK" and _decision_confidence(decision) < LOCK_MIN_CONFIDENCE:
-        return {
-            "event": False,
-            "message": (
-                f"Skipped PAPER LOCK: confidence {_decision_confidence(decision) * 100:.0f}% "
-                f"is below the {LOCK_MIN_CONFIDENCE * 100:.0f}% LOCK confidence floor."
-            ),
-        }
     if (
         entry_side
         and strategy in {"SCALP", "LOCK"}
@@ -948,7 +939,7 @@ def manage_kalshi_paper_cycle(
     if entry_side and action.startswith("SCALP"):
         projected_exit = _projected_scalp_exit(decision)
         required_exit = (
-            entry_price * (1.0 + SCALP_MIN_GROSS_RETURN)
+            entry_price
             if entry_price is not None
             else None
         )
@@ -971,7 +962,7 @@ def manage_kalshi_paper_cycle(
                 "event": False,
                 "message": (
                     f"Skipped PAPER SCALP: projected exit {projected_text} is below "
-                    f"the {SCALP_MIN_GROSS_RETURN * 100:.0f}% gross-return target "
+                    f"entry price "
                     f"({required_text})."
                 ),
             }

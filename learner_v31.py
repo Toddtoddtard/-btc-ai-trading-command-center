@@ -88,12 +88,14 @@ def ensure_v31(state):
     state.setdefault("lock_gate_history", [])
     state.setdefault("lock_gate_stats", {})
     state["btc_execution_mode"] = {
-        "name": "BALANCED_CALLS",
+        "name": "PROFIT_BASED_PAPER",
         "paper_only": True,
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "lock_focus_enabled": True,
         "earliest_lock_seconds": LOCK_EARLIEST_SECONDS,
-        "confidence_floor": LOCK_MIN_CONFIDENCE,
+        "confidence_floor": None,
+        "minimum_net_edge_per_contract": 0.01,
+        "eligibility": "expected value after fees",
         "maximum_entry_price": LOCK_MAX_ENTRY_PRICE,
         "maximum_lock_entry_price": LOCK_MAX_ENTRY_PRICE,
         "maximum_scalp_entry_price": SCALP_MAX_ENTRY_PRICE,
@@ -629,11 +631,11 @@ def current_shadow_call(state, df, market_info):
         target_confirmed=target_confirmed,
         edge_floor=policy["edge_floor"],
         direction=direction,
+        probability_up=contract_probability_up,
     )
     call["master_action"] = focus["action"]
-    execution_approved, execution_reason = learned_trade_gate(
-        focus["action"], confidence, base_score, consensus, policy, source_health
-    )
+    execution_approved = source_health >= 0.70 and target is not None
+    execution_reason = "Profit eligibility checked at fill" if execution_approved else "WAIT — FEED HEALTH / TARGET"
     call["execution_approved"] = bool(execution_approved)
     call["execution_reason"] = execution_reason
     call["would_wait"] = not execution_approved
@@ -650,11 +652,14 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         return False
     old_action = str(pending.get("master_action") or "WAIT").upper()
     if old_action.startswith("LOCK"):
+        # Refresh economics/feed approval without changing the immutable call.
+        for key in ("contract_probability_up", "execution_approved", "execution_reason"):
+            pending[key] = live_call.get(key)
         return False
     for key in (
         "specialists", "master_confidence", "master_base_score",
         "master_action", "would_wait", "lock_focus",
-        "execution_approved", "execution_reason",
+        "execution_approved", "execution_reason", "contract_probability_up",
     ):
         pending[key] = live_call.get(key)
     if str(pending.get("master_action") or "").startswith("LOCK"):

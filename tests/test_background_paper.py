@@ -45,7 +45,7 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertFalse(bg.reconcile_shared_paper_ledger(paper)["ok"])
 
     def pending(self, **updates):
-        p = {"ticker": "KXBTC15M-TEST", "expires_at": 2000, "start_price": 100000, "predicted_end": 100300, "target": 100000, "predicted_direction": 1, "master_confidence": .70, "would_wait": False}
+        p = {"ticker": "KXBTC15M-TEST", "expires_at": 2000, "start_price": 100000, "predicted_end": 100300, "target": 100000, "predicted_direction": 1, "master_confidence": .70, "contract_probability_up": .90, "would_wait": False}
         p.update(updates)
         return {"pending": p}
 
@@ -72,26 +72,19 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertIn("Directional call published", paper["last_message"])
         self.assertIn("FEED HEALTH", paper["last_message"])
 
-    def test_scalp_entry_above_75_is_rejected(self):
+    def test_scalp_entry_above_75_with_net_edge(self):
         state = self.pending()
         paper = bg.run_cycle(state, lambda _: self.market(yes_bid_dollars=.75, yes_ask_dollars=.76), now=1000)
-        self.assertIsNone(paper["open_position"])
-        self.assertIn("above the 75%", paper["last_message"])
+        self.assertIsNotNone(paper['open_position'])
 
     def test_blocked_signal_remains_visible_after_later_wait(self):
-        state = self.pending()
-        paper = bg.run_cycle(
-            state,
-            lambda _: self.market(yes_bid_dollars=.75, yes_ask_dollars=.76),
-            now=1000,
-        )
-        self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
-        self.assertIn("above the 75%", paper["last_signal_message"])
-        state["pending"]["would_wait"] = True
+        state = self.pending(master_action='LOCK UP', contract_probability_up=.6)
+        paper = bg.run_cycle(state, lambda _: self.market(yes_bid_dollars=.75, yes_ask_dollars=.76), now=1000)
+        self.assertEqual(paper['last_signal']['outcome'], 'BLOCKED')
+        state['pending']['master_action'] = 'WAIT'
         paper = bg.run_cycle(state, lambda _: self.market(), now=1001)
-        self.assertEqual(paper["last_message"], "No paper action: learner selected WAIT.")
-        self.assertIn("above the 75%", paper["last_signal_message"])
-        self.assertEqual(len(paper["signal_attempts"]), 1)
+        self.assertIn('fees', paper['last_signal_message'])
+        self.assertEqual(len(paper['signal_attempts']), 1)
 
     def test_lock_entry_above_93_is_rejected(self):
         state = self.pending(master_confidence=.95, master_action="LOCK UP")
@@ -102,7 +95,7 @@ class BackgroundPaperTests(unittest.TestCase):
         )
         self.assertIsNone(paper["open_position"])
         self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
-        self.assertIn("above the 93%", paper["last_message"])
+        self.assertIn("fees", paper["last_message"])
 
     def test_lock_entry_at_95_is_rejected(self):
         state = self.pending(master_confidence=.95, master_action="LOCK UP")
@@ -112,7 +105,7 @@ class BackgroundPaperTests(unittest.TestCase):
             now=1000,
         )
         self.assertIsNone(paper["open_position"])
-        self.assertIn("above the 93%", paper["last_message"])
+        self.assertIn("fees", paper["last_message"])
 
     def test_lock_first_mode_disables_new_scalps(self):
         state = self.pending()
@@ -121,21 +114,11 @@ class BackgroundPaperTests(unittest.TestCase):
         self.assertIsNone(paper["open_position"])
         self.assertIn("execution mode", paper["last_message"])
 
-    def test_lottery_style_low_probability_scalp_is_rejected(self):
+    def test_low_price_scalp_admitted_with_net_edge(self):
         state = self.pending()
-        paper = bg.run_cycle(
-            state,
-            lambda _: self.market(
-                yes_bid_dollars=0.0,
-                yes_ask_dollars=.001,
-                no_bid_dollars=.999,
-                no_ask_dollars=1.0,
-            ),
-            now=1000,
-        )
-        self.assertIsNone(paper["open_position"])
-        self.assertIn("below the 15% lottery floor", paper["last_message"])
-        self.assertEqual(paper["last_signal"]["outcome"], "BLOCKED")
+        paper = bg.run_cycle(state, lambda _: self.market(yes_bid_dollars=.09,
+                             yes_ask_dollars=.10, no_bid_dollars=.90, no_ask_dollars=.91), now=1000)
+        self.assertIsNotNone(paper['open_position'])
 
     def test_qualifying_scalp_opens_and_takes_profit(self):
         state = self.pending()

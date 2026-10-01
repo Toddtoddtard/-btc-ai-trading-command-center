@@ -18,7 +18,7 @@ class ContractRegressionTests(unittest.TestCase):
                              kalshi_close_ts=time.time()+900, target_price=100,
                              yes_ask_dollars=.50, yes_bid_dollars=.48,
                              no_ask_dollars=.52, no_bid_dollars=.50,
-                             confidence=.95, scalp_projected_exit_price=.80)
+                             confidence=.95, contract_probability_up=.90, scalp_projected_exit_price=.80)
         self.risk = dict(approved=True, position_pct=.1)
 
     def test_learner_cadence_reports_normal_best_effort_interval(self):
@@ -133,6 +133,7 @@ class ContractRegressionTests(unittest.TestCase):
 
     def test_no_settles_from_official_result(self):
         self.decision['action'] = 'LOCK DOWN'
+        self.decision['contract_probability_up'] = .10
         self.open()
         self.expire()
         self.cycle('no', spot=10000)
@@ -182,28 +183,15 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(closed['result'], 'WIN')
         self.assertAlmostEqual(closed['pnl'], engine.paper_summary(self.db)['realized_pnl'])
 
-    def test_scalp_rejects_lottery_style_selected_side(self):
-        self.decision.update(
-            action='SCALP UP',
-            yes_ask_dollars=.001,
-            yes_bid_dollars=0.0,
-            no_ask_dollars=1.0,
-            no_bid_dollars=.999,
-            scalp_projected_exit_price=.80,
-        )
-        skipped = self.cycle()
-        self.assertFalse(skipped['event'])
-        self.assertIn('below the 15% lottery floor', skipped['message'])
-        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
-        self.assertIsNone(
-            engine.open_position(self.db, 500, self.decision, self.risk, 100)
-        )
+    def test_low_price_scalp_requires_net_edge(self):
+        self.decision.update(action='SCALP UP', yes_ask_dollars=.10,
+                             yes_bid_dollars=.09, scalp_projected_exit_price=.20)
+        self.assertTrue(self.cycle()['event'])
 
-    def test_scalp_requires_projected_five_percent_gross_return(self):
+    def test_scalp_requires_projected_net_profit(self):
         self.decision.update(action='SCALP UP', scalp_projected_exit_price=.52)
         skipped = self.cycle()
         self.assertFalse(skipped['event'])
-        self.assertIn('5% gross-return target', skipped['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
         # A 53% forecast clears gross return but cannot cover both fees.
@@ -291,14 +279,9 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertEqual(reason, 'OFFICIAL_SETTLEMENT:yes')
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
-    def test_lock_requires_sixty_eight_percent_confidence(self):
-        self.decision['confidence'] = .679
-        blocked = self.cycle()
-        self.assertFalse(blocked['event'])
-        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
-        self.decision['confidence'] = .68
-        opened = self.cycle()
-        self.assertTrue(opened['event'])
+    def test_lock_uses_contract_value_instead_of_confidence_floor(self):
+        self.decision['confidence'] = .55
+        self.assertTrue(self.cycle()['event'])
         self.assertEqual(engine.paper_summary(self.db)['open_position']['strategy'], 'LOCK')
 
     def test_only_one_lock_entry_is_allowed_per_market(self):
@@ -494,7 +477,7 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('persistent GitHub learning-state ledger', source)
         self.assertIn('Balanced-call mode publishes a directional outlook', source)
         self.assertIn('Paper execution remains separate', source)
-        self.assertIn('at least 68% calibrated confidence', source)
+        self.assertIn('1¢ margin per contract', source)
         self.assertIn('only from that ticker\'s official Kalshi settlement', source)
         self.assertIn('if row["pnl"] is None', paper_tab)
         self.assertNotIn('LOCK sells automatically at a 95%', source)
@@ -547,34 +530,13 @@ class ContractRegressionTests(unittest.TestCase):
         self.cycle('yes', enabled=False)
         self.assertEqual(engine.paper_summary(self.db)['samples'], 1)
 
-    def test_scalp_entries_stop_above_seventy_five_percent(self):
-        self.decision.update(
-            action='SCALP UP',
-            yes_ask_dollars=.85,
-            scalp_projected_exit_price=1.0,
-        )
-        skipped = self.cycle()
-        self.assertFalse(skipped['event'])
-        self.assertIn('85%', skipped['message'])
-        self.assertIn('75% maximum', skipped['message'])
-        self.assertIsNone(engine.paper_summary(self.db)['open_position'])
-        self.assertIsNone(
-            engine.open_position(self.db, 500, self.decision, self.risk, 100)
-        )
+    def test_scalp_above_seventy_five_with_net_edge(self):
+        self.decision.update(action='SCALP UP', yes_ask_dollars=.85,
+                             scalp_projected_exit_price=.90)
+        self.assertTrue(self.cycle()['event'])
+        self.assertEqual(engine.paper_summary(self.db)['open_position']['entry_price'], .85)
 
-        # Exactly 75% remains eligible; its 10% gross-return target is 82.5%.
-        self.decision.update(
-            yes_ask_dollars=.75,
-            scalp_projected_exit_price=.825,
-        )
-        opened = self.cycle()
-        self.assertTrue(opened['event'])
-        self.assertEqual(
-            engine.paper_summary(self.db)['open_position']['entry_price'],
-            .75,
-        )
-
-    def test_lock_above_ninety_three_percent_is_rejected(self):
+    def test_lock_above_estimated_value_is_rejected(self):
         self.decision.update(
             action='LOCK UP',
             confidence=.95,
@@ -583,7 +545,6 @@ class ContractRegressionTests(unittest.TestCase):
         )
         opened = self.cycle()
         self.assertFalse(opened['event'])
-        self.assertIn('above the 93%', opened['message'])
         self.assertIsNone(engine.paper_summary(self.db)['open_position'])
 
     def test_lock_at_ninety_five_percent_is_rejected(self):
