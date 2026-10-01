@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from multi_timeframe import CONTEXT_FEATURE_NAMES, context_vector, summarize_context
+from learning_prices import closed_price_at
 
 
 HORIZONS = (1, 5, 15)
@@ -258,18 +259,20 @@ def register_horizon_predictions(state, rows, observed_at=None, market_info=None
     return True
 
 
-def _price_at_or_after(frame, target_at, tolerance_seconds=75):
+def _closed_price_at_target(frame, target_at):
+    """Use the last completed minute at the deadline, never a later candle.
+
+    Minute bars are stamped at their opening time. Nearest-time matching can
+    select a still-forming bar, or a later outcome when grading a delayed run.
+    Missing deadline coverage must stay pending rather than invent a label.
+    """
     if frame.empty or "time" not in frame:
         return None
-    times = pd.to_datetime(frame["time"], utc=True, errors="coerce")
-    closes_at = times + pd.Timedelta(minutes=1)
     target = pd.to_datetime(float(target_at), unit="s", utc=True)
-    delta = (closes_at - target).dt.total_seconds().abs()
-    valid = delta <= tolerance_seconds
-    if not valid.any():
-        return None
-    idx = delta[valid].idxmin()
-    return _finite(frame.loc[idx, "close"], None)
+    ordered = frame.copy()
+    ordered["time"] = pd.to_datetime(ordered["time"], utc=True, errors="coerce")
+    ordered = ordered.dropna(subset=["time"]).sort_values("time")
+    return closed_price_at(ordered, target)
 
 
 def _update_model(model, features, outcome, probability, baseline_probability):
@@ -359,7 +362,7 @@ def resolve_horizon_predictions(state, frame, now=None):
             if target_at > now:
                 remaining[key] = prediction
                 continue
-            actual_price = _price_at_or_after(frame, target_at)
+            actual_price = _closed_price_at_target(frame, target_at)
             if actual_price is None:
                 remaining[key] = prediction
                 continue
