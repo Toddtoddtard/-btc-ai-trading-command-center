@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 # modules. Refresh these stateless modules in dependency order before binding
 # their exports, so a deployment cannot mix old helpers or price caps with new UI.
 for _runtime_module in (
-    "access_control", "lock_focus", "kalshi_paper_engine",
+    "access_control", "profit_policy", "lock_focus", "kalshi_paper_engine",
     "background_paper", "pro_trade_ticket", "live_feeds",
 ):
     importlib.reload(importlib.import_module(_runtime_module))
@@ -1781,6 +1781,7 @@ def master_decision(
             target_confirmed=target_confirmed,
             edge_floor=policy["edge_floor"],
             direction=raw_side,
+            probability_up=contract_up_probability,
         )
         lock_up = lock_focus["action"] == "LOCK UP" and raw_side == "UP"
         lock_down = lock_focus["action"] == "LOCK DOWN" and raw_side == "DOWN"
@@ -1838,30 +1839,14 @@ def master_decision(
 
     gate_note = ""
     execution_approved = action not in {"HOLD", "WAIT"}
-    if not _lock_was_already_persisted and action not in {"HOLD", "WAIT"}:
-        allowed, gated_action = learned_trade_gate(
-            action, confidence, base_score, consensus, policy, source_health=source_health
-        )
-        if not allowed:
-            if action.startswith("LOCK"):
-                action = f"SCALP {raw_side}"
-            locked_side = None
-            execution_approved = False
-            gate_note = f"{gated_action}; learned reliability gate blocked trade"
-
-    # Learned precision layer is a final safety veto only. It must not duplicate
-    # the council trade gate or permanently deadlock otherwise-valid calls.
-    if (
-        not _lock_was_already_persisted
-        and action not in {"HOLD", "WAIT"}
-        and not bool(v5_council.get("precision_gate_passed"))
-    ):
-        if action.startswith("LOCK"):
-            action = f"SCALP {raw_side}"
-        locked_side = None
+    # Profit eligibility is checked with actual order size in both engines.
+    # Confidence/consensus remain model inputs and sizing signals, not duplicate vetoes.
+    if source_health < 0.70 or not reference_healthy:
         execution_approved = False
-        precision_reason = str(v5_council.get("precision_gate_reason", "WAIT — v5 precision gate"))
-        gate_note = (gate_note + "; " if gate_note else "") + precision_reason
+        gate_note = "WAIT — FEED HEALTH / TARGET REFERENCE"
+        if not _lock_was_already_persisted:
+            action = f"SCALP {raw_side}" if kctx["available"] else "HOLD"
+            locked_side = None
 
     # Final one-way latch. Existing locks override all later signal/gate changes.
     # A newly approved lock is atomically registered; INSERT OR IGNORE guarantees
@@ -3741,9 +3726,9 @@ with st.expander("🧾 Recent Updates — Last 24 Hours", expanded=False):
 - **Continuous LOCK evaluation:** LOCK qualification is checked throughout the active 15-minute market instead of only at a single late-window moment.
 - **Three-market outlook:** the research layer now grades directional outlooks for the next three 15-minute markets to provide broader context without changing paper execution by itself.
 - **Authoritative Kalshi entry display:** selected-side paper fills come from the shared Kalshi ledger so the displayed entry percentage matches the actual recorded paper fill.
-- **Balanced call automation:** every healthy BTC 15-minute market gets a directional SCALP outlook; automatic paper entries still require price, fee, data-quality, and reliability approval. LOCK requires at least 68% calibrated confidence plus independent confirmation.
+- **Balanced call automation:** every healthy BTC 15-minute market gets a directional SCALP outlook; automatic paper entries still require price, fee, data-quality, and reliability approval. LOCK eligibility uses estimated settlement value after fees plus a 1¢ margin per contract.
 - **Evidence-based LOCK learning:** every LOCK gate is now retained and graded against official settlement, with paper-only comparisons across 64%–80% confidence floors.
-- **Faster unattended execution checks:** the scheduled paper worker retries safe quotes during each run while preserving the LOCK 93% / SCALP 75% entry ceilings and other risk gates.
+- **Faster unattended execution checks:** the scheduled paper worker retries safe quotes during each run while checking expected profit after fees and retaining exposure and loss controls.
 - **Research calibration safeguards:** walk-forward Brier calibration and JSON-safe learning-state validation were tightened so research updates cannot silently corrupt the learner state.
 - **Responsive validation scorecard:** the Backtest validation metrics now use a readable 3-plus-2 layout instead of five cramped columns.
 
@@ -6048,7 +6033,7 @@ def live_dashboard():
             return f"${value:+,.2f}" if signed else f"${value:,.2f}"
 
         _projected_label = (
-            "Win scenario net" if _ticket["strategy"] == "LOCK" else "Projected net"
+            "Expected settlement net" if _ticket["strategy"] == "LOCK" else "Projected net"
         )
         _blocker_text = (
             " • ".join(_ticket["blockers"])
@@ -6068,7 +6053,7 @@ def live_dashboard():
                 <div class="pro-ticket-cell"><div class="pro-ticket-label">Paper amount</div><div class="pro-ticket-value">{_ticket_money(_ticket['total_cost'])}</div></div>
                 <div class="pro-ticket-cell"><div class="pro-ticket-label">Estimated entry fee</div><div class="pro-ticket-value">{_ticket_money(_ticket['entry_fee'])}</div></div>
                 <div class="pro-ticket-cell"><div class="pro-ticket-label">Break-even exit</div><div class="pro-ticket-value">{_ticket_pct(_ticket['break_even_price'])}</div></div>
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">Target / settlement</div><div class="pro-ticket-value">{_ticket_pct(_ticket['take_profit_price'] if _ticket['strategy'] == 'SCALP' else _ticket['projected_exit_price'])}</div></div>
+                <div class="pro-ticket-cell"><div class="pro-ticket-label">Target / estimated probability</div><div class="pro-ticket-value">{_ticket_pct(_ticket['take_profit_price'] if _ticket['strategy'] == 'SCALP' else _ticket['projected_exit_price'])}</div></div>
                 <div class="pro-ticket-cell"><div class="pro-ticket-label">{_projected_label}</div><div class="pro-ticket-value">{_ticket_money(_ticket['projected_net_pnl'], signed=True)}</div></div>
                 <div class="pro-ticket-cell"><div class="pro-ticket-label">Maximum entry loss</div><div class="pro-ticket-value">{_ticket_money(_ticket['max_loss'])}</div></div>
               </div>
@@ -6128,9 +6113,9 @@ def live_dashboard():
         st.caption(
             "Balanced-call mode publishes a directional outlook for every healthy 15-minute market. "
             "Paper execution remains separate and may reject a visible call for price, fees, feed health, or weak evidence. "
-            "LOCK qualification is evaluated continuously and requires at least 68% calibrated confidence, "
-            "strong council agreement, healthy data, "
-            "target confirmation, market alignment, and a LOCK entry at or below 93%. SCALPs remain capped at 75%. "
+            "LOCK qualification uses estimated settlement probability versus the executable ask, "
+            "fees, and a 1¢ margin per contract. SCALPs use projected exit value after both fees. "
+            "Fixed confidence, consensus, market-support and entry-price percentages no longer veto profitable estimates. "
             "LOCK keeps its original direction, "
             "stays open through the exact 15-minute window, and is finalized "
             "only from that ticker's official Kalshi settlement."

@@ -60,13 +60,13 @@ class ProTradeTicketTests(unittest.TestCase):
 
     def test_lock_preview_is_settlement_based_and_not_risk_gate_labeled(self):
         ticket = build_pro_trade_ticket(
-            _decision("LOCK UP", yes_ask_dollars=0.72),
+            _decision("LOCK UP", yes_ask_dollars=0.72, contract_probability_up=.9),
             {"approved": False, "position_pct": 0.02},
             {"cash": 500.0},
         )
 
         self.assertEqual(ticket["status"], "READY")
-        self.assertEqual(ticket["projected_exit_price"], 1.0)
+        self.assertEqual(ticket["projected_exit_price"], .9)
         self.assertIsNone(ticket["take_profit_price"])
         self.assertIn("official Kalshi settlement", ticket["protection"])
 

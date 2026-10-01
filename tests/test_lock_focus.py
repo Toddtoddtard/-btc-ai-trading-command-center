@@ -15,6 +15,7 @@ class LockFocusTests(unittest.TestCase):
         values = {
             "base_score": 0.40,
             "confidence": 0.95,
+            "probability_up": .8,
             "consensus": 0.75,
             "source_health": 1.0,
             "seconds_remaining": 600,
@@ -68,13 +69,10 @@ class LockFocusTests(unittest.TestCase):
         self.assertEqual(row["action"], "SCALP UP")
         self.assertFalse(row["checks"]["window"])
 
-    def test_lock_requires_sixty_eight_percent_confidence(self):
-        row = self.evaluate(confidence=0.679)
-        self.assertEqual(row["action"], "SCALP UP")
-        self.assertFalse(row["checks"]["confidence"])
-        qualified = self.evaluate(confidence=0.68)
-        self.assertEqual(qualified["action"], "LOCK UP")
-        self.assertTrue(qualified["checks"]["confidence"])
+    def test_lock_confidence_is_not_a_price_independent_veto(self):
+        row = self.evaluate(confidence=.55)
+        self.assertEqual(row['action'], 'LOCK UP')
+        self.assertTrue(row['checks']['expected_profit'])
 
     def test_lock_gate_telemetry_records_and_resolves_official_truth(self):
         focus = self.evaluate(confidence=0.68)
@@ -95,12 +93,11 @@ class LockFocusTests(unittest.TestCase):
         market = {"yes_bid": 0.93, "yes_ask": 0.94, "no_bid": 0.06, "no_ask": 0.07}
         row = self.evaluate(market=market)
         self.assertEqual(row["action"], "SCALP UP")
-        self.assertFalse(row["checks"]["entry_price"])
+        self.assertFalse(row["checks"]["expected_profit"])
 
-    def test_lock_requires_market_and_council_alignment(self):
-        row = self.evaluate(consensus=0.30)
-        self.assertEqual(row["action"], "SCALP UP")
-        self.assertFalse(row["checks"]["consensus"])
+    def test_consensus_is_model_input_not_fixed_veto(self):
+        row = self.evaluate(consensus=.30)
+        self.assertEqual(row['action'], 'LOCK UP')
 
     def test_explicit_settlement_direction_drives_the_call(self):
         row = self.evaluate(base_score=-0.40, direction="UP")
@@ -109,7 +106,7 @@ class LockFocusTests(unittest.TestCase):
 
     def test_down_lock_uses_no_contract(self):
         market = {"yes_bid": 0.37, "yes_ask": 0.39, "no_bid": 0.61, "no_ask": 0.63}
-        row = self.evaluate(base_score=-0.40, market=market)
+        row = self.evaluate(base_score=-0.40, market=market, probability_up=.2)
         self.assertEqual(row["action"], "LOCK DOWN")
         self.assertEqual(row["side"], "NO")
 

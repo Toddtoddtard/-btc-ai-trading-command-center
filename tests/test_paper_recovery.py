@@ -43,7 +43,7 @@ class PaperRecoveryTests(unittest.TestCase):
         self.assertIsNone(paper['open_position'])
         self.assertIn('per-market limit', paper['last_message'])
 
-    def test_recovery_preserves_reliability_and_price_caps(self):
+    def test_recovery_preserves_feed_approval_and_uses_net_edge(self):
         state = self.state()
         state['pending'].update(execution_approved=False, execution_reason='WAIT — CALIBRATION')
         paper = self.run_cycle(state)
@@ -52,8 +52,8 @@ class PaperRecoveryTests(unittest.TestCase):
         state['pending']['execution_approved'] = True
         paper = self.run_cycle(state, market=dict(ticker='KXBTC15M-RECOVERY', status='open',
                                                  yes_bid_dollars=.75, yes_ask_dollars=.76))
-        self.assertIsNone(paper['open_position'])
-        self.assertIn('75%', paper['last_message'])
+        self.assertIsNotNone(paper['open_position'])
+        self.assertLessEqual(paper['open_position']['amount'], 502 * .005)
 
     def test_expired_closed_and_missing_expiry_cannot_open(self):
         for expiry, status in [(999, 'open'), (1000, 'open'), (None, 'open'), (2000, 'settled'), (2000, 'closed')]:
