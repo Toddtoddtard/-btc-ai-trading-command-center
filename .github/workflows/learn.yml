@@ -60,7 +60,7 @@ jobs:
       - name: Checkout app code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -76,7 +76,7 @@ jobs:
         run: |
           set -e
           rm -f /tmp/previous_learning_state.json /tmp/historical_specialist_knowledge_v7.json /tmp/horizon_models.json
-          git fetch origin learning-state:refs/remotes/origin/learning-state || true
+          git fetch --depth=1 origin +learning-state:refs/remotes/origin/learning-state || true
           if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
             git show refs/remotes/origin/learning-state:learning_state.json > /tmp/previous_learning_state.json || true
             git show refs/remotes/origin/learning-state:historical_specialist_knowledge_v7.json > /tmp/historical_specialist_knowledge_v7.json || true
@@ -253,7 +253,7 @@ jobs:
           set -e
           git config user.name "btc-ai-learning-bot"
           git config user.email "actions@users.noreply.github.com"
-          git fetch origin learning-state:refs/remotes/origin/learning-state || true
+          git fetch --depth=1 origin +learning-state:refs/remotes/origin/learning-state || true
           if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
             git checkout -B learning-state refs/remotes/origin/learning-state
           else
