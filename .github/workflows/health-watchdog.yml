@@ -9,9 +9,10 @@ on:
       - 'worker_watchdog.py'
       - 'app_healthcheck.py'
   schedule:
-    - cron: '7,27,47 * * * *'
+    - cron: '4-59/5 * * * *'
+    - cron: '11 * * * *'
   workflow_run:
-    workflows: ['BTC Political Event Watch', 'Train BTC Horizon Models']
+    workflows: ['BTC Political Event Watch', 'Train BTC Horizon Models', 'BTC AI 24x7 Learner']
     types: [completed]
     branches: [main]
 
@@ -40,8 +41,12 @@ jobs:
       - name: Request one stale-learner recovery if no run is active
         env:
           GH_TOKEN: ${{ github.token }}
+          RECOVERY_VERIFY_ONLY: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'BTC AI 24x7 Learner' }}
         run: python worker_watchdog.py
   app-health:
+    # Browser wake checks need not install Chromium every five minutes.
+    # Run them hourly, on explicit changes, or after other periodic workers.
+    if: (github.event_name == 'schedule' && github.event.schedule == '11 * * * *') || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.name != 'BTC AI 24x7 Learner')
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:

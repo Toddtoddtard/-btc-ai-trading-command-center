@@ -689,6 +689,30 @@ def cadence_health(previous_updated_at, now):
     }
 
 
+def record_learning_gap(state, previous_updated_at, now, frame):
+    """Retain snapshot gaps and candle coverage without inventing missed calls."""
+    health = cadence_health(previous_updated_at, now)
+    if (health.get('observed_interval_minutes') or 0) <= 20:
+        return
+    previous = pd.Timestamp(previous_updated_at)
+    previous = previous.tz_localize('UTC') if previous.tzinfo is None else previous.tz_convert('UTC')
+    ends = pd.to_datetime(frame['time'], utc=True, errors='coerce') + pd.Timedelta(minutes=1)
+    expected = max(0, int(now.timestamp() // 60 - previous.timestamp() // 60))
+    recovered = ends[(ends > previous) & (ends <= now)].drop_duplicates().size
+    gaps = state.setdefault('learning_gap_history', [])
+    key = (previous.isoformat(), now.isoformat())
+    if any((r['from'], r['to']) == key for r in gaps):
+        return
+    gaps.append({'from': key[0], 'to': key[1],
+                 'snapshot_gap_minutes': health['observed_interval_minutes'],
+                 'expected_closed_minutes': expected,
+                 'reloaded_closed_minutes': int(recovered),
+                 'unavailable_closed_minutes': max(0, expected - int(recovered)),
+                 'missed_qualifying_calls': None,
+                 'paper_trades_backfilled': False})
+    state['learning_gap_history'] = gaps[-100:]
+
+
 def main():
     state = ensure_v31(load_previous_state())
     previous_updated_at = state.get("updated_at")
@@ -742,6 +766,7 @@ def main():
     update_wait_counterfactual(state)
     update_lifecycles(state)
     updated_now = datetime.now(timezone.utc)
+    record_learning_gap(state, previous_updated_at, updated_now, df)
     state["updated_at"] = updated_now.isoformat()
     current_regime = detect_regime(df)
     state["status"].update({
