@@ -8,6 +8,8 @@ production forecast only after repeated live Brier-score outperformance.
 from __future__ import annotations
 
 import math
+import hashlib
+import json
 import time
 from datetime import datetime, timezone
 
@@ -413,9 +415,19 @@ def merge_offline_bundle(state, bundle):
         if len(weights or []) != len(FEATURE_NAMES):
             continue
         model = root["models"][str(horizon)]
-        if str(model.get("offline_trained_through") or "") >= str(incoming.get("trained_through") or ""):
+        # A corrected trainer can produce a different candidate from the same
+        # archive month. Dates alone silently ignored those corrected models.
+        candidate_id = hashlib.sha256(json.dumps(incoming, sort_keys=True, allow_nan=False).encode()).hexdigest()
+        if model.get("offline_candidate_id") == candidate_id:
             continue
+        if str(model.get("offline_trained_through") or "") > str(incoming.get("trained_through") or ""):
+            continue
+        # Pending probabilities belong to the old weights. Do not train or
+        # score the replacement using predictions it never made.
+        for record in root.get("pending", []):
+            record.get("predictions", {}).pop(str(horizon), None)
         model.update({
+            "offline_candidate_id": candidate_id,
             "weights": [float(x) for x in weights],
             "bias": _finite(incoming.get("bias")),
             "temperature": _finite(incoming.get("temperature"), 1.0),
@@ -433,8 +445,12 @@ def merge_offline_bundle(state, bundle):
             "brier_sum": 0.0,
             "baseline_brier_sum": 0.0,
             "recent": [],
+            "metrics": {},
+            "disabled_reason": "New candidate awaiting independent live validation",
         })
         changed = True
+    root["pending"] = [r for r in root.get("pending", []) if r.get("predictions")]
+    root["affects_execution"] = any(bool(m.get("enabled")) for m in root["models"].values())
     root["offline_source"] = bundle.get("source")
     root["offline_generated_at"] = bundle.get("generated_at")
     return changed

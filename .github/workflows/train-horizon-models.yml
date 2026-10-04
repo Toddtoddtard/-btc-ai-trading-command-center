@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: btc-ai-learning-state
+  group: btc-horizon-training
   cancel-in-progress: false
 
 jobs:
@@ -51,6 +51,29 @@ jobs:
               assert len(model['weights']) == 21
               assert model['validation']['samples'] >= 10000
           PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-candidate
+          path: /tmp/horizon_models.json
+          retention-days: 7
+
+  publish:
+    needs: train
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only the short publication step shares the learner's state lock.
+    # Historical training must not block paper management for up to 90 minutes.
+    concurrency:
+      group: btc-ai-learning-state
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: horizon-candidate
+          path: /tmp
       - name: Publish research bundle
         run: |
           set -e

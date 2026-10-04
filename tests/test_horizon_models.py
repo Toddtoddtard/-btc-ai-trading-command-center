@@ -10,6 +10,7 @@ from horizon_models import (
     _evaluate_promotion,
     default_model,
     ensure_horizon_state,
+    merge_offline_bundle,
     feature_vector,
     register_horizon_predictions,
     resolve_horizon_predictions,
@@ -31,6 +32,28 @@ def candles(count=100, start="2026-01-01T00:00:00Z"):
 
 
 class HorizonModelTests(unittest.TestCase):
+    def test_candidate_replacement_isolates_pending_scores_and_accepts_same_month_fix(self):
+        state = {}
+        root = ensure_horizon_state(state)
+        candidate = {'weights': [0.1] * len(FEATURE_NAMES), 'trained_through': '2026-08',
+                     'promotion_eligible': True}
+        bundle = {'version': 2, 'models': {'1': candidate}}
+        self.assertTrue(merge_offline_bundle(state, bundle))
+        root['models']['1'].update(samples=12, enabled=True, metrics={'samples': 12})
+        root['affects_execution'] = True
+        root['pending'] = [{'predictions': {'1': {'probability_up': .8}, '5': {'probability_up': .6}}}]
+        self.assertFalse(merge_offline_bundle(state, bundle))
+        self.assertEqual(root['models']['1']['samples'], 12)
+        self.assertIn('1', root['pending'][0]['predictions'])
+        candidate['weights'] = [0.2] * len(FEATURE_NAMES)
+        self.assertTrue(merge_offline_bundle(state, bundle))
+        self.assertEqual(root['models']['1']['samples'], 0)
+        self.assertEqual(root['models']['1']['metrics'], {})
+        self.assertFalse(root['affects_execution'])
+        self.assertEqual(set(root['pending'][0]['predictions']), {'5'})
+        candidate['trained_through'] = '2026-07'
+        self.assertFalse(merge_offline_bundle(state, bundle))
+
     def test_deadline_label_excludes_future_and_forming_candles(self):
         frame = candles(3)
         frame["close"] = [99.0, 200.0, 300.0]

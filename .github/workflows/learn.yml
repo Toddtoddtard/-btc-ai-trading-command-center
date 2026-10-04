@@ -42,7 +42,8 @@ on:
       - 'kalshi_paper_engine.py'
       - '.github/workflows/learn.yml'
   schedule:
-    - cron: "*/5 * * * *"
+    # Avoid the top-of-hour scheduling peak. GitHub cron is still best effort.
+    - cron: "2-57/5 * * * *"
 
 permissions:
   contents: write

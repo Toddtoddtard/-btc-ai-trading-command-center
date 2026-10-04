@@ -1,0 +1,64 @@
+name: BTC Availability Watchdog
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/health-watchdog.yml'
+      - 'worker_watchdog.py'
+      - 'app_healthcheck.py'
+  schedule:
+    - cron: '7,27,47 * * * *'
+  workflow_run:
+    workflows: ['BTC Political Event Watch', 'Train BTC Horizon Models']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: btc-availability-watchdog
+  cancel-in-progress: false
+
+jobs:
+  recover-learner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Request one stale-learner recovery if no run is active
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python worker_watchdog.py
+  app-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright==1.55.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Check public dashboard gate and wake app if needed
+        run: python app_healthcheck.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-health
+          path: health-artifacts/
+          retention-days: 3
