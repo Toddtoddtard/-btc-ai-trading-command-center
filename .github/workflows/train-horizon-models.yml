@@ -65,6 +65,7 @@ jobs:
     # Historical training must not block paper management for up to 90 minutes.
     concurrency:
       group: btc-ai-learning-state
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
