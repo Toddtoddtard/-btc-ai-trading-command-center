@@ -90,3 +90,12 @@ class CandleLearningTests(unittest.TestCase):
     def test_empty_feed_fails_visibly(self):
         with self.assertRaisesRegex(ValueError, 'No valid closed candles'):
             fetch_catchup(lambda *_args: [], 'https://example.com', {})
+
+    def test_microsecond_timestamps_are_not_mistaken_for_closed_candles(self):
+        f=candles(120)
+        f['time']=f.time.dt.as_unit('us')
+        self.assertEqual(len(closed_frame(f,now=end(f)-1)),119)
+        ns=f.copy(); ns['time']=ns.time.dt.as_unit('ns')
+        a,b={},{}
+        advance(a,f,now=end(f)); advance(b,ns,now=end(ns))
+        self.assertEqual(a,b)

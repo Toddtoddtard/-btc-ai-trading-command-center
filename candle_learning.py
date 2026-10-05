@@ -22,7 +22,7 @@ def closed_frame(rows, now=None):
     f = rows.copy() if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
     if f.empty or not {'time','open','high','low','close','volume'}.issubset(f.columns):
         return pd.DataFrame()
-    f['time'] = pd.to_datetime(f['time'], utc=True, errors='coerce')
+    f['time'] = pd.to_datetime(f['time'], utc=True, errors='coerce').dt.as_unit('ns')
     for c in ('open', 'high', 'low', 'close', 'volume'):
         f[c] = pd.to_numeric(f[c], errors='coerce')
     f = f.dropna(subset=['time', 'open', 'high', 'low', 'close', 'volume'])
