@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from candle_learning import fetch_catchup, advance as advance_candle_learning
 import learner as legacy
 import learner_v3 as v3
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
@@ -722,6 +723,14 @@ def main():
     timeframe_context = legacy.market_timeframe_context()
     horizon_root = ensure_horizon_state(state)
     horizon_root["latest_context"] = timeframe_context
+    # Recover every closed minute independently of whether any trade was called.
+    try:
+        candle_frame = fetch_catchup(legacy.get, legacy.SPOT, horizon_root)
+        candle_lab = advance_candle_learning(horizon_root, candle_frame)
+        candle_lab.pop("error", None)
+    except Exception as exc:
+        candle_lab = horizon_root.setdefault("candle_learning", {})
+        candle_lab["error"] = str(exc)[:300]
     horizon_graded = resolve_horizon_predictions(state, df)
     graded = strict_grade(state, df)
     forward_outlooks_graded = grade_forward_outlooks(state, df)
@@ -792,6 +801,9 @@ def main():
         "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),
         "horizon_models_paper_only": state.get("horizon_models", {}).get("paper_only") is True,
         "horizon_models_affect_execution": state.get("horizon_models", {}).get("affects_execution", False),
+        "candle_learning_minutes_this_run": candle_lab.get("minutes_this_run", 0),
+        "candle_learning_backlog_minutes": candle_lab.get("backlog_minutes"),
+        "candle_learning_ok": not candle_lab.get("error") and not candle_lab.get("blocked_at"),
         "horizon_predictions_graded_this_run": horizon_graded,
         "horizon_predictions_registered_this_run": horizon_registered,
         "higher_timeframes_requested": 7,

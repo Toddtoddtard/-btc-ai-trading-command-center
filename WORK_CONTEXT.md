@@ -73,3 +73,10 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - The 1m/5m/15m online models now use the last candle closed at or before their deadline, less than 60 seconds old. The previous nearest-candle lookup could use a later or still-forming candle and train on the wrong direction.
 - Missing deadline coverage stays pending. Delayed grading cannot borrow later prices. Tests cover all three horizons, a direction-flipping future candle, missing coverage, and no duplicate training.
 - Existing weights and historical metrics are preserved; old scores are not retroactively corrected. This fixes feedback quality, not a demonstrated win-rate increase. The broader forecast-chart learning upgrade remains separate unfinished work.
+
+## Complete-minute candle learning (2026-10-05)
+
+- `candle_learning.py` paginates closed Binance candles from a durable cursor, learns each consecutive minute with delayed 1/5/15m outcomes, and records replay separately from live forecasts. Missing data blocks catch-up explicitly.
+- `horizon_models.candle_learning` holds the models and coverage. `learner_v31.py` runs it; the Bot Intelligence coverage expander reports backlog, training and live evidence.
+- `docs/CANDLE_LEARNING.md` records source definitions, features, promotion gates and limitations. A qualified model can feed the shared Python forecast's existing bounded horizon component. No replay paper fills or invented order-book data.
+- `tests/test_candle_learning.py` covers pagination, gap recovery, duplicate prevention, chunk equivalence, future exclusion and live/replay separation.
