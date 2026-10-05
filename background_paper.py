@@ -38,6 +38,8 @@ from kalshi_paper_engine import (
     projected_net_pnl,
 )
 
+from profit_policy import entry_economics, selected_probability
+
 STATE_INPUT = os.environ.get("LEARNING_STATE_OUTPUT", "/tmp/learning_state.json")
 STARTING_CASH = 500.0
 # Snapshot of the authoritative Streamlit ledger when background execution was
@@ -1044,13 +1046,6 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if ask is None or bid is None:
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER entry: executable quote unavailable.", "BLOCKED", now)
         return paper
-    if strategy == "LOCK" and confidence < LOCK_MIN_CONFIDENCE:
-        _record_signal_outcome(
-            paper, pending, ticker, side, strategy, confidence,
-            f"Skipped PAPER LOCK: confidence {confidence*100:.0f}% is below the {LOCK_MIN_CONFIDENCE*100:.0f}% LOCK confidence floor.",
-            "BLOCKED", now,
-        )
-        return paper
     if strategy == "SCALP" and not auto_scalping_enabled:
         _record_signal_outcome(
             paper, pending, ticker, side, strategy, confidence,
@@ -1058,7 +1053,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             "BLOCKED", now,
         )
         return paper
-    if ask > entry_price_limit(strategy):
+    if not 0 < ask < 1 or not 0 <= bid <= ask:
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, f"Skipped PAPER {strategy}: Kalshi price {ask*100:.0f}% is above the {entry_price_limit(strategy)*100:.0f}% maximum.", "BLOCKED", now)
         return paper
     if strategy == "SCALP":
@@ -1089,12 +1084,12 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER SCALP: " + gate["reason"], "BLOCKED", now)
             return paper
         projected = _projected_side_value(pending, market, side)
-        required_exit = ask * (1.0 + SCALP_MIN_GROSS_RETURN)
+        required_exit = ask
         if projected is None or projected < required_exit:
             text = "unavailable" if projected is None else f"{projected*100:.0f}%"
             message = (
                 f"Skipped PAPER SCALP: projected exit {text} is below the "
-                f"{SCALP_MIN_GROSS_RETURN*100:.0f}% gross-return target "
+                f"entry price "
                 f"({required_exit*100:.0f}%)."
             )
             _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, "BLOCKED", now)
@@ -1116,9 +1111,12 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if contracts < 1:
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER entry: paper allocation is too small.", "BLOCKED", now)
         return paper
-    if strategy == "SCALP" and projected_net_pnl(contracts, ask, projected) <= 0:
+    value = (selected_probability(pending.get("contract_probability_up"), side)
+             if strategy == "LOCK" else projected)
+    economics = entry_economics(strategy, contracts, ask, value)
+    if not economics["approved"]:
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
-                              "Skipped PAPER SCALP: projected profit is not positive after entry and exit fees.", "BLOCKED", now)
+                              "Skipped PAPER entry: " + economics["reason"], "BLOCKED", now)
         return paper
     # A final deadline check protects the actual fill, not just the forecast.
     if live_clock:

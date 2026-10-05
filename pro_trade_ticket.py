@@ -9,6 +9,7 @@ regression-tested independently from Streamlit.
 from __future__ import annotations
 
 import math
+from profit_policy import entry_economics, selected_probability
 
 from kalshi_paper_engine import (
     entry_price_limit,
@@ -113,13 +114,13 @@ def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=Fals
     if strategy == "SCALP":
         projected_exit = _finite((decision or {}).get("scalp_projected_exit_price"))
     elif strategy == "LOCK":
-        projected_exit = 1.0
+        projected_exit = selected_probability((decision or {}).get("contract_probability_up"), side)
     if projected_exit is not None:
         projected_exit = min(1.0, max(0.0, projected_exit))
 
     projected_exit_fee = (
         kalshi_taker_fee(contracts, projected_exit)
-        if contracts and projected_exit is not None
+        if strategy == "SCALP" and contracts and projected_exit is not None
         else 0.0
     )
     projected_net = (
@@ -139,7 +140,12 @@ def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=Fals
         take_profit = min(1.0, entry * (1.0 + SCALP_MIN_GROSS_RETURN))
         emergency_stop = max(0.0, entry - SCALP_STOP_LOSS_POINTS)
 
+    economics = entry_economics(strategy, contracts, entry, projected_exit)
     blockers = []
+    if strategy in {"LOCK", "SCALP"} and not economics["approved"]:
+        blockers.append(economics["reason"])
+    if (decision or {}).get("execution_approved") is False:
+        blockers.append("feed or target checks have not approved execution")
     if side is None:
         blockers.append("Master AI is waiting for a qualified call")
     if has_open_position:

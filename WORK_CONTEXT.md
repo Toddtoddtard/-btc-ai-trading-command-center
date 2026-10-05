@@ -73,3 +73,9 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - The 1m/5m/15m online models now use the last candle closed at or before their deadline, less than 60 seconds old. The previous nearest-candle lookup could use a later or still-forming candle and train on the wrong direction.
 - Missing deadline coverage stays pending. Delayed grading cannot borrow later prices. Tests cover all three horizons, a direction-flipping future candle, missing coverage, and no duplicate training.
 - Existing weights and historical metrics are preserved; old scores are not retroactively corrected. This fixes feedback quality, not a demonstrated win-rate increase. The broader forecast-chart learning upgrade remains separate unfinished work.
+
+## Profit-based paper eligibility (2026-10-01)
+
+- `profit_policy.py` now owns eligibility: selected-side settlement probability for LOCK, projected exit value for SCALP, minus rounded fees, must leave at least $0.01 per contract. This is estimated edge, not guaranteed profit. The existing general 0.07 fee model with conservative whole-cent rounding is retained; series-specific fee multipliers are not yet modeled.
+- Fixed 68% confidence, 55% consensus, 52% market support, score and entry-price ceilings no longer veto entries. Confidence and specialists still inform forecasts and sizing. Missing probabilities fail closed; confidence is never substituted for contract probability.
+- Both paper engines and the ticket check actual quantity economics. App and learner retain 70% feed health, target checks, immutable LOCK direction, expiry, exposure limits and loss controls. No ledger resets or live endpoints. Existing SCALP exit management stays unchanged.

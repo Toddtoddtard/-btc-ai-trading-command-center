@@ -27,9 +27,9 @@ class RuntimeImportTests(unittest.TestCase):
             exec('from live_feeds import load_live_feeds, parallel_calls', namespace)
             self.assertTrue(callable(namespace['parallel_calls']))
             self.assertEqual(namespace['parallel_calls']({'x': lambda: 7}), {'x': 7})
-            self.assertEqual(kalshi_paper_engine.entry_price_limit('LOCK'), .93)
-            self.assertEqual(background_paper.entry_price_limit('LOCK'), .93)
-            self.assertEqual(background_paper.entry_price_limit('SCALP'), .75)
+            self.assertEqual(kalshi_paper_engine.entry_price_limit('LOCK'), 1.0)
+            self.assertEqual(background_paper.entry_price_limit('LOCK'), 1.0)
+            self.assertEqual(background_paper.entry_price_limit('SCALP'), 1.0)
             self.assertTrue(lock_focus.AUTO_SCALPING_ENABLED)
         finally:
             for module in (lock_focus, kalshi_paper_engine, background_paper, live_feeds):
