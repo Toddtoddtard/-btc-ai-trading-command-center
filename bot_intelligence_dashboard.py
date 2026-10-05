@@ -94,6 +94,24 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
         f"Current regime: {regime} • contribution snapshots graded: {evaluated:,} • verdict minimum: {minimum} samples."
     )
 
+    candle_lab = (learning_state.get("horizon_models") or {}).get("candle_learning", {})
+    if candle_lab:
+        with st.expander("Candle and wick learning coverage"):
+            st.caption("Replayed candles train the models. Live scores count only forecasts captured before their outcomes. These are BTC direction scores, not Kalshi trade wins.")
+            st.write(f"Closed minutes studied: {candle_lab.get('minutes_observed', 0):,} · 15-minute boundaries covered: {candle_lab.get('windows_observed', 0):,} · Backlog: {candle_lab.get('backlog_minutes', 'unknown')} minutes")
+            if candle_lab.get("error") or candle_lab.get("blocked_at"):
+                st.warning("Candle catch-up is blocked; missing data has not been counted as learned.")
+            records = []
+            for horizon, model in candle_lab.get("models", {}).items():
+                live = model.get("live_metrics", {})
+                replay = model.get("replay_metrics", {})
+                records.append({"Horizon": f"{horizon}m", "Training labels": model.get("trained", 0),
+                                "Live samples": live.get("samples", 0),
+                                "Live accuracy": f"{live['hit']:.1%}" if live.get("samples") else "Collecting",
+                                "Replay accuracy": f"{replay['hit']:.1%}" if replay.get("samples") else "Collecting",
+                                "Forecast influence": "Qualified" if model.get("enabled") else "Learning"})
+            st.dataframe(records, hide_index=True)
+
     if not rows:
         st.info("Bot contribution history is still building. Live specialists continue to run normally while the learner gathers enough graded snapshots.")
         return

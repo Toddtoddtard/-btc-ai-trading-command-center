@@ -112,7 +112,7 @@ def candle_structure_signal(hist):
     Learned specialist weighting still decides how much influence the result
     earns after outcomes are known.
     """
-    if hist is None or len(hist) < 8:
+    if hist is None or len(hist) < 9:
         return 0.0, "Insufficient completed candles for structure analysis"
 
     frame = hist.tail(40)
@@ -438,6 +438,11 @@ def forecast_path_core(rows, target=None, state=None, horizon_state=None):
         max_influence = max(avg_range * 2.0, last * 0.0015)
         projected_move += float(np.clip(gap * cfg["target_influence"], -max_influence, max_influence))
     horizon_predictions = predict_horizons(rows, horizon_state or {})
+    from candle_learning import predict as predict_candle_learning
+    candle_predictions = predict_candle_learning(rows, horizon_state or {})
+    for horizon, candidate in candle_predictions.items():
+        if candidate.get("enabled"):
+            horizon_predictions[horizon] = candidate
     model_15 = horizon_predictions.get("15", {})
     if model_15.get("enabled"):
         probability = safe_float(model_15.get("probability_up"), 0.5)
