@@ -26,7 +26,8 @@ def closed_frame(rows, now=None):
     for c in ('open', 'high', 'low', 'close', 'volume'):
         f[c] = pd.to_numeric(f[c], errors='coerce')
     f = f.dropna(subset=['time', 'open', 'high', 'low', 'close', 'volume'])
-    valid = ((f.close > 0) & (f.low > 0) & (f.volume >= 0) &
+    finite = np.isfinite(f[['open','high','low','close','volume']]).all(axis=1)
+    valid = (finite & (f.close > 0) & (f.low > 0) & (f.volume >= 0) &
              (f.high >= f[['open', 'close', 'low']].max(axis=1)) &
              (f.low <= f[['open', 'close']].min(axis=1)))
     f = f[valid & ((f.time.astype('int64') / 1e9 + 60) <= now)]
@@ -221,7 +222,10 @@ def fetch_catchup(get_json, base_url, root, now=None, max_pages=4):
             break
     f = pd.DataFrame(rows,columns=COLS)
     f['time'] = pd.to_datetime(f.ot,unit='ms',utc=True)
-    return closed_frame(f,now)
+    result = closed_frame(f,now)
+    if result.empty:
+        raise ValueError('No valid closed candles returned for catch-up')
+    return result
 
 
 def predict(rows, root, now=None):

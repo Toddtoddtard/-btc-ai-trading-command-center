@@ -86,3 +86,7 @@ class CandleLearningTests(unittest.TestCase):
         self.assertEqual(calls[1]['startTime'],calls[0]['startTime']+1000*60000)
         self.assertEqual(root['candle_learning']['cursor'],pd.Timestamp('2026-01-01T02:00:00Z').timestamp())
         self.assertEqual(len(f),2000)
+
+    def test_empty_feed_fails_visibly(self):
+        with self.assertRaisesRegex(ValueError, 'No valid closed candles'):
+            fetch_catchup(lambda *_args: [], 'https://example.com', {})
