@@ -43,11 +43,19 @@ def _quote(market, name):
     return value
 
 
-def specialist_consensus(specialists, direction):
+def specialist_consensus(specialists, direction, council=None):
     """Confidence-weighted agreement with the proposed settlement side."""
     wanted = 1.0 if str(direction).upper() == "UP" else -1.0
+    if isinstance(council, dict):
+        members = council.get("members", [])
+        total = sum(m["effective_weight"] for m in members)
+        agreeing = sum(m["effective_weight"] for m in members if m["score"] * wanted > 0)
+        return agreeing / total if total else 0.0
+    from council_v4 import specialist_active
     agreeing = total = 0.0
-    for row in (specialists or {}).values():
+    for name, row in (specialists or {}).items():
+        if not specialist_active(name, row):
+            continue
         score = _f((row or {}).get("score"), 0.0)
         confidence = max(0.05, _f((row or {}).get("confidence"), 0.5))
         if abs(score) < 0.03:

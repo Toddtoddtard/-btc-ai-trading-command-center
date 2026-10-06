@@ -4,7 +4,7 @@ import math
 import pandas as pd
 import streamlit as st
 
-from council_v4 import specialist_weight
+from specialist_knowledge_v5 import knowledge_council_vote
 
 
 def _f(value, default=float("nan")):
@@ -51,10 +51,12 @@ def _verdict_icon(verdict):
 
 def build_bot_intelligence_rows(results, learning_state, regime):
     intel = (learning_state or {}).get("bot_intelligence_v4", {}) or {}
-    ranking = intel.get("ranking", []) or []
+    ranking = (intel.get("ranking", []) or []) if intel.get("label_basis") == "official_kalshi_directional_calls_v1" else []
     by_name = {str(row.get("name")): row for row in ranking if isinstance(row, dict)}
     specialist_state = (learning_state or {}).get("specialists", {}) or {}
 
+    vote = knowledge_council_vote(results, learning_state or {}, regime)
+    members = {m["name"]: m for m in vote["members"]}
     rows = []
     for name, live in (results or {}).items():
         if name == "Combination AI":
@@ -68,8 +70,8 @@ def build_bot_intelligence_rows(results, learning_state, regime):
             "Live signal": str((live or {}).get("signal", "NEUTRAL")),
             "Live score": _f((live or {}).get("score"), 0.0),
             "Live confidence": _f((live or {}).get("confidence"), 0.0),
-            "Council weight": specialist_weight(name, learning_state, regime),
-            "Samples": int(contribution.get("samples") or learned.get("samples") or 0),
+            "Council weight": members.get(name, {}).get("vote_share", 0.0),
+            "Samples": int(contribution.get("directional_calls", 0)),
             "Standalone accuracy": _f(contribution.get("standalone_accuracy")),
             "Marginal accuracy": _f(contribution.get("marginal_accuracy")),
             "Contribution score": _f(contribution.get("contribution_score")),
@@ -90,8 +92,8 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
 
     st.markdown("### Bot Intelligence v4")
     st.caption(
-        "This panel ranks each specialist by whether it improves the entire council, not merely by whether it agrees with the final call. "
-        f"Current regime: {regime} • contribution snapshots graded: {evaluated:,} • verdict minimum: {minimum} samples."
+        "Accuracy uses active directional predictions and official Kalshi outcomes. Contribution is a retrospective comparison using current weights, not a live win rate. "
+        f"Current regime: {regime} • official-result snapshots reviewed: {evaluated:,} • verdict minimum: {minimum} samples."
     )
 
     candle_lab = (learning_state.get("horizon_models") or {}).get("candle_learning", {})
@@ -152,7 +154,7 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
             f'<div class="bot-card {cls}">'
             f'<div class="bot-card-top"><span class="bot-name">{row["Specialist"]}</span><span class="bot-verdict">{icon} {verdict}</span></div>'
             f'<div class="bot-live {sig_cls}">{signal} {row["Live score"]:+.2f}</div>'
-            f'<div class="bot-card-grid"><span>Weight <b>{row["Council weight"]:.2f}×</b></span><span>Accuracy <b>{_pct(row["Standalone accuracy"])}</b></span>'
+            f'<div class="bot-card-grid"><span>Vote share <b>{row["Council weight"]:.1%}</b></span><span>Accuracy <b>{_pct(row["Standalone accuracy"])}</b></span>'
             f'<span>Contribution <b>{_num(row["Contribution score"], 3)}</b></span><span>Samples <b>{row["Samples"]:,}</b></span></div>'
             f'</div>'
         )
@@ -179,16 +181,17 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
         unsafe_allow_html=True,
     )
 
-    st.caption(f"Highest current council weight: {top_weight['Specialist']} at {top_weight['Council weight']:.2f}× in {regime}.")
+    st.caption(f"Highest current vote share: {top_weight['Specialist']} at {top_weight['Council weight']:.1%} in {regime}.")
 
     detail = pd.DataFrame(rows)
     detail["Live confidence %"] = detail["Live confidence"] * 100.0
+    detail["Council vote share %"] = detail["Council weight"] * 100.0
     detail["Standalone accuracy %"] = detail["Standalone accuracy"] * 100.0
     detail["Marginal accuracy %"] = detail["Marginal accuracy"] * 100.0
     detail["Unique saves %"] = detail["Unique saves"] * 100.0
     detail["Harmful flips %"] = detail["Harmful flips"] * 100.0
     detail = detail[[
-        "Specialist", "Status", "Live signal", "Live score", "Live confidence %", "Council weight",
+        "Specialist", "Status", "Live signal", "Live score", "Live confidence %", "Council vote share %",
         "Samples", "Standalone accuracy %", "Marginal accuracy %", "Contribution score",
         "Unique saves %", "Harmful flips %", "Reason",
     ]]
@@ -201,7 +204,7 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
             column_config={
                 "Live score": st.column_config.NumberColumn(format="%+.3f"),
                 "Live confidence %": st.column_config.NumberColumn(format="%.1f%%"),
-                "Council weight": st.column_config.NumberColumn(format="%.2fx"),
+                "Council vote share %": st.column_config.NumberColumn(format="%.1f%%"),
                 "Standalone accuracy %": st.column_config.NumberColumn(format="%.1f%%"),
                 "Marginal accuracy %": st.column_config.NumberColumn(format="%+.2f%%"),
                 "Contribution score": st.column_config.NumberColumn(format="%+.3f"),

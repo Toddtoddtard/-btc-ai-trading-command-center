@@ -80,3 +80,10 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - `horizon_models.candle_learning` holds the models and coverage. `learner_v31.py` runs it; the Bot Intelligence coverage expander reports backlog, training and live evidence.
 - `docs/CANDLE_LEARNING.md` records source definitions, features, promotion gates and limitations. A qualified model can feed the shared Python forecast's existing bounded horizon component. No replay paper fills or invented order-book data.
 - `tests/test_candle_learning.py` covers pagination, gap recovery, duplicate prevention, chunk equivalence, future exclusion and live/replay separation.
+
+## Council parity and official scoring (2026-10-06)
+
+- Dashboard and learner use `knowledge_council_vote`. Combination is excluded; neutral/inactive specialists abstain rather than dilute the denominator. Vote shares are returned by the shared function and displayed as percentages.
+- `council_accounting.py` rebuilds specialist counters and regime history from retained immutable prediction snapshots with official yes/no outcomes. Former counters are archived in `legacy_specialist_accounting`; the new scope is retained snapshots, not lifetime. Unknown settlements remain ungraded.
+- Old mixed-label contribution multipliers are ignored. Contribution analysis uses official outcomes and the shared knowledge-adjusted scores, labeled retrospective current-policy ablation rather than prospective performance. Spot-direction historical priors are not mixed into official-target reliability.
+- Neutral specialists receive no loss in regime learning. Interim spot-based target grading remains provisional; the published authoritative specialist counters use official outcomes. No paper trades or balances are reset.

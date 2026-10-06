@@ -52,6 +52,7 @@ class CouncilV4Tests(unittest.TestCase):
             state["master_history"].append({
                 "ticker": ticker,
                 "direction_correct": 1,
+                "kalshi_result": "yes" if actual_up else "no",
                 "realized_return": 0.002 if actual_up else -0.002,
             })
         report = analyze_bot_contributions(state, min_samples=5)

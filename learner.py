@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from council_v4 import specialist_active
 import json
 import math
 import os
@@ -525,7 +526,7 @@ def grade(state, df):
             continue
         learned = state["specialists"][name]
         score = float(call["score"])
-        predicted_direction = 1 if score > 0.03 else -1 if score < -0.03 else 0
+        predicted_direction = (1 if score > 0.03 else -1 if score < -0.03 else 0) if specialist_active(name, call) else 0
         hit = int(predicted_direction != 0 and predicted_direction == actual_direction)
         # Edge must agree with the same target-based outcome used for hit/reward.
         edge = score * contract_realized * 100 if predicted_direction else 0.0

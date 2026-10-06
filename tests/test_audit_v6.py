@@ -45,10 +45,11 @@ class AuditV6Tests(unittest.TestCase):
     def test_harmful_bot_is_downweighted_after_evidence(self):
         state = {
             "specialists": {"Whale AI": {"adaptive_weight": 1.0, "regimes": {}}},
-            "bot_intelligence_v4": {
+            "bot_intelligence_v4": {"label_basis": "official_kalshi_directional_calls_v1",
                 "ranking": [{
                     "name": "Whale AI",
                     "samples": 20,
+                    "directional_calls": 20,
                     "contribution_score": -0.30,
                 }]
             },
