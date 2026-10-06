@@ -74,7 +74,7 @@ jobs:
       - name: Verify candle catch-up and leakage protection
         run: python -m unittest tests.test_candle_learning -v
       - name: Verify shared council and official scoring
-        run: python -m unittest tests.test_council_parity -v
+        run: python -m unittest tests.test_council_parity tests.test_state_preservation -v
       - name: Run audit v6 regression tests
         run: python -m unittest tests.test_horizon_models tests.test_multi_timeframe tests.test_train_horizon_models tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_external_teacher_lab tests.test_research_lab tests.test_lock_focus tests.test_forward_outlook tests.test_shared_learning -v
       - name: Load previous private learning state and historical priors
@@ -82,9 +82,9 @@ jobs:
         run: |
           set -e
           rm -f /tmp/previous_learning_state.json /tmp/historical_specialist_knowledge_v7.json /tmp/horizon_models.json
-          git fetch --depth=1 origin +learning-state:refs/remotes/origin/learning-state || true
+          git fetch --depth=1 origin +learning-state:refs/remotes/origin/learning-state
           if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
-            git show refs/remotes/origin/learning-state:learning_state.json > /tmp/previous_learning_state.json || true
+            git show refs/remotes/origin/learning-state:learning_state.json > /tmp/previous_learning_state.json
             git show refs/remotes/origin/learning-state:historical_specialist_knowledge_v7.json > /tmp/historical_specialist_knowledge_v7.json || true
             git show refs/remotes/origin/learning-state:horizon_models.json > /tmp/horizon_models.json || true
           fi
@@ -96,7 +96,8 @@ jobs:
           print('Loaded previous learning state with', data.get('forecast', {}).get('samples', 0), 'graded samples')
           PY
           else
-            echo "No previous learning state found; learner will use fallback state."
+            echo "Authoritative learning state is missing; refusing to reset history or bankroll."
+            exit 1
           fi
           if [ -s /tmp/historical_specialist_knowledge_v7.json ]; then
             python - <<'PY'
@@ -261,7 +262,7 @@ jobs:
           set -e
           git config user.name "btc-ai-learning-bot"
           git config user.email "actions@users.noreply.github.com"
-          git fetch --depth=1 origin +learning-state:refs/remotes/origin/learning-state || true
+          git fetch --depth=1 origin +learning-state:refs/remotes/origin/learning-state
           if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
             git checkout -B learning-state refs/remotes/origin/learning-state
           else

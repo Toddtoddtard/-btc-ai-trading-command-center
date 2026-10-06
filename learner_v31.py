@@ -184,17 +184,22 @@ def load_previous_state():
     """
     input_path = os.getenv("LEARNING_STATE_INPUT", "").strip()
     if input_path:
-        try:
-            payload = json.loads(Path(input_path).read_text())
-            if isinstance(payload, dict) and "forecast" in payload:
-                payload = legacy.migrate_event_name(payload)
-                bundle_path = os.getenv("HORIZON_MODELS_INPUT", "").strip()
-                if bundle_path and Path(bundle_path).is_file():
-                    merge_offline_bundle(payload, json.loads(Path(bundle_path).read_text()))
-                payload.setdefault("status", {})["loaded_from_private_branch"] = True
-                return payload
-        except Exception as exc:
-            print(f"Could not load LEARNING_STATE_INPUT: {exc}")
+        # An explicit snapshot is authoritative. Never reset the ledger or
+        # silently switch to an older network copy when that snapshot fails.
+        payload = json.loads(Path(input_path).read_text())
+        if not isinstance(payload, dict) or not isinstance(payload.get("forecast"), dict):
+            raise ValueError("Authoritative learning snapshot is invalid")
+        payload = legacy.migrate_event_name(payload)
+        bundle_path = os.getenv("HORIZON_MODELS_INPUT", "").strip()
+        if bundle_path and Path(bundle_path).is_file():
+            try:
+                bundle = json.loads(Path(bundle_path).read_text())
+            except (OSError, ValueError) as exc:
+                print(f"Could not read optional HORIZON_MODELS_INPUT; preserving live state: {exc}")
+            else:
+                merge_offline_bundle(payload, bundle)
+        payload.setdefault("status", {})["loaded_from_private_branch"] = True
+        return payload
     state = legacy.load()
     bundle_path = os.getenv("HORIZON_MODELS_INPUT", "").strip()
     if bundle_path and Path(bundle_path).is_file():

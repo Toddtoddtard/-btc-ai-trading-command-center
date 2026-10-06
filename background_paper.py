@@ -12,6 +12,8 @@ import json
 import math
 import os
 import time
+import tempfile
+from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -1145,6 +1147,23 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     return paper
 
 
+def save_checkpoint(path, state):
+    """Replace only a completely serialized checkpoint on the same filesystem."""
+    path = Path(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=path.name + ".", delete=False) as handle:
+            temporary = handle.name
+            json.dump(state, handle, indent=2, sort_keys=True, allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def main():
     with open(STATE_INPUT, encoding="utf-8") as handle:
         state = json.load(handle)
@@ -1163,8 +1182,7 @@ def main():
             paper["last_message"] = "Background paper cycle failed safely: " + str(exc)
         # Checkpoint every pass so a later transient failure cannot erase an
         # entry or settlement recorded by an earlier retry.
-        with open(STATE_INPUT, "w", encoding="utf-8") as handle:
-            json.dump(state, handle, indent=2, sort_keys=True)
+        save_checkpoint(STATE_INPUT, state)
         if cycle + 1 < cycles and interval:
             time.sleep(interval)
     print(paper["last_message"])
