@@ -1770,7 +1770,7 @@ def master_decision(
                 or (raw_side == "DOWN" and projected_edge <= -max(atr * 0.35, px * 0.00035))
             )
         )
-        settlement_consensus = specialist_consensus(results, raw_side)
+        settlement_consensus = specialist_consensus(results, raw_side, v5_council)
         lock_focus = evaluate_lock_focus(
             base_score=score,
             confidence=confidence,

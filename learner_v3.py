@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from council_v4 import specialist_active
 import copy
 import json
 import math
@@ -85,31 +86,10 @@ def ensure_v3(state):
 
 
 def weighted_master_confidence(pending, state):
-    calls = pending.get("specialists", {}) if isinstance(pending, dict) else {}
-    if not calls:
-        return 0.5, 0.0
-    numerator = 0.0
-    denom = 0.0
-    signed = []
-    for name, call in calls.items():
-        if name == "Political Event Watch AI" and str(call.get("event_status", "INACTIVE")).upper() != "ACTIVE":
-            continue
-        if name == "Cross-Market Research AI" and str(call.get("research_status", "INACTIVE")).upper() != "ACTIVE":
-            continue
-        score = safe_float(call.get("score"), 0.0)
-        confidence = safe_float(call.get("confidence"), 0.5)
-        learned = state.get("specialists", {}).get(name, {})
-        weight = safe_float(learned.get("adaptive_weight"), 1.0)
-        numerator += score * confidence * weight
-        denom += confidence * weight
-        if abs(score) > 0.03:
-            signed.append(1 if score > 0 else -1)
-    base_score = numerator / denom if denom else 0.0
-    consensus = abs(sum(signed)) / len(signed) if signed else 0.0
-    raw_conf = float(np.clip(0.45 + abs(base_score) * 0.34 + consensus * 0.15, 0.45, 0.95))
-    penalty = safe_float(state.get("wait_policy", {}).get("overconfidence_penalty"), 0.0)
-    calibrated = float(np.clip(raw_conf - penalty, 0.40, 0.93))
-    return calibrated, base_score
+    from specialist_knowledge_v5 import knowledge_council_vote
+    vote = knowledge_council_vote(pending.get("specialists", {}), state,
+                                  pending.get("regime") or state.get("status", {}).get("current_regime", "UNKNOWN"))
+    return vote["confidence"], vote["base_score"]
 
 
 def update_rolling(state):
@@ -157,8 +137,10 @@ def update_regime_learning(state, pending, actual_direction, realized_return, hi
         if not learned:
             continue
         score = safe_float(call.get("score"), 0.0)
-        pred = 1 if score > 0.03 else -1 if score < -0.03 else 0
-        hit = int(pred != 0 and pred == actual_direction)
+        pred = (1 if score > 0.03 else -1 if score < -0.03 else 0) if specialist_active(name, call) else 0
+        if pred == 0:
+            continue
+        hit = int(pred == actual_direction)
         rb = learned.setdefault("regimes", {}).setdefault(regime, {"samples": 0, "hits": 0, "ewma_accuracy": 0.5, "adaptive_weight": 1.0})
         rb["samples"] += 1
         rb["hits"] += hit
@@ -176,7 +158,7 @@ def recalibrate_weights(state, pending, actual_direction, realized_return):
             continue
         score = safe_float(call.get("score"), 0.0)
         conf = float(np.clip(safe_float(call.get("confidence"), 0.5), 0.01, 0.99))
-        pred = 1 if score > 0.03 else -1 if score < -0.03 else 0
+        pred = (1 if score > 0.03 else -1 if score < -0.03 else 0) if specialist_active(name, call) else 0
         if pred == 0:
             continue
         hit = int(pred == actual_direction)
@@ -202,7 +184,8 @@ def recalibrate_weights(state, pending, actual_direction, realized_return):
 
 
 def update_confidence_model(state, pending, hit_master):
-    conf, base_score = weighted_master_confidence(pending, state)
+    conf = safe_float(pending.get("master_confidence"), 0.5)
+    base_score = safe_float(pending.get("master_base_score"), 0.0)
     outcome = 1.0 if hit_master else 0.0
     brier = (conf - outcome) ** 2
     model = state.setdefault("confidence_model", {})
@@ -305,9 +288,9 @@ def enhanced_grade(state, df):
     actual = safe_float(actual, safe_float(pending_copy.get("start_price"), 0.0))
     start = safe_float(pending_copy.get("start_price"), actual)
     predicted_end = safe_float(pending_copy.get("predicted_end"), start)
-    actual_direction = 1 if actual >= start else -1
-    master_pred = int(pending_copy.get("predicted_direction", 1))
-    master_hit = int(actual_direction == master_pred)
+    outcome = legacy.score_forecast_outcome(start, safe_float(pending_copy.get("target"), start), predicted_end, pending_copy.get("predicted_direction"), actual)
+    actual_direction = outcome["settlement_direction"]
+    master_hit = outcome["settlement_correct"]
     realized_return = (actual / start - 1.0) if start else 0.0
 
     graded = legacy.grade(state, df)

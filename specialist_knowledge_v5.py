@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import numpy as np
-from council_v4 import council_vote
+from council_v4 import council_vote, specialist_active
 
 TARGET_PRECISION = 0.90
 PRIOR_STRENGTH = 18.0
@@ -33,6 +33,8 @@ def _history_rows(state, name):
 def _historical_prior(state, name, regime=None):
     state = state or {}
     report = state.get("historical_specialist_knowledge_v7", {}) or {}
+    if state.get("specialist_accounting", {}).get("basis") == "official_kalshi_directional_calls_v1" and report.get("label_basis") != "official_kalshi_directional_calls_v1":
+        return 0.50, 0
     if (
         name == "Pattern AI"
         and int(_f(state.get("pattern_structure_version"), 1)) >= 2
@@ -126,7 +128,8 @@ def knowledge_adjust_results(results, state, regime="UNKNOWN"):
         if not isinstance(item, dict):
             continue
         k = specialist_posterior(state, name, regime)
-        knowledge[name] = k
+        if specialist_active(name, item):
+            knowledge[name] = k
         score = float(np.clip(_f(item.get("score"), 0.0) * k["reliability_multiplier"], -1.0, 1.0))
         raw_conf = float(np.clip(_f(item.get("confidence"), 0.5), 0.05, 0.99))
         learned_conf = float(np.clip(0.42 + k["posterior_accuracy"] * 0.45, 0.42, 0.88))

@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 
 from candle_learning import fetch_catchup, advance as advance_candle_learning
+from council_accounting import reconcile_specialists
+from specialist_knowledge_v5 import knowledge_council_vote
 import learner as legacy
 import learner_v3 as v3
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
@@ -570,7 +572,10 @@ def current_shadow_call(state, df, market_info):
         "predicted_direction": forecast.get("predicted_direction"),
         "specialists": specialists,
     }
-    confidence, base_score = v3.weighted_master_confidence(call, state)
+    call["regime"] = detect_regime(df)
+    vote = knowledge_council_vote(specialists, state, call["regime"])
+    call["council_vote"] = vote
+    confidence, base_score = vote["confidence"], vote["base_score"]
     call["master_confidence"] = confidence
     call["master_base_score"] = base_score
     source_health = source_health_from_specialists(specialists)
@@ -595,7 +600,7 @@ def current_shadow_call(state, df, market_info):
     ) if contract_probability_up is not None else (
         "UP" if base_score > 0 else "DOWN"
     )
-    consensus = specialist_consensus(specialists, direction)
+    consensus = specialist_consensus(specialists, direction, vote)
     call["contract_probability_up"] = contract_probability_up
     call["contract_probability_edge"] = safe_float(contract_view.get("edge_vs_market"))
     call["strike_distance_sigma"] = safe_float(
@@ -635,6 +640,10 @@ def current_shadow_call(state, df, market_info):
     execution_approved, execution_reason = learned_trade_gate(
         focus["action"], confidence, base_score, consensus, policy, source_health
     )
+    if not vote["precision_gate_passed"]:
+        execution_approved = False
+        execution_reason = vote["precision_gate_reason"]
+        call["master_action"] = "WAIT"
     call["execution_approved"] = bool(execution_approved)
     call["execution_reason"] = execution_reason
     call["would_wait"] = not execution_approved
@@ -653,7 +662,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
     if old_action.startswith("LOCK"):
         return False
     for key in (
-        "specialists", "master_confidence", "master_base_score",
+        "specialists", "master_confidence", "master_base_score", "council_vote",
         "master_action", "would_wait", "lock_focus",
         "execution_approved", "execution_reason",
     ):
@@ -736,6 +745,7 @@ def main():
     forward_outlooks_graded = grade_forward_outlooks(state, df)
     research_resolved = resolve_shadows(state, legacy.official_result)
     official_resolved = legacy.resolve_official_results(state)
+    reconcile_specialists(state)
     registered = register_with_snapshot(state, df, market_info)
     live_call = current_shadow_call(state, df, market_info)
     lock_gate_recorded = record_lock_gate_evaluation(state, live_call, market_info)

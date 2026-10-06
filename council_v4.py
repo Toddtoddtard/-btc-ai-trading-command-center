@@ -44,6 +44,17 @@ BASE_WEIGHTS = {
 EXCLUDED_FROM_COUNCIL = {"Combination AI"}
 
 
+def specialist_active(name, item):
+    """Abstention keeps a specialist available without diluting today's vote."""
+    if name in EXCLUDED_FROM_COUNCIL or not isinstance(item, dict):
+        return False
+    if name == "Political Event Watch AI" and item.get("event_status", "INACTIVE") != "ACTIVE":
+        return False
+    if name == "Cross-Market Research AI" and item.get("research_status", "INACTIVE") != "ACTIVE":
+        return False
+    return abs(_safe_float(item.get("score"))) > 0.03
+
+
 def _safe_float(value, default=0.0):
     try:
         value = float(value)
@@ -66,11 +77,13 @@ def _contribution_multiplier(state, name):
     """
     state = state if isinstance(state, dict) else {}
     intel = state.get("bot_intelligence_v4", {}) if isinstance(state.get("bot_intelligence_v4", {}), dict) else {}
+    if intel.get("label_basis") != "official_kalshi_directional_calls_v1":
+        return 1.0
     ranking = intel.get("ranking", []) if isinstance(intel.get("ranking", []), list) else []
     row = next((r for r in ranking if isinstance(r, dict) and r.get("name") == name), None)
     if not row:
         return 1.0
-    samples = max(0, int(_safe_float(row.get("samples"), 0)))
+    samples = max(0, int(_safe_float(row.get("directional_calls"), 0)))
     contribution = float(np.clip(_safe_float(row.get("contribution_score"), 0.0), -0.75, 0.50))
     # At 20 samples the contribution signal has full effect; before that it is
     # intentionally shrunk to reduce overreaction to a tiny early sample.
@@ -101,7 +114,7 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
     members = []
 
     for name, item in results.items():
-        if name in exclude or not isinstance(item, dict):
+        if name in exclude or not specialist_active(name, item):
             continue
         if name == "Political Event Watch AI" and str(item.get("event_status", "INACTIVE")).upper() != "ACTIVE":
             continue
@@ -125,6 +138,9 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
             "contribution_multiplier": _contribution_multiplier(state or {}, name),
         })
 
+    for member in members:
+        member["vote_share"] = member["effective_weight"] / denominator if denominator else 0.0
+        member["signed_contribution"] = member["score"] * member["vote_share"]
     base_score = weighted_sum / denominator if denominator else 0.0
     consensus = abs(directional_signed) / directional_weight if directional_weight else 0.0
     raw_confidence = float(np.clip(0.46 + abs(base_score) * 0.34 + consensus * 0.18, 0.40, 0.96))
@@ -179,9 +195,7 @@ def analyze_bot_contributions(state, min_samples=12):
     harmful specialists instead of rewarding raw agreement alone.
     """
     state = state if isinstance(state, dict) else {}
-    snapshots = state.get("prediction_snapshots", []) or []
-    history = state.get("master_history", []) or []
-    outcomes = {str(row.get("ticker")): row for row in history if row.get("ticker")}
+    from council_accounting import official_snapshots
     stats = defaultdict(lambda: {
         "samples": 0,
         "standalone_hits": 0,
@@ -194,21 +208,17 @@ def analyze_bot_contributions(state, min_samples=12):
     })
     evaluated = 0
 
-    for snap in snapshots:
+    for snap, outcome in official_snapshots(state):
         ticker = str(snap.get("ticker") or "")
-        outcome = outcomes.get(ticker)
-        if not outcome or outcome.get("direction_correct") is None:
-            continue
         specialists = ((snap.get("snapshot") or {}).get("specialists") or {})
         if not specialists:
             continue
 
-        realized = outcome.get("realized_return")
-        if realized is None:
-            continue
-        actual_dir = 1 if _safe_float(realized, 0.0) >= 0 else -1
+        actual_dir = 1 if outcome["kalshi_result"] == "yes" else -1
+        from specialist_knowledge_v5 import knowledge_adjust_results
+        adjusted, _ = knowledge_adjust_results(specialists, state, str((snap.get("snapshot") or {}).get("regime") or "UNKNOWN"))
         regime = str((snap.get("snapshot") or {}).get("regime") or "UNKNOWN")
-        full = council_vote(specialists, state, regime)
+        full = council_vote(adjusted, state, regime)
         full_dir = _direction(full["base_score"])
         full_hit = int(full_dir != 0 and full_dir == actual_dir)
         evaluated += 1
@@ -218,14 +228,14 @@ def analyze_bot_contributions(state, min_samples=12):
                 continue
             st = stats[name]
             st["samples"] += 1
-            call_dir = _direction((call or {}).get("score"))
+            call_dir = _direction((call or {}).get("score")) if specialist_active(name, call) else 0
             if call_dir:
                 st["standalone_calls"] += 1
                 st["standalone_hits"] += int(call_dir == actual_dir)
             st["score_abs_sum"] += abs(_safe_float((call or {}).get("score"), 0.0))
             st["full_hits"] += full_hit
 
-            without = council_vote(specialists, state, regime, exclude={name})
+            without = council_vote(adjusted, state, regime, exclude={name})
             without_dir = _direction(without["base_score"])
             without_hit = int(without_dir != 0 and without_dir == actual_dir)
             st["without_hits"] += without_hit
@@ -245,9 +255,9 @@ def analyze_bot_contributions(state, min_samples=12):
         marginal = full_acc - without_acc
         saves = st["unique_saves"] / n
         harms = st["harmful_flips"] / n
-        confidence_shrink = min(1.0, n / max(float(min_samples), 1.0))
+        confidence_shrink = min(1.0, st["standalone_calls"] / max(float(min_samples), 1.0))
         contribution_score = confidence_shrink * (marginal + 0.50 * saves - 0.65 * harms)
-        if n < min_samples:
+        if st["standalone_calls"] < min_samples:
             verdict = "LEARNING"
         elif contribution_score >= 0.025:
             verdict = "HIGH VALUE"
@@ -261,6 +271,8 @@ def analyze_bot_contributions(state, min_samples=12):
             "name": name,
             "samples": n,
             "standalone_accuracy": standalone_acc,
+            "directional_calls": st["standalone_calls"],
+            "standalone_hits": st["standalone_hits"],
             "full_council_accuracy": full_acc,
             "without_bot_accuracy": without_acc,
             "marginal_accuracy": marginal,
@@ -274,6 +286,8 @@ def analyze_bot_contributions(state, min_samples=12):
     ranking.sort(key=lambda row: (row["contribution_score"], row["samples"]), reverse=True)
     return {
         "version": 4,
+        "label_basis": "official_kalshi_directional_calls_v1",
+        "evaluation_mode": "retrospective_current_policy_ablation",
         "evaluated_snapshots": evaluated,
         "minimum_samples_for_verdict": int(min_samples),
         "ranking": ranking,
