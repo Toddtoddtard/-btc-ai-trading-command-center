@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY learner-requirements.txt ./
+RUN pip install --no-cache-dir -r learner-requirements.txt
+COPY . ./
+ENV PYTHONUNBUFFERED=1 WORKER_STATE_DIR=/var/data/btc PORT=10000
+CMD ["python", "continuous_worker.py"]

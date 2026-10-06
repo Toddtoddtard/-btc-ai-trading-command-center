@@ -1,6 +1,8 @@
 import base64
 import json
 import time
+import os
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import streamlit as st
@@ -97,6 +99,29 @@ def _fetch_public(cache_key=None):
         return json.loads(response.read().decode("utf-8"))
 
 
+def _worker_state_url():
+    url = os.getenv('CONTINUOUS_WORKER_STATE_URL', '').strip()
+    if not url:
+        try:
+            url = str(st.secrets.get('continuous_worker_state_url', '')).strip()
+        except Exception:
+            pass
+    if url:
+        parsed = urlsplit(url)
+        if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError('Continuous worker URL must be a plain HTTPS endpoint without credentials')
+    return url
+
+
+def _fetch_worker(url):
+    request = Request(url, headers={'Accept': 'application/json', 'Cache-Control': 'no-cache'})
+    with urlopen(request, timeout=3.0) as response:
+        state = json.loads(response.read().decode('utf-8'))
+    if state.get('version') != 31 or state.get('background_paper', {}).get('paper_only') is not True:
+        raise ValueError('Invalid continuous paper state')
+    return state
+
+
 def fetch_shared_learning_state(ttl=20.0):
     now = time.monotonic()
     cached = _CACHE.get("data")
@@ -106,10 +131,11 @@ def fetch_shared_learning_state(ttl=20.0):
     token = _secret_token()
     try:
         public_key = int(time.time() // max(float(ttl), 1.0))
-        payload = _fetch_private(token) if token else _fetch_public(public_key)
+        worker_url = _worker_state_url()
+        payload = _fetch_worker(worker_url) if worker_url else (_fetch_private(token) if token else _fetch_public(public_key))
         if isinstance(payload, dict):
             payload.setdefault("data_quality", {})
-            payload["data_quality"]["shared_learning_source"] = "private-github" if token else "github-raw"
+            payload["data_quality"]["shared_learning_source"] = "continuous-worker" if worker_url else ("private-github" if token else "github-raw")
             _CACHE.update({"ts": now, "data": payload, "source": payload["data_quality"]["shared_learning_source"]})
             return payload
     except Exception:
