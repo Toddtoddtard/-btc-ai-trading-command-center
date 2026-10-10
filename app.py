@@ -6242,6 +6242,14 @@ def live_dashboard():
                     text = "RESOLVED" if resolved else "OPEN"
                     return f'<span class="journal-result {cls}">{text}</span>'
 
+                def _journal_official_badge(value):
+                    label = str(value or "").strip().upper()
+                    if label == "YES":
+                        return '<span class="journal-result journal-up">YES</span>'
+                    if label == "NO":
+                        return '<span class="journal-result journal-down">NO</span>'
+                    return '<span class="journal-result journal-pending">PENDING</span>'
+
                 journal_html = journal_view.to_html(
                     index=False,
                     border=0,
@@ -6251,6 +6259,7 @@ def live_dashboard():
                         "action": _journal_action_badge,
                         "resolved": _journal_resolved_badge,
                         "correct": _journal_result_badge,
+                        "official_result": _journal_official_badge,
                     },
                 )
                 st.markdown(
