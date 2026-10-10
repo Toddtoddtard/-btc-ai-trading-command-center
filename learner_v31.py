@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import copy
+from signal_education import detect_signals
 from prediction_journal import record_prediction, resolve_journal
 from collections import Counter
 import json
@@ -784,6 +785,9 @@ def main():
     # Research phases use the current observation time, while execution keeps
     # the original pending forecast geometry for strict expiry grading.
     shadow_call = live_call or state.get("pending")
+    if live_call:
+        shadow_call = dict(shadow_call)
+        shadow_call["named_signals"] = detect_signals(df, now=shadow_call.get("opened_at"))
     record_prediction(state, shadow_call, market_info)
     journal_resolved = resolve_journal(state, legacy.official_result)
     research_registered = register_shadow(state, shadow_call, market_info)

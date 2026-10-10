@@ -22,6 +22,19 @@ def render_research_dashboard(learning_state):
         return
 
     calibration = lab.get("calibration", {}) or {}
+    with st.expander("Signal learning — which setups work?"):
+        st.caption("Named signals are checked against official Kalshi outcomes, including WAIT observations. Accuracy measures the contract outcome, not just price movement. Results are experimental and do not change trade permissions.")
+        signal_rows = (lab.get("signal_education") or {}).get("ranking", [])
+        if signal_rows:
+            display = pd.DataFrame(signal_rows).rename(columns={
+                "signal": "Signal", "context": "Conditions", "samples": "Markets",
+                "wins": "Wins", "net_pnl": "Paper P/L ($)", "accuracy": "Win rate (%)",
+            })
+            display["Win rate (%)"] = (display["Win rate (%)"] * 100).round(1)
+            display["Paper P/L ($)"] = display["Paper P/L ($)"].round(2)
+            st.dataframe(display, use_container_width=True, hide_index=True)
+        else:
+            st.info("Collecting live MACD crossover, engulfing-candle, and volume-breakout observations. Results appear after official settlement.")
     window_score = lab.get("window_scorecard", {}) or {}
     guarded = calibration.get("guarded", {}) or {}
     calibrator = lab.get("guarded_calibrator", {}) or {}

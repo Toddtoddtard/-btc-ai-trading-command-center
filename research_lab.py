@@ -11,6 +11,7 @@ orders.
 from __future__ import annotations
 
 import math
+from signal_education import summarize_signals
 from datetime import datetime, timezone
 
 from external_teacher_lab import (
@@ -367,6 +368,7 @@ def register_shadow(state, pending, market_info):
         "policies": policies,
     }
     observation["external_teachers"] = build_teacher_calls(lab, pending, market_info)
+    observation["named_signals"] = pending.get("named_signals", [])
     lab["pending"].append(observation)
     lab["pending"] = lab["pending"][-200:]
     return True
@@ -664,6 +666,7 @@ def resolve_shadows(state, result_reader):
     lab["pending"] = unresolved[-200:]
     lab["history"] = lab["history"][-1000:]
     lab["window_scorecard"] = independent_window_scorecard(lab["history"])
+    lab["signal_education"] = summarize_signals(lab["history"])
     strategy_leaderboard(lab)
     teacher_leaderboard(lab)
     return resolved
