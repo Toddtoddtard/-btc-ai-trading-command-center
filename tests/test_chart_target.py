@@ -6,6 +6,25 @@ from pathlib import Path
 
 
 class ChartTargetTests(unittest.TestCase):
+    def test_server_target_survives_browser_failure_but_not_expiry(self):
+        source = Path('app.py').read_text()
+        start = source.index('        const serverClose =')
+        end = source.index('        // Track the active UTC', start)
+        initialization = source[start:end]
+        script = '''
+const assert=require('assert');Date.now=()=>1860000;
+function seed(initial){
+''' + initialization + '''
+return {currentTarget,currentTicker};}
+assert.equal(seed({close_time:new Date(2700000).toISOString(),target:83000,ticker:'CURRENT'}).currentTarget,83000);
+for(const close of [1800000,3600000,null]){
+  assert.ok(Number.isNaN(seed({close_time:close===null?null:new Date(close).toISOString(),target:83000,ticker:'OTHER'}).currentTarget));
+}
+assert.ok(Number.isNaN(seed({close_time:new Date(2700000).toISOString(),target:null}).currentTarget));
+'''
+        result = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_current_contract_selection_and_rollover_race(self):
         source = Path('app.py').read_text()
         functions = []

@@ -4131,7 +4131,7 @@ st.markdown(
 # PERSISTENT LIVE MARKET CHART
 # ============================================================
 
-def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None, paper_entries=None):
+def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None, paper_entries=None, initial_close=None):
     """
     Browser-side Plotly chart.
 
@@ -4168,6 +4168,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 else None
             ),
             "ticker": initial_ticker or "",
+            "close_time": initial_close,
             "dark": bool(dark_mode),
             "learning": learning_state or get_learning_state(),
             "entries": paper_entries or [],
@@ -4225,9 +4226,14 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         const chart = document.getElementById("persistent-market-chart");
         const status = document.getElementById("market-status");
 
-        // Verify the contract in the browser before displaying its strike.
-        let currentTarget = NaN;
-        let currentTicker = "";
+        // The server already queried this exact contract. Keep its verified
+        // target if browser API access fails, but never beyond this window.
+        const serverClose = Date.parse(initial.close_time || "");
+        const validServerTarget = serverClose > Date.now() &&
+            serverClose <= (Math.floor(Date.now() / 900000) + 1) * 900000 &&
+            Number.isFinite(initial.target) && initial.target > 0;
+        let currentTarget = validServerTarget ? initial.target : NaN;
+        let currentTicker = validServerTarget ? initial.ticker : "";
         // Track the active UTC 15-minute window in the browser. At rollover we
         // immediately clear the old Kalshi target so a previous contract can
         // never remain visible while the new market is publishing.
@@ -4730,7 +4736,16 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 
             try {{
                 const fresh = await fetchCandles();
-                if (!fresh || !fresh.length) return;
+                if (!fresh || !fresh.length) {{
+                    status.textContent = "BTC browser feed unavailable — server refresh will retry";
+                    return;
+                }}
+                const lastBar = fresh[fresh.length - 1];
+                const candleAge = Date.now() - Date.parse(lastBar.time);
+                if (!Number.isFinite(candleAge) || candleAge > 120000 || candleAge < -60000) {{
+                    status.textContent = "STALE BTC candles — waiting for fresh data";
+                    return;
+                }}
 
                 const sig = signature(fresh);
                 if (sig === lastCandleSignature) return;
@@ -4756,7 +4771,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 );
 
                 status.textContent =
-                    "Live BTC 1m candles • " +
+                    "Binance BTC/USDT $" + Number(lastBar.close).toLocaleString() + " • " +
                     (currentTicker ? currentTicker + " • " : "") +
                     "updated " + new Date().toLocaleTimeString();
             }} finally {{
@@ -5014,8 +5029,8 @@ except Exception:
 
 st.subheader("Live Kalshi BTC Market")
 st.caption(
-    "Persistent AGGR-style candle chart — this chart updates in place "
-    "and is not rebuilt by the dashboard refresh."
+    "BTC/USDT candles with the current Kalshi contract target. "
+    "Browser updates plus a 15-second server refresh fallback."
 )
 st.caption("1m / 5m / 15m have separate shadow models. Each can affect the displayed forecast only after historical validation and repeated live Brier-score outperformance. Forecasts remain estimates, not guarantees.")
 
@@ -5059,14 +5074,35 @@ try:
 except Exception:
     _persistent_paper_entries = []
 
-persistent_kalshi_market_chart(
-    _persistent_hist,
-    _persistent_ctx.get("target", np.nan),
-    _persistent_ctx.get("ticker", ""),
-    dark_mode=dark_mode,
-    learning_state=_learning_state,
-    paper_entries=_persistent_paper_entries,
-)
+@st.fragment(run_every=15)
+def refresh_market_chart():
+    try:
+        raw, _ = fetch_klines("1m", 60)
+        hist = enrich_history(raw)
+    except Exception:
+        hist = pd.DataFrame()
+    if hist.empty:
+        st.warning("BTC chart feed unavailable — retrying in 15 seconds.")
+        return
+    latest = pd.Timestamp(hist.iloc[-1]["time"])
+    age = time.time() - latest.timestamp()
+    if not -60 <= age <= 120:
+        st.warning("BTC chart candles are stale — forecasts hidden until fresh data returns.")
+        return
+    price = float(hist.iloc[-1]["close"])
+    try:
+        context = stable_kalshi_contract(fetch_kalshi_bitcoin_markets(), price)
+    except Exception:
+        context = {}
+    st.caption(f"Binance BTC/USDT ${price:,.2f} • latest candle {latest.strftime('%H:%M UTC')} • server checked {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}. This is a spot proxy, not Kalshi's settlement index.")
+    persistent_kalshi_market_chart(
+        hist, context.get("target", np.nan), context.get("ticker", ""),
+        dark_mode=dark_mode, learning_state=_learning_state,
+        paper_entries=_persistent_paper_entries,
+        initial_close=context.get("close_time"),
+    )
+
+refresh_market_chart()
 
 if _learning_state["samples"] > 0:
     _kalshi_samples = int(_learning_state.get("kalshi_samples", 0))
