@@ -6,6 +6,8 @@ on:
     branches:
       - main
     paths:
+      - 'prediction_journal.py'
+      - 'tests/test_persistent_journal.py'
       - 'learner.py'
       - 'learner_v3.py'
       - 'learner_v31.py'
@@ -74,7 +76,7 @@ jobs:
       - name: Verify candle catch-up and leakage protection
         run: python -m unittest tests.test_candle_learning -v
       - name: Verify shared council and official scoring
-        run: python -m unittest tests.test_council_parity tests.test_state_preservation -v
+        run: python -m unittest tests.test_council_parity tests.test_state_preservation tests.test_persistent_journal -v
       - name: Run audit v6 regression tests
         run: python -m unittest tests.test_horizon_models tests.test_multi_timeframe tests.test_train_horizon_models tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_external_teacher_lab tests.test_research_lab tests.test_lock_focus tests.test_forward_outlook tests.test_shared_learning -v
       - name: Load previous private learning state and historical priors
@@ -277,3 +279,4 @@ jobs:
           fi
           git commit -m "Update BTC AI learning state"
           git push origin learning-state --force-with-lease
+

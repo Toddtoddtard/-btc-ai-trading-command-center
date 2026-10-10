@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import copy
+from prediction_journal import record_prediction, resolve_journal
 from collections import Counter
 import json
 import os
@@ -783,6 +784,8 @@ def main():
     # Research phases use the current observation time, while execution keeps
     # the original pending forecast geometry for strict expiry grading.
     shadow_call = live_call or state.get("pending")
+    record_prediction(state, shadow_call, market_info)
+    journal_resolved = resolve_journal(state, legacy.official_result)
     research_registered = register_shadow(state, shadow_call, market_info)
     v3.update_rolling(state)
     state["validation"] = v3.walk_forward_validate(df, state)
@@ -801,6 +804,7 @@ def main():
         "graded_this_run": graded,
         "official_results_resolved": official_resolved,
         "registered_this_run": registered,
+        "journal_official_results_resolved": journal_resolved,
         "research_lab_ok": True,
         "research_resolved_this_run": research_resolved,
         "research_registered_this_run": research_registered,
@@ -837,3 +841,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

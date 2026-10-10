@@ -3,6 +3,7 @@ import importlib
 import math
 import re
 import sqlite3
+from prediction_journal import journal_view as persistent_journal_view
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -6173,16 +6174,23 @@ def live_dashboard():
             st.info("No automatic Kalshi paper trades yet.")
 
     with tab_journal:
-        stats = prediction_stats()
+        _journal_state = fetch_remote_learning_state()
+        _journal_rows, stats = persistent_journal_view(_journal_state)
+        if not _journal_state:
+            st.warning("Persistent prediction history is unavailable. Local-only counts are not substituted.")
         j1, j2, j3, j4 = st.columns(4)
         j1.metric("Predictions", stats["n"])
         j2.metric("Signal calls resolved", stats["trade_resolved"])
         j3.metric("Signal-call accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
         j4.metric("HOLD/WAIT resolved", stats["wait_resolved"])
         st.caption(
-            "Win/loss accuracy counts only SCALP/LOCK calls. HOLD/WAIT decisions are still recorded and resolved for learning, but are not treated as wins or losses."
+            "Persistent background history — one row per observed market. Accuracy uses official Kalshi outcomes for saved SCALP/LOCK calls only. HOLD/WAIT and historical FORECAST rows without a saved execution action are excluded. Earlier history is limited to retained records; missed windows are not invented."
         )
-        journal_df = recent_predictions(150)
+        st.caption("Background snapshot: " + str((_journal_state or {}).get("updated_at") or "unavailable"))
+        journal_df = pd.DataFrame(_journal_rows[:150])
+        st.caption("Showing the latest 150 rows; totals include all saved journal rows.")
+        with st.expander("Earlier dashboard-local records (separate legacy journal)"):
+            st.dataframe(recent_predictions(150), use_container_width=True, hide_index=True)
         if not journal_df.empty:
             if dark_mode:
                 # Match the AI Council table: dark card, blue outline, and
@@ -6195,6 +6203,7 @@ def live_dashboard():
                 # textual states such as NO TRADE and OPEN.
                 journal_view["correct"] = journal_view["correct"].astype(object)
                 journal_view.loc[_journal_actions.isin(["HOLD", "WAIT"]), "correct"] = "NO TRADE"
+                journal_view.loc[_journal_actions.str.startswith("FORECAST") & (_journal_resolved == 1), "correct"] = "FORECAST ONLY"
                 journal_view.loc[_journal_resolved != 1, "correct"] = "OPEN"
 
                 def _journal_action_badge(value):
@@ -6209,6 +6218,8 @@ def live_dashboard():
 
                 def _journal_result_badge(value):
                     label = str(value).upper().strip()
+                    if label == "FORECAST ONLY":
+                        return '<span class="journal-result journal-neutral">FORECAST ONLY</span>'
                     if label == "NO TRADE":
                         return '<span class="journal-result journal-neutral">NO TRADE</span>'
                     if label == "OPEN" or pd.isna(value):
@@ -6565,3 +6576,4 @@ def live_dashboard():
 
 
 live_dashboard()
+

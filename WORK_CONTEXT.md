@@ -87,3 +87,12 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - `council_accounting.py` rebuilds specialist counters and regime history from retained immutable prediction snapshots with official yes/no outcomes. Former counters are archived in `legacy_specialist_accounting`; the new scope is retained snapshots, not lifetime. Unknown settlements remain ungraded.
 - Old mixed-label contribution multipliers are ignored. Contribution analysis uses official outcomes and the shared knowledge-adjusted scores, labeled retrospective current-policy ablation rather than prospective performance. Spot-direction historical priors are not mixed into official-target reliability.
 - Neutral specialists receive no loss in regime learning. Interim spot-based target grading remains provisional; the published authoritative specialist counters use official outcomes. No paper trades or balances are reset.
+
+
+## Persistent prediction journal (2026-10-09)
+
+- `prediction_journal.py` stores one observed-market row in `learning_state.json`, independent of Streamlit uptime. The learner records the current master action, allows WAIT to become a signal and a SCALP to become the first LOCK, and never reverses that LOCK.
+- The dashboard metrics and table read the same shared snapshot. Retained historical forecasts are recovered as FORECAST rows when the old execution action is unknown; they are excluded from signal-call accuracy. Existing dashboard-local rows remain in a separate legacy expander.
+- Only official Kalshi yes/no outcomes resolve shared journal rows. Unknown results remain pending; three extra result lookups per run bound retry overhead. No missed windows, paper fills, or historical execution actions are fabricated.
+- Persisted journal rows survive source-history truncation. Worker scheduling is still best effort; this change fixes journal persistence and reporting, not scheduler availability.
+- `tests/test_persistent_journal.py` covers restart recovery, deduplication, LOCK immutability, official scoring, WAIT exclusion, honest historical recovery and bounded/fair retries.
