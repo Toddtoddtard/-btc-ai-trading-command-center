@@ -944,7 +944,7 @@ def fetch_kalshi_bitcoin_markets():
         exact_close_ts = kalshi_close_timestamp(exact)
         if pd.isna(exact_close_ts):
             exact_close_ts = float(close_ny.timestamp())
-        if exact_close_ts <= now_ts:
+        if not now_ts < exact_close_ts <= float(expected_close.timestamp()):
             continue
         target = kalshi_numeric_target(exact)
         row = dict(exact)
@@ -977,7 +977,7 @@ def fetch_kalshi_bitcoin_markets():
                     if not ticker.upper().startswith("KXBTC15M-"):
                         continue
                     close_ts = kalshi_close_timestamp(market)
-                    if pd.isna(close_ts) or close_ts <= now_ts:
+                    if pd.isna(close_ts) or not now_ts < close_ts <= float(expected_close.timestamp()):
                         continue
                     row = dict(market)
                     row["_close_ts"] = close_ts
@@ -4225,14 +4225,17 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         const chart = document.getElementById("persistent-market-chart");
         const status = document.getElementById("market-status");
 
-        let currentTarget = initial.target;
-        let currentTicker = initial.ticker || "";
+        // Verify the contract in the browser before displaying its strike.
+        let currentTarget = NaN;
+        let currentTicker = "";
         // Track the active UTC 15-minute window in the browser. At rollover we
         // immediately clear the old Kalshi target so a previous contract can
         // never remain visible while the new market is publishing.
         let kalshiWindowKey = Math.floor(Date.now() / 900000);
         let lastCandleSignature = "";
         let busy = false;
+        let targetRequest = 0;
+        let targetBusy = false;
 
         const learning = initial.learning || {{}};
         const W_RET3 = Number(learning.w_ret3 ?? 0.46);
@@ -4695,8 +4698,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                         closeMs: parseTime(closeRaw)
                     }};
                 }}).filter(m =>
-                    Number.isFinite(m.target) && m.target > 0 &&
-                    Number.isFinite(m.closeMs) && m.closeMs > now
+                    Number.isFinite(m.closeMs) && m.closeMs > now &&
+                    m.closeMs <= (Math.floor(now / 900000) + 1) * 900000
                 );
 
                 const pinned = parsed.find(m => m.ticker === currentTicker);
@@ -4714,6 +4717,9 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     if (Number.isFinite(exactTarget) && exactTarget > 0) selected.target = exactTarget;
                     if (Number.isFinite(exactClose)) selected.closeMs = exactClose;
                 }}
+                if (!Number.isFinite(selected.target) || selected.target <= 0 ||
+                    selected.closeMs <= Date.now() ||
+                    selected.closeMs > (Math.floor(Date.now() / 900000) + 1) * 900000) return null;
                 return selected;
             }} catch (e) {{ return null; }}
         }}
@@ -4772,7 +4778,17 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 status.textContent = "Loading new Kalshi 15m target…";
             }}
 
-            const market = await fetchKalshiTarget();
+            if (targetBusy) return;
+            targetBusy = true;
+            const request = ++targetRequest;
+            let market;
+            try {{
+                market = await fetchKalshiTarget();
+            }} finally {{
+                targetBusy = false;
+            }}
+            // Ignore out-of-order responses and requests spanning a rollover.
+            if (request !== targetRequest || windowKey !== Math.floor(Date.now() / 900000)) return;
             if (!market) {{
                 if (!Number.isFinite(currentTarget)) {{
                     status.textContent = "Kalshi target unavailable — retrying…";
