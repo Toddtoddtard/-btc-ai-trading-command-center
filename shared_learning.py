@@ -1,6 +1,8 @@
 import base64
 import json
 import time
+from datetime import datetime, timezone
+import re
 from urllib.request import Request, urlopen
 
 import streamlit as st
@@ -79,6 +81,18 @@ def _fetch_private(token):
     )
     with urlopen(req, timeout=3.5) as response:
         wrapper = json.loads(response.read().decode("utf-8"))
+    # GitHub's Contents API omits content for files larger than 1 MB.
+    # Learning history has crossed that boundary; fetch the same blob instead.
+    if wrapper.get("encoding") != "base64" or not wrapper.get("content"):
+        sha = str(wrapper.get("sha") or "")
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise ValueError("Learning-state blob SHA missing")
+        blob_request = Request(
+            f"https://api.github.com/repos/{REPO}/git/blobs/{sha}",
+            headers=dict(req.header_items()),
+        )
+        with urlopen(blob_request, timeout=3.5) as response:
+            wrapper = json.loads(response.read().decode("utf-8"))
     raw = base64.b64decode(wrapper["content"]).decode("utf-8")
     return json.loads(raw)
 
@@ -110,13 +124,16 @@ def fetch_shared_learning_state(ttl=20.0):
         if isinstance(payload, dict):
             payload.setdefault("data_quality", {})
             payload["data_quality"]["shared_learning_source"] = "private-github" if token else "github-raw"
+            payload["data_quality"]["shared_learning_fetch_failed"] = False
+            payload["data_quality"]["shared_learning_last_success_at"] = datetime.now(timezone.utc).isoformat()
             _CACHE.update({"ts": now, "data": payload, "source": payload["data_quality"]["shared_learning_source"]})
             return payload
     except Exception:
         pass
 
     if isinstance(cached, dict):
-        _CACHE["ts"] = now
+        _CACHE["ts"] = now  # Retry throttle, not a successful-download timestamp.
+        cached.setdefault("data_quality", {})["shared_learning_fetch_failed"] = True
         return cached
 
     baseline = json.loads(json.dumps(BASELINE_STATE))
@@ -127,3 +144,36 @@ def fetch_shared_learning_state(ttl=20.0):
 
 def shared_learning_source():
     return str(_CACHE.get("source") or "baseline")
+
+
+def learning_freshness(state, now=None):
+    """Describe source age separately from fetch time; never relabel a retry fresh."""
+    now = time.time() if now is None else float(now)
+    state = state or {}
+    quality = state.get("data_quality") or {}
+    def age(stamp):
+        try:
+            parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+            if parsed.tzinfo is None or parsed.timestamp() > now + 60:
+                return None
+            return max(0.0, now - parsed.timestamp())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    learning_age = age(state.get("updated_at"))
+    paper_age = age((state.get("background_paper") or {}).get("last_cycle_at"))
+    unavailable = bool(quality.get("fallback_baseline")) or learning_age is None
+    fetch_failed = bool(quality.get("shared_learning_fetch_failed"))
+    def label(seconds):
+        return "unknown age" if seconds is None else f"{seconds / 60:.1f} minutes old"
+    status = "UNAVAILABLE" if unavailable else (
+        "STALE" if learning_age >= 1200 or paper_age is None or paper_age >= 1200 else
+        "DELAYED" if learning_age >= 600 or paper_age >= 600 else "CURRENT"
+    )
+    if fetch_failed:
+        status = "CACHED / DOWNLOAD FAILED"
+    message = f"{status} — learning snapshot {label(learning_age)}; paper cycle {label(paper_age)}."
+    if status != "CURRENT":
+        message += " Saved balances, calls and accuracy below are historical snapshots, not proof the worker is running now."
+    return {"status": status, "message": message, "warning": status != "CURRENT",
+            "learning_age_seconds": learning_age, "paper_age_seconds": paper_age,
+            "fetch_failed": fetch_failed}

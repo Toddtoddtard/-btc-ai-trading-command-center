@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 # their exports, so a deployment cannot mix old helpers or price caps with new UI.
 for _runtime_module in (
     "access_control", "lock_focus", "kalshi_paper_engine",
-    "background_paper", "pro_trade_ticket", "live_feeds",
+    "background_paper", "pro_trade_ticket", "live_feeds", "shared_learning",
 ):
     importlib.reload(importlib.import_module(_runtime_module))
 
@@ -26,7 +26,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from access_control import DEPLOYED_BUILD, require_owner_approval
 from market_guide import render_market_guide
-from shared_learning import fetch_shared_learning_state
+from shared_learning import fetch_shared_learning_state, learning_freshness
 
 from ai_core import (
     clamp,
@@ -1187,6 +1187,10 @@ def stable_kalshi_contract(kalshi, spot_price):
             if pd.notna(result.get("distance", np.nan)) and result.get("target")
             else np.nan
         )
+        if cache_expired(result):
+            result.update(available=False, target=np.nan, up_probability=np.nan,
+                          distance=np.nan, distance_pct=np.nan, market=None)
+            return result
         result["available"] = True
         result["orderbook"] = fetch_kalshi_orderbook(str(result.get("ticker") or ""))
         if result["orderbook"].get("midpoint") is not None:
@@ -1492,7 +1496,7 @@ def hourly_target_chart(hist, spot_price, hourly_ai):
             high=tail["high"],
             low=tail["low"],
             close=tail["close"],
-            name="BTC 1m",
+            name="Binance BTC/USDT 1m",
             increasing_line_width=1.6,
             decreasing_line_width=1.6,
             increasing_fillcolor="#12b886",
@@ -3635,7 +3639,7 @@ def kalshi_15m_chart(hist, spot_price, kctx, projected_end=np.nan):
             high=tail["high"],
             low=tail["low"],
             close=tail["close"],
-            name="BTC 1m",
+            name="Binance BTC/USDT 1m",
             increasing_line_width=1.8,
             decreasing_line_width=1.8,
             increasing_fillcolor="#12b886",
@@ -4046,25 +4050,35 @@ refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3
 record_predictions = st.sidebar.checkbox("Auto-journal predictions", value=True)
 show_raw = st.sidebar.checkbox("Show diagnostics", value=False)
 
-_sidebar_learning_state = fetch_remote_learning_state() or {}
-_sidebar_paper_state = _sidebar_learning_state.get("background_paper", {})
-auto_paper_enabled = bool(_sidebar_paper_state.get("enabled", True))
-st.sidebar.toggle(
-    "AUTO PAPER TRADING",
-    value=auto_paper_enabled,
-    disabled=True,
-    help="Controlled by the persistent GitHub learner. PAPER ONLY.",
-)
-
-if auto_paper_enabled:
-    st.sidebar.success("AUTO PAPER: ON")
-    st.sidebar.caption(
-        "The scheduled GitHub learner manages the persistent paper ledger about "
-        "every 5 minutes, even when this page is closed. The open dashboard "
-        "re-evaluates LOCK qualification on every live refresh."
+@st.fragment(run_every=20)
+def refresh_sidebar_paper_status():
+    _sidebar_learning_state = fetch_remote_learning_state() or {}
+    _sidebar_paper_state = _sidebar_learning_state.get("background_paper", {})
+    auto_paper_enabled = bool(_sidebar_paper_state.get("enabled", True))
+    st.toggle(
+        "AUTO PAPER TRADING",
+        value=auto_paper_enabled,
+        disabled=True,
+        help="Controlled by the persistent GitHub learner. PAPER ONLY.",
     )
-else:
-    st.sidebar.info("AUTO PAPER: OFF")
+
+    if auto_paper_enabled:
+        st.info("AUTO PAPER: ENABLED")
+        st.caption(
+            "The GitHub learner requests a paper cycle every "
+            "5 minutes; scheduling can be delayed. The open dashboard "
+            "re-evaluates LOCK qualification on every live refresh."
+        )
+    else:
+        st.info("AUTO PAPER: OFF")
+    health = learning_freshness(_sidebar_learning_state)
+    if health["warning"]:
+        st.warning(health["message"])
+    else:
+        st.caption(health["message"])
+
+with st.sidebar:
+    refresh_sidebar_paper_status()
 
 st.sidebar.divider()
 st.sidebar.subheader("Safety")
@@ -5095,7 +5109,6 @@ try:
 except Exception:
     pass
 
-_learning_state = get_learning_state()
 
 try:
     _persistent_learning_state = fetch_remote_learning_state() or {}
@@ -5123,41 +5136,55 @@ def refresh_market_chart():
     st.caption(f"Kalshi BTC/USD ${live['price']:,.2f} • price timestamp {timestamp.strftime('%H:%M:%S UTC')}")
     persistent_kalshi_market_chart(
         hist, context.get("target", np.nan), context.get("ticker", ""),
-        dark_mode=dark_mode, learning_state=_learning_state,
+        dark_mode=dark_mode, learning_state=get_learning_state(),
         paper_entries=[],  # Legacy entry prices were recorded on a different feed.
         initial_close=context.get("close_time"),
     )
 
 refresh_market_chart()
 
-if _learning_state["samples"] > 0:
-    _kalshi_samples = int(_learning_state.get("kalshi_samples", 0))
-    _kalshi_accuracy = (
-        _learning_state.get("kalshi_hits", 0) / _kalshi_samples * 100.0
-        if _kalshi_samples else np.nan
-    )
-    _btc_move_samples = int(_learning_state.get("btc_move_samples", 0))
-    _btc_move_text = (
-        f"BTC 15m move accuracy {_learning_state.get('btc_move_hits', 0) / _btc_move_samples * 100:.1f}% "
-        f"({_btc_move_samples} new-format)"
-        if _btc_move_samples else "BTC 15m move accuracy collecting new-format results"
-    )
-    st.caption(
-        f"Self-learning model: {_learning_state['samples']} completed windows • "
-        + (
-            f"official Kalshi settlement accuracy {_kalshi_accuracy:.1f}% "
-            f"({_kalshi_samples} settled) • "
-            if _kalshi_samples else "official Kalshi settlement accuracy collecting • "
+def render_learning_freshness(state):
+    health = learning_freshness(state)
+    if health["warning"]:
+        st.warning(health["message"])
+    else:
+        st.caption(health["message"])
+
+
+@st.fragment(run_every=20)
+def refresh_learning_summary():
+    _learning_state = get_learning_state()
+    render_learning_freshness(fetch_remote_learning_state())
+    if _learning_state["samples"] > 0:
+        _kalshi_samples = int(_learning_state.get("kalshi_samples", 0))
+        _kalshi_accuracy = (
+            _learning_state.get("kalshi_hits", 0) / _kalshi_samples * 100.0
+            if _kalshi_samples else np.nan
         )
-        + _btc_move_text + " • "
-        f"avg final-price error USD {_learning_state['avg_abs_error']:,.2f} • "
-        f"avg path error USD {_learning_state['avg_path_error']:,.2f}"
-    )
-else:
-    st.caption(
-        "Self-learning model is active. Accuracy statistics will appear after "
-        "the first completed 15-minute Kalshi window is graded."
-    )
+        _btc_move_samples = int(_learning_state.get("btc_move_samples", 0))
+        _btc_move_text = (
+            f"BTC 15m move accuracy {_learning_state.get('btc_move_hits', 0) / _btc_move_samples * 100:.1f}% "
+            f"({_btc_move_samples} new-format)"
+            if _btc_move_samples else "BTC 15m move accuracy collecting new-format results"
+        )
+        st.caption(
+            f"Self-learning model: {_learning_state['samples']} completed windows • "
+            + (
+                f"official Kalshi settlement accuracy {_kalshi_accuracy:.1f}% "
+                f"({_kalshi_samples} settled) • "
+                if _kalshi_samples else "official Kalshi settlement accuracy collecting • "
+            )
+            + _btc_move_text + " • "
+            f"avg final-price error USD {_learning_state['avg_abs_error']:,.2f} • "
+            f"avg path error USD {_learning_state['avg_path_error']:,.2f}"
+        )
+    else:
+        st.caption(
+            "Self-learning model is active. Accuracy statistics will appear after "
+            "the first completed 15-minute Kalshi window is graded."
+        )
+
+refresh_learning_summary()
 
 @st.fragment(run_every=live_run_every)
 def live_dashboard():
@@ -5190,21 +5217,15 @@ def live_dashboard():
             st.code("\n".join(errors))
         st.stop()
 
-    # The aggregate-trade feed carries the newest executed Binance spot trade.
-    # Prefer it over the rolling 24-hour ticker snapshot so the displayed BTC
-    # price, AI inputs and paper decisions share the freshest loaded value.
-    latest_trade_price = (
-        safe_float(agg["price"].iloc[-1])
-        if not agg.empty and "price" in agg.columns
-        else np.nan
-    )
-    price = safe_float(kalshi_reference.get("price"), np.nan)
-    if pd.isna(price) or price <= 0:
-        price = latest_trade_price
-    if pd.isna(price) or price <= 0:
-        price = safe_float(ticker.get("price"), safe_float(hist["close"].iloc[-1]))
-    if pd.isna(price) or price <= 0:
-        price = float(hist["close"].iloc[-1])
+    _display_context = stable_kalshi_contract(kalshi, np.nan)
+    _display_feed = fetch_kalshi_chart(_display_context.get("ticker", ""))
+    display_price = safe_float(_display_feed.get("price"), np.nan) if _display_feed.get("available") else np.nan
+    # Official chart prices also drive the dashboard target-distance inputs.
+    # On outage, preserve internal diagnostics with the existing spot proxy,
+    # but never label that fallback as the live Kalshi price.
+    price = display_price
+    if pd.isna(price):
+        price = safe_float(kalshi_reference.get("price"), safe_float(hist["close"].iloc[-1]))
 
     results = run_specialists(hist, agg, futures, kalshi, settlement_price=price)
     # Let every specialist learn independently from this Kalshi window.
@@ -5231,7 +5252,7 @@ def live_dashboard():
         hist,
         kalshi,
         settlement_price=price,
-        reference_healthy=bool(kalshi_reference.get("healthy")),
+        reference_healthy=bool(_display_feed.get("available")),
     )
     hourly_ai = hourly_kalshi_target_ai(hist, results, hourly_kalshi, price)
     account = get_account(price)
@@ -5258,15 +5279,13 @@ def live_dashboard():
     # ============================================================
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    _display_context = stable_kalshi_contract(kalshi, price)
-    _display_feed = fetch_kalshi_chart(_display_context.get("ticker", ""))
-    m1.metric("Kalshi BTC/USD", fmt_money(_display_feed.get("price")) if _display_feed.get("available") else "Unavailable")
+    m1.metric("Kalshi BTC/USD", fmt_money(display_price) if pd.notna(display_price) else "Unavailable")
     m1.caption(
         "Kalshi chart • " + datetime.fromtimestamp(_display_feed["timestamp"], timezone.utc).strftime("%H:%M:%S UTC")
         if _display_feed.get("available") else "Waiting for fresh Kalshi data"
     )
     m2.metric(
-        "BTC 24h Change",
+        "Binance 24h Change",
         fmt_pct(ticker.get("change_24h")),
         help="Live BTC market change over 24 hours; this is not an AI accuracy statistic.",
     )
@@ -5318,19 +5337,11 @@ def live_dashboard():
         help="Actual selected-side Kalshi ask captured when the most recent paper call opened.",
     )
 
-    _reference_source = kalshi_reference.get("source", "Kalshi reference unavailable")
-    _reference_dispersion = safe_float(kalshi_reference.get("dispersion_pct"), np.nan)
-    _reference_note = f" • venue spread {_reference_dispersion*100:.3f}%" if pd.notna(_reference_dispersion) else ""
-    if kalshi_reference.get("healthy"):
-        st.caption(
-            f"BTC decision price: {_reference_source}{_reference_note}. "
-            "Kalshi settles from the licensed CF Benchmarks BRTI final-minute average; this free USD composite is the closest public proxy."
-        )
+    if _display_feed.get("available"):
+        st.caption("Current BTC price and target distance use Kalshi's chart feed. Technical candles and order flow use Binance.")
     else:
-        st.warning(
-            "Kalshi reference feed is degraded. The dashboard may show a fallback price, "
-            "but new LOCK calls are blocked until at least two aligned USD venues recover."
-        )
+        st.warning("Live Kalshi price unavailable. Current-price cards show Unavailable; internal spot-proxy diagnostics are not Kalshi prices. New LOCK qualification is blocked until the Kalshi feed recovers.")
+    render_learning_freshness(_shared_learning_state)
 
     st.caption(
         f"Data + decision {full_cycle_ms:.0f} ms • feed load {feeds['load_ms']:.0f} ms • "
@@ -5459,7 +5470,7 @@ def live_dashboard():
         _macd_price_projection = forecast_path_core(
             hist.tail(60).to_dict("records"),
             kctx.get("target", np.nan),
-            _learning_state,
+            get_learning_state(),
         )
         _macd_projection = project_macd_path(
             hist,
@@ -5531,8 +5542,8 @@ def live_dashboard():
 
             k1, k2, k3, k4, k5, k6 = st.columns(6)
             k1.metric("Kalshi target", fmt_money(kctx["target"]))
-            k2.metric("BTC now", fmt_money(price))
-            k3.metric("Vs target", f"${kctx['distance']:+,.2f}")
+            k2.metric("Kalshi BTC now", fmt_money(display_price) if pd.notna(display_price) else "Unavailable")
+            k3.metric("Vs target", f"${display_price - kctx['target']:+,.2f}" if pd.notna(display_price) and pd.notna(kctx.get("target")) else "Unavailable")
             with k4:
                 countdown_close_ms = (
                     int(live_close_ts * 1000)
@@ -5658,7 +5669,7 @@ def live_dashboard():
         c1.metric("RSI 14", f"{safe_float(last['rsi'], 50):.1f}")
         c2.metric("ATR 14", f"${safe_float(last['atr14'], 0):,.2f}")
         c3.metric(
-            "BTC 24h Volume",
+            "Binance 24h Volume",
             f"${safe_float(ticker.get('quote_volume_24h'), 0):,.0f}",
             help="Live Binance BTC quote volume over 24 hours; this is not an AI accuracy statistic.",
         )
@@ -5903,8 +5914,8 @@ def live_dashboard():
 
         h5, h6, h7 = st.columns(3)
         h5.metric(
-            "BTC now",
-            fmt_money(price),
+            "Kalshi BTC now",
+            fmt_money(display_price) if pd.notna(display_price) else "Unavailable",
         )
         h6.metric(
             "Nearest Kalshi hourly strike",
@@ -6006,7 +6017,7 @@ def live_dashboard():
             rr1, rr2, rr3, rr4 = st.columns(4)
             rr1.metric("Ticker", kctx["ticker"])
             rr2.metric("Target", fmt_money(kctx["target"]))
-            rr3.metric("BTC vs target", f"${kctx['distance']:+,.2f}")
+            rr3.metric("BTC vs target", f"${display_price - kctx['target']:+,.2f}" if pd.notna(display_price) and pd.notna(kctx.get("target")) else "Unavailable")
             rr4.metric(
                 "UP / DOWN",
                 (
@@ -6048,6 +6059,7 @@ def live_dashboard():
 
     with tab_paper:
         st.subheader("Automatic Paper Trading")
+        render_learning_freshness(_shared_learning_state)
 
         _kp = shared_paper_summary(_shared_paper)
         _post_fix, _scalp_gate = shared_paper_scorecard(_shared_paper)
@@ -6259,6 +6271,7 @@ def live_dashboard():
 
     with tab_journal:
         _journal_state = fetch_remote_learning_state()
+        render_learning_freshness(_journal_state)
         _journal_rows, stats = persistent_journal_view(_journal_state)
         if not _journal_state:
             st.warning("Persistent prediction history is unavailable. Local-only counts are not substituted.")
@@ -6589,6 +6602,7 @@ def live_dashboard():
 
     with tab_backtest:
         st.subheader("Kalshi Execution Validation")
+        render_learning_freshness(_shared_learning_state)
         st.caption(
             "Profitability is judged from the authoritative Kalshi paper ledger: "
             "actual executable entries/exits, recorded fees, one global position "
