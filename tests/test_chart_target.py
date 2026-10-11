@@ -37,6 +37,7 @@ const assert=require('assert');
 let now=1800000+60000; Date.now=()=>now;
 let currentTicker='',currentTarget=NaN,kalshiWindowKey=2,targetRequest=0,targetBusy=false,entryMarkers=[];
 const chart={},status={},Plotly={relayout:async()=>{}};
+const setPredictionHorizon=()=>{},selectedPredictionHorizon=15;
 const targetShape=()=>[],targetAnnotation=()=>[];
 let markets=[],exact=null;
 let fetchKalshiJson=async()=>({markets});

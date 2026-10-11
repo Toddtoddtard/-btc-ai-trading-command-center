@@ -4186,11 +4186,13 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         background:{bg};
         border-radius:10px;
         overflow:hidden;
-        min-height:445px;
+        min-height:480px;
     ">
         <div id="market-status" style="
-            height:26px;
-            padding:5px 10px 0 10px;
+            min-height:52px;
+            padding:6px 10px;
+            line-height:18px;
+            overflow-wrap:anywhere;
             color:{fg};
             font-family:Arial,sans-serif;
             font-size:12px;
@@ -4202,7 +4204,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             <div id="prediction-horizon-controls" style="
                 position:absolute;
                 right:14px;
-                bottom:10px;
+                bottom:0;
                 z-index:20;
                 display:flex;
                 gap:4px;
@@ -4265,7 +4267,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 high: rows.map(r => r.high),
                 low: rows.map(r => r.low),
                 close: rows.map(r => r.close),
-                name: "BTC 1m",
+                name: "Binance 1m",
                 increasing: {{
                     line: {{color:"#12b886", width:1.7}},
                     fillcolor:"#12b886"
@@ -4385,7 +4387,16 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 prevClose = close;
             }}
 
-            return forecast;
+            // This chart describes the active Kalshi window, not the next
+            // contract. Never carry its forecast past the current close or
+            // display an old path as future data after a browser-feed outage.
+            const now = Date.now();
+            const marketClose = (Math.floor(now / 900000) + 1) * 900000;
+            if (now - lastTime > 120000 || lastTime > now + 60000) return [];
+            return forecast.filter(r => {{
+                const at = Date.parse(r.time);
+                return at > now && at <= marketClose && at <= lastTime + Number(horizonMinutes) * 60000;
+            }});
         }}
 
         function predictionTrace(rows, horizonMinutes = 15) {{
@@ -4399,7 +4410,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 high: forecast.map(r => r.high),
                 low: forecast.map(r => r.low),
                 close: forecast.map(r => r.close),
-                name: "Predicted " + horizon + "m candles",
+                name: "Projected candles (estimate)",
+                showlegend: false,
                 increasing: {{
                     line: {{
                         color:"rgba(77,171,247,0.88)",
@@ -4432,8 +4444,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 mode: "lines+markers",
                 line: {{width: 3, dash: "dot", color: "#2ea8ff"}},
                 marker: {{size: 5, color: "#2ea8ff"}},
-                name: "Prediction " + horizon + "m",
-                hovertemplate: "AI " + horizon + "m prediction: $%{{y:,.2f}}<extra></extra>"
+                name: "Forecast (≤" + horizon + "m)",
+                hovertemplate: "Estimated BTC/USDT: $%{{y:,.2f}}<extra></extra>"
             }};
         }}
 
@@ -4505,9 +4517,11 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             paper_bgcolor: paperBg,
             plot_bgcolor: plotBg,
             font: {{color: fontColor}},
-            margin: {{l:8,r:62,t:34,b:28}},
+            margin: {{l:8,r:62,t:48,b:65}},
             xaxis: {{
                 rangeslider: {{visible:false}},
+                tickformat:"%H:%M",
+                title: {{text:"Time (UTC)", standoff:4}},
                 showgrid:false,
                 zeroline:false,
                 fixedrange:false
@@ -4540,7 +4554,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             responsive:true,
             scrollZoom:true,
             doubleClick:"reset",
-            displayModeBar:"hover"
+            displayModeBar:window.innerWidth > 600 ? "hover" : false
         }};
 
         let rows = initial.candles || [];
@@ -4737,12 +4751,14 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             try {{
                 const fresh = await fetchCandles();
                 if (!fresh || !fresh.length) {{
+                    setPredictionHorizon(selectedPredictionHorizon);
                     status.textContent = "BTC browser feed unavailable — server refresh will retry";
                     return;
                 }}
                 const lastBar = fresh[fresh.length - 1];
                 const candleAge = Date.now() - Date.parse(lastBar.time);
                 if (!Number.isFinite(candleAge) || candleAge > 120000 || candleAge < -60000) {{
+                    setPredictionHorizon(selectedPredictionHorizon);
                     status.textContent = "STALE BTC candles — waiting for fresh data";
                     return;
                 }}
@@ -4790,6 +4806,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     shapes: [],
                     annotations: []
                 }});
+                setPredictionHorizon(selectedPredictionHorizon);
                 status.textContent = "Loading new Kalshi 15m target…";
             }}
 
@@ -4856,7 +4873,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 
     components.html(
         html,
-        height=445,
+        height=480,
         scrolling=False,
     )
 
@@ -5030,7 +5047,8 @@ except Exception:
 st.subheader("Live Kalshi BTC Market")
 st.caption(
     "BTC/USDT candles with the current Kalshi contract target. "
-    "Browser updates plus a 15-second server refresh fallback."
+    "Forecasts stop at this contract’s close. Times are UTC. "
+    "The BTC/USD estimate below uses different exchanges and can differ from Binance."
 )
 st.caption("1m / 5m / 15m have separate shadow models. Each can affect the displayed forecast only after historical validation and repeated live Brier-score outperformance. Forecasts remain estimates, not guarantees.")
 
@@ -5124,8 +5142,8 @@ if _learning_state["samples"] > 0:
             if _kalshi_samples else "official Kalshi settlement accuracy collecting • "
         )
         + _btc_move_text + " • "
-        f"avg final-price error ${_learning_state['avg_abs_error']:,.2f} • "
-        f"avg path error ${_learning_state['avg_path_error']:,.2f}"
+        f"avg final-price error USD {_learning_state['avg_abs_error']:,.2f} • "
+        f"avg path error USD {_learning_state['avg_path_error']:,.2f}"
     )
 else:
     st.caption(
@@ -5232,7 +5250,19 @@ def live_dashboard():
     # ============================================================
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("BTC", fmt_money(price))
+    _using_usd_reference = (
+        pd.notna(safe_float(kalshi_reference.get("price"), np.nan))
+        and safe_float(kalshi_reference.get("price"), 0) > 0
+    )
+    m1.metric(
+        "BTC/USD estimate" if _using_usd_reference else "BTC/USDT (Binance)",
+        fmt_money(price),
+        help="Median public USD exchange quote; not the official Kalshi settlement index. The chart uses Binance BTC/USDT." if _using_usd_reference else "Binance spot fallback; not the official Kalshi settlement index.",
+    )
+    m1.caption(
+        (str(kalshi_reference.get("source") or "Public USD venues") if _using_usd_reference else "Binance spot fallback")
+        + " • checked " + utc_now().strftime("%H:%M:%S UTC")
+    )
     m2.metric(
         "BTC 24h Change",
         fmt_pct(ticker.get("change_24h")),

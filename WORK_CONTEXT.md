@@ -96,3 +96,10 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - Only official Kalshi yes/no outcomes resolve shared journal rows. Unknown results remain pending; three extra result lookups per run bound retry overhead. No missed windows, paper fills, or historical execution actions are fabricated.
 - Persisted journal rows survive source-history truncation. Worker scheduling is still best effort; this change fixes journal persistence and reporting, not scheduler availability.
 - `tests/test_persistent_journal.py` covers restart recovery, deduplication, LOCK immutability, official scoring, WAIT exclusion, honest historical recovery and bounded/fair retries.
+
+## Chart clarity and active-window bounds (2026-10-10)
+
+- Label the dashboard BTC/USD median estimate separately from Binance BTC/USDT chart candles; these are different price sources, not interchangeable settlement values. No execution or settlement logic changed.
+- Browser forecasts stop at the current UTC quarter-hour close and hide once their input candle is more than two minutes old. Selected 1m/5m/15m horizons remain maximum lengths.
+- Allow the chart status to wrap, reserve axis/control space, shorten the legend and hide the desktop toolbar on mobile. Use USD in the learning-error caption to prevent Markdown math rendering.
+- Chart execution tests reproduce the 21:54 screenshot, check the 22:00 cutoff, and cover stale paths and target rollover.
