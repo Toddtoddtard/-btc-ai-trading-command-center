@@ -103,3 +103,10 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - Browser forecasts stop at the current UTC quarter-hour close and hide once their input candle is more than two minutes old. Selected 1m/5m/15m horizons remain maximum lengths.
 - Allow the chart status to wrap, reserve axis/control space, shorten the legend and hide the desktop toolbar on mobile. Use USD in the learning-error caption to prevent Markdown math rendering.
 - Chart execution tests reproduce the 21:54 screenshot, check the 22:00 cutoff, and cover stale paths and target rollover.
+
+## Kalshi-native chart feed (2026-10-11)
+
+- Main chart and primary BTC price card now read Kalshi public `/live_data/events/{event_ticker}?range=1h`, using `live_data.details.candlesticks["1M"]` and timestamped `timeseries` values. The endpoint was observed returning live `crypto`/`BTC` data without credentials. No paid feed or trading key is added.
+- Reject mismatched events, historical/expired/future windows, and price ticks older than 30 seconds. Never substitute Binance or the USD composite in this chart/card. The server refreshes the chart every five seconds, browser every two seconds.
+- Other analysis inputs and the paper learner remain unchanged. Historical path metrics are explicitly labeled as Binance-based; old entry dots without matching price provenance are omitted from this chart.
+- Official docs: https://docs.kalshi.com/api-reference/live-data/get-event-live-data . Tests exercise Python and browser parsing, stale data, rollover and no-exchange-fallback behavior.

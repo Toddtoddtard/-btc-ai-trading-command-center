@@ -43,6 +43,7 @@ from dashboard_ui import (
 )
 from live_feeds import load_live_feeds, parallel_calls
 from kalshi_reference import fetch_kalshi_reference
+from kalshi_chart_data import fetch_chart
 from macd_engine import project_macd_path
 from council_v4 import council_vote
 from specialist_knowledge_v5 import knowledge_council_vote
@@ -744,6 +745,11 @@ def fetch_spot_ticker():
 def fetch_kalshi_reference_price():
     """Free USD composite aligned to Kalshi's BRTI settlement basis."""
     return fetch_kalshi_reference()
+
+
+@st.cache_data(ttl=2, show_spinner=False)
+def fetch_kalshi_chart(market_ticker):
+    return fetch_chart(market_ticker)
 
 
 @st.cache_data(ttl=2, show_spinner=False)
@@ -4198,7 +4204,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             font-size:12px;
             opacity:.82;
             box-sizing:border-box;
-        ">Live BTC 1m candles • predicted 15m candle path • Kalshi target</div>
+        ">Kalshi BTC/USD candles • estimated path • Kalshi target</div>
         <div style="position:relative;width:100%;height:415px;">
             <div id="persistent-market-chart" style="width:100%;height:415px;"></div>
             <div id="prediction-horizon-controls" style="
@@ -4267,7 +4273,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 high: rows.map(r => r.high),
                 low: rows.map(r => r.low),
                 close: rows.map(r => r.close),
-                name: "Binance 1m",
+                name: "Kalshi BTC/USD 1m",
                 increasing: {{
                     line: {{color:"#12b886", width:1.7}},
                     fillcolor:"#12b886"
@@ -4445,7 +4451,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 line: {{width: 3, dash: "dot", color: "#2ea8ff"}},
                 marker: {{size: 5, color: "#2ea8ff"}},
                 name: "Forecast (≤" + horizon + "m)",
-                hovertemplate: "Estimated BTC/USDT: $%{{y:,.2f}}<extra></extra>"
+                hovertemplate: "Estimated Kalshi chart price: $%{{y:,.2f}}<extra></extra>"
             }};
         }}
 
@@ -4624,31 +4630,41 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             ].join("|");
         }}
 
-        async function fetchCandles() {{
-            const urls = [
-                "https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=60",
-                "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=60"
-            ];
+        let lastChartPrice = NaN;
+        let lastChartTimestamp = 0;
 
-            let payload = null;
-            for (const url of urls) {{
-                try {{
-                    const resp = await fetch(url, {{cache:"no-store"}});
-                    if (!resp.ok) continue;
-                    payload = await resp.json();
-                    if (Array.isArray(payload)) break;
-                }} catch (e) {{}}
+        function parseKalshiCandles(payload, event, now = Date.now()) {{
+            const live = (payload || {{}}).live_data || {{}};
+            const d = live.details || {{}};
+            const maturity = Number(d.maturity_ts_ms);
+            if (live.type !== "crypto" || live.is_historical !== false || d.coin !== "BTC" ||
+                d.event_ticker !== event || !(maturity > now && maturity <= (Math.floor(now / 900000)+1)*900000)) return null;
+            const points = (d.timeseries || []).filter(p => Number.isFinite(Number(p.t)) &&
+                Number.isFinite(Number(p.v)) && Number(p.v)>1000 && Number(p.t)<=now+5000);
+            points.sort((a,b)=>Number(a.t)-Number(b.t));
+            const latest = points[points.length-1];
+            if (!latest || now-Number(latest.t)>30000) return null;
+            const bars = new Map();
+            for (const r of ((d.candlesticks || {{}})["1M"] || [])) {{
+                const t=Number(r.open_ts_ms), o=Number(r.open), h=Number(r.high), l=Number(r.low), c=Number(r.close);
+                if (![t,o,h,l,c].every(Number.isFinite) || t<=0 || t>Number(latest.t) ||
+                    l<=1000 || l>Math.min(o,c) || h<Math.max(o,c)) continue;
+                bars.set(t, {{time:new Date(t).toISOString(),open:o,high:h,low:l,close:c}});
             }}
+            const candles = Array.from(bars.entries()).sort((a,b)=>a[0]-b[0]).slice(-60).map(x=>x[1]);
+            if (!candles.length || Number(latest.t)-Date.parse(candles[candles.length-1].time)>120000) return null;
+            lastChartPrice=Number(latest.v);
+            lastChartTimestamp=Number(latest.t);
+            return candles;
+        }}
 
-            if (!Array.isArray(payload)) return null;
-
-            return payload.map(k => ({{
-                time: new Date(k[0]).toISOString(),
-                open: Number(k[1]),
-                high: Number(k[2]),
-                low: Number(k[3]),
-                close: Number(k[4])
-            }}));
+        async function fetchCandles() {{
+            const ticker = currentTicker || (serverClose > Date.now() ? initial.ticker : "");
+            const match = String(ticker || "").match(/^(KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}})(?:-\\d+)?$/);
+            if (!match) return null;
+            const event = match[1];
+            const payload = await fetchKalshiJson("/live_data/events/" + encodeURIComponent(event) + "?range=1h");
+            return parseKalshiCandles(payload, event);
         }}
 
         function parseTime(value) {{
@@ -4752,7 +4768,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 const fresh = await fetchCandles();
                 if (!fresh || !fresh.length) {{
                     setPredictionHorizon(selectedPredictionHorizon);
-                    status.textContent = "BTC browser feed unavailable — server refresh will retry";
+                    status.textContent = "Kalshi chart feed unavailable — server refresh will retry";
                     return;
                 }}
                 const lastBar = fresh[fresh.length - 1];
@@ -4787,9 +4803,9 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 );
 
                 status.textContent =
-                    "Binance BTC/USDT $" + Number(lastBar.close).toLocaleString() + " • " +
+                    "Kalshi BTC/USD $" + Number(lastChartPrice).toLocaleString(undefined, {{minimumFractionDigits:2,maximumFractionDigits:2}}) + " • " +
                     (currentTicker ? currentTicker + " • " : "") +
-                    "updated " + new Date().toLocaleTimeString();
+                    "price at " + new Date(lastChartTimestamp).toLocaleTimeString();
             }} finally {{
                 busy = false;
             }}
@@ -4854,7 +4870,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }}
 
         // Candle updates are quick but do not rebuild the iframe.
-        const candleTimer = setInterval(updateCandles, 1500);
+        const candleTimer = setInterval(updateCandles, 2000);
 
         // Kalshi target only changes when a new 15-minute contract becomes active.
         const kalshiTimer = setInterval(updateTarget, 1000);
@@ -5046,11 +5062,11 @@ except Exception:
 
 st.subheader("Live Kalshi BTC Market")
 st.caption(
-    "BTC/USDT candles with the current Kalshi contract target. "
+    "Kalshi BTC/USD chart data with the current Kalshi contract target. "
     "Forecasts stop at this contract’s close. Times are UTC. "
-    "The BTC/USD estimate below uses different exchanges and can differ from Binance."
+    "Chart prices are fetched directly from Kalshi; unavailable data is never replaced with Binance."
 )
-st.caption("1m / 5m / 15m have separate shadow models. Each can affect the displayed forecast only after historical validation and repeated live Brier-score outperformance. Forecasts remain estimates, not guarantees.")
+st.caption("The forecast overlay is an estimate. Historical BTC-path accuracy below was measured on Binance data, not this Kalshi chart feed.")
 
 # Grade completed windows and learn before drawing the next forecast.
 try:
@@ -5092,31 +5108,23 @@ try:
 except Exception:
     _persistent_paper_entries = []
 
-@st.fragment(run_every=15)
+@st.fragment(run_every=5)
 def refresh_market_chart():
     try:
-        raw, _ = fetch_klines("1m", 60)
-        hist = enrich_history(raw)
-    except Exception:
-        hist = pd.DataFrame()
-    if hist.empty:
-        st.warning("BTC chart feed unavailable — retrying in 15 seconds.")
+        context = stable_kalshi_contract(fetch_kalshi_bitcoin_markets(), np.nan)
+        live = fetch_kalshi_chart(context.get("ticker", ""))
+    except Exception as exc:
+        live = {"available": False, "error": str(exc)}
+    if not live.get("available"):
+        st.warning("Kalshi BTC chart unavailable or stale — retrying. No Binance price is substituted.")
         return
-    latest = pd.Timestamp(hist.iloc[-1]["time"])
-    age = time.time() - latest.timestamp()
-    if not -60 <= age <= 120:
-        st.warning("BTC chart candles are stale — forecasts hidden until fresh data returns.")
-        return
-    price = float(hist.iloc[-1]["close"])
-    try:
-        context = stable_kalshi_contract(fetch_kalshi_bitcoin_markets(), price)
-    except Exception:
-        context = {}
-    st.caption(f"Binance BTC/USDT ${price:,.2f} • latest candle {latest.strftime('%H:%M UTC')} • server checked {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}. This is a spot proxy, not Kalshi's settlement index.")
+    hist = pd.DataFrame(live["candles"])
+    timestamp = datetime.fromtimestamp(live["timestamp"], timezone.utc)
+    st.caption(f"Kalshi BTC/USD ${live['price']:,.2f} • price timestamp {timestamp.strftime('%H:%M:%S UTC')}")
     persistent_kalshi_market_chart(
         hist, context.get("target", np.nan), context.get("ticker", ""),
         dark_mode=dark_mode, learning_state=_learning_state,
-        paper_entries=_persistent_paper_entries,
+        paper_entries=[],  # Legacy entry prices were recorded on a different feed.
         initial_close=context.get("close_time"),
     )
 
@@ -5250,18 +5258,12 @@ def live_dashboard():
     # ============================================================
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    _using_usd_reference = (
-        pd.notna(safe_float(kalshi_reference.get("price"), np.nan))
-        and safe_float(kalshi_reference.get("price"), 0) > 0
-    )
-    m1.metric(
-        "BTC/USD estimate" if _using_usd_reference else "BTC/USDT (Binance)",
-        fmt_money(price),
-        help="Median public USD exchange quote; not the official Kalshi settlement index. The chart uses Binance BTC/USDT." if _using_usd_reference else "Binance spot fallback; not the official Kalshi settlement index.",
-    )
+    _display_context = stable_kalshi_contract(kalshi, price)
+    _display_feed = fetch_kalshi_chart(_display_context.get("ticker", ""))
+    m1.metric("Kalshi BTC/USD", fmt_money(_display_feed.get("price")) if _display_feed.get("available") else "Unavailable")
     m1.caption(
-        (str(kalshi_reference.get("source") or "Public USD venues") if _using_usd_reference else "Binance spot fallback")
-        + " • checked " + utc_now().strftime("%H:%M:%S UTC")
+        "Kalshi chart • " + datetime.fromtimestamp(_display_feed["timestamp"], timezone.utc).strftime("%H:%M:%S UTC")
+        if _display_feed.get("available") else "Waiting for fresh Kalshi data"
     )
     m2.metric(
         "BTC 24h Change",
