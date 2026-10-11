@@ -110,3 +110,13 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - Reject mismatched events, historical/expired/future windows, and price ticks older than 30 seconds. Never substitute Binance or the USD composite in this chart/card. The server refreshes the chart every five seconds, browser every two seconds.
 - Other analysis inputs and the paper learner remain unchanged. Historical path metrics are explicitly labeled as Binance-based; old entry dots without matching price provenance are omitted from this chart.
 - Official docs: https://docs.kalshi.com/api-reference/live-data/get-event-live-data . Tests exercise Python and browser parsing, stale data, rollover and no-exchange-fallback behavior.
+
+
+## 2026-10-11 — r94 dashboard freshness
+
+- Current BTC cards and target-distance metrics now use one Kalshi chart snapshot per dashboard refresh. Missing official quotes show Unavailable; new dashboard LOCK qualification requires a fresh official feed. Technical candles, order flow and 24h metrics explicitly identify Binance.
+- Forecast weights, accuracy summary and sidebar paper status reload during fragment refreshes. Saved learning and paper cycles show their own source ages; delayed, stale and failed-download snapshots carry warnings. Enabled paper mode does not imply a currently running worker.
+- GitHub authenticated learning-state downloads follow the validated blob SHA when the Contents response omits large-file content. Failed downloads preserve the actual source age and last successful download time.
+- Expired cached Kalshi contracts no longer expose a target or probability as active during feed outages.
+- Investigation found successful learner runs separated by long GitHub scheduling delays; watchdog recovery dispatch is functioning. GitHub cron remains best effort, so the UI reports delays rather than promising uninterrupted updates.
+- Regression coverage includes large-state loading, cache failure/recovery, independent paper-cycle age, summary refresh and contract expiry.
