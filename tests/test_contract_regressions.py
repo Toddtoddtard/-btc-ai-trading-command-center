@@ -485,7 +485,7 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('components.html(_live_countdown_html, height=72', source)
         self.assertIn('setInterval(renderInlineCountdown, 250)', source)
         self.assertIn('function paperEntryTrace()', source)
-        self.assertIn('paper_entries=_persistent_paper_entries', source)
+        self.assertIn('paper_entries=[],  # Legacy entry prices were recorded on a different feed.', source)
         self.assertIn("Entered at {_call_entries[-1]", source)
         self.assertIn('Since Loss-Loop Fix — Kalshi Execution Scorecard', source)
         self.assertIn('_kp = shared_paper_summary(_shared_paper)', source)
