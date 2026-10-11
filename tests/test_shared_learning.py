@@ -23,6 +23,9 @@ class _Response:
 
 class SharedLearningTests(unittest.TestCase):
     def setUp(self):
+        network = patch.object(shared_learning, "urlopen", side_effect=AssertionError("Unmocked network request"))
+        network.start()
+        self.addCleanup(network.stop)
         shared_learning._PUBLIC_API_RETRY_AT = float("-inf")
         shared_learning._CACHE.update({"ts": 0.0, "data": None, "source": "baseline"})
 
