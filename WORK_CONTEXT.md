@@ -120,3 +120,6 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 - Expired cached Kalshi contracts no longer expose a target or probability as active during feed outages.
 - Investigation found successful learner runs separated by long GitHub scheduling delays; watchdog recovery dispatch is functioning. GitHub cron remains best effort, so the UI reports delays rather than promising uninterrupted updates.
 - Regression coverage includes large-state loading, cache failure/recovery, independent paper-cycle age, summary refresh and contract expiry.
+
+### r95 publication-cache follow-up
+Live verification found raw.githubusercontent.com still returning the prior snapshot after a successful learner publication. Added rate-limited public Contents/blob recovery when source data is delayed and monotonic snapshot selection so a stale CDN response cannot roll back newer cached data. Recovery is limited to one attempt per five minutes to respect unauthenticated API limits.

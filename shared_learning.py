@@ -50,7 +50,8 @@ BASELINE_STATE = {
     "prediction_snapshots": [],
 }
 
-_CACHE = {"ts": 0.0, "data": None, "source": "baseline"}
+_CACHE = globals().get("_CACHE", {"ts": 0.0, "data": None, "source": "baseline"})
+_PUBLIC_API_RETRY_AT = globals().get("_PUBLIC_API_RETRY_AT", float("-inf"))
 
 
 def _secret_token():
@@ -70,15 +71,14 @@ def _secret_token():
 
 
 def _fetch_private(token):
-    req = Request(
-        API_URL,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "BTC-AI-Command-Center/shared-learning",
-            "Cache-Control": "no-cache",
-        },
-    )
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "BTC-AI-Command-Center/shared-learning",
+        "Cache-Control": "no-cache",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = Request(API_URL, headers=headers)
     with urlopen(req, timeout=3.5) as response:
         wrapper = json.loads(response.read().decode("utf-8"))
     # GitHub's Contents API omits content for files larger than 1 MB.
@@ -112,6 +112,7 @@ def _fetch_public(cache_key=None):
 
 
 def fetch_shared_learning_state(ttl=20.0):
+    global _PUBLIC_API_RETRY_AT
     now = time.monotonic()
     cached = _CACHE.get("data")
     if isinstance(cached, dict) and now - float(_CACHE.get("ts", 0.0)) < ttl:
@@ -121,9 +122,24 @@ def fetch_shared_learning_state(ttl=20.0):
     try:
         public_key = int(time.time() // max(float(ttl), 1.0))
         payload = _fetch_private(token) if token else _fetch_public(public_key)
+        source = "private-github" if token else "github-raw"
         if isinstance(payload, dict):
+            # Raw branch URLs can lag a successful publication despite cache busting.
+            # Bound unauthenticated API recovery to at most 24 requests/hour
+            # (Contents + blob), and never replace a newer saved snapshot.
+            if not token and learning_freshness(payload)["warning"] and now - _PUBLIC_API_RETRY_AT >= 300:
+                _PUBLIC_API_RETRY_AT = now
+                try:
+                    recovered = _fetch_private("")
+                    if snapshot_timestamp(recovered) > snapshot_timestamp(payload):
+                        payload, source = recovered, "github-api"
+                except Exception:
+                    pass
+            if isinstance(cached, dict) and snapshot_timestamp(cached) > snapshot_timestamp(payload):
+                payload = json.loads(json.dumps(cached))
+                source = payload.get("data_quality", {}).get("shared_learning_source", source)
             payload.setdefault("data_quality", {})
-            payload["data_quality"]["shared_learning_source"] = "private-github" if token else "github-raw"
+            payload["data_quality"]["shared_learning_source"] = source
             payload["data_quality"]["shared_learning_fetch_failed"] = False
             payload["data_quality"]["shared_learning_last_success_at"] = datetime.now(timezone.utc).isoformat()
             _CACHE.update({"ts": now, "data": payload, "source": payload["data_quality"]["shared_learning_source"]})
@@ -177,3 +193,14 @@ def learning_freshness(state, now=None):
     return {"status": status, "message": message, "warning": status != "CURRENT",
             "learning_age_seconds": learning_age, "paper_age_seconds": paper_age,
             "fetch_failed": fetch_failed}
+
+
+def snapshot_timestamp(state):
+    """Order snapshots by publication time, not by when a CDN returned them."""
+    try:
+        stamp = datetime.fromisoformat(str(state.get("updated_at")).replace("Z", "+00:00"))
+        if stamp.tzinfo is None or stamp.timestamp() > time.time() + 60:
+            return float("-inf")
+        return stamp.timestamp()
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return float("-inf")

@@ -23,6 +23,10 @@ class _Response:
 
 class SharedLearningTests(unittest.TestCase):
     def setUp(self):
+        network = patch.object(shared_learning, "urlopen", side_effect=AssertionError("Unmocked network request"))
+        network.start()
+        self.addCleanup(network.stop)
+        shared_learning._PUBLIC_API_RETRY_AT = float("-inf")
         shared_learning._CACHE.update({"ts": 0.0, "data": None, "source": "baseline"})
 
     def test_large_private_state_loads_blob_on_same_host(self):
@@ -71,8 +75,21 @@ class SharedLearningTests(unittest.TestCase):
             state["updated_at"] = stamp
             self.assertEqual(shared_learning.learning_freshness(state, now)["status"], "UNAVAILABLE")
 
+    def test_stale_cdn_recovers_and_cannot_roll_back_newer_snapshot(self):
+        old = {"updated_at": "2026-10-11T17:00:00Z", "background_paper": {"last_cycle_at": "2026-10-11T17:01:00Z"}}
+        new = {"updated_at": "2026-10-11T19:00:00Z", "background_paper": {"last_cycle_at": "2026-10-11T19:01:00Z"}}
+        now = datetime(2026, 10, 11, 19, 2, tzinfo=timezone.utc).timestamp()
+        with patch.object(shared_learning, "_secret_token", return_value=""), patch.object(shared_learning, "_fetch_public", return_value=old), patch.object(shared_learning, "_fetch_private", return_value=new) as api, patch.object(shared_learning.time, "time", return_value=now), patch.object(shared_learning.time, "monotonic", side_effect=[1000, 1025]):
+            first = shared_learning.fetch_shared_learning_state(ttl=0)
+            second = shared_learning.fetch_shared_learning_state(ttl=0)
+        self.assertEqual(first["updated_at"], new["updated_at"])
+        self.assertEqual(second["updated_at"], new["updated_at"])
+        self.assertEqual(second["data_quality"]["shared_learning_source"], "github-api")
+        api.assert_called_once_with("")
+
     def test_public_fetch_uses_bounded_cache_buster(self):
         requests = []
+        shared_learning._PUBLIC_API_RETRY_AT = shared_learning.time.monotonic()
 
         def fake_open(request, timeout):
             requests.append(request)
