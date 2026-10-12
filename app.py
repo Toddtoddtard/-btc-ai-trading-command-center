@@ -15,6 +15,8 @@ from urllib.request import Request, urlopen
 # their exports, so a deployment cannot mix old helpers or price caps with new UI.
 for _runtime_module in (
     "access_control", "lock_focus", "kalshi_paper_engine",
+    "contract_calibration", "reliability_v31", "council_v4",
+    "council_accounting", "specialist_knowledge_v5",
     "background_paper", "pro_trade_ticket", "live_feeds", "shared_learning",
 ):
     importlib.reload(importlib.import_module(_runtime_module))
@@ -50,6 +52,7 @@ from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from contract_probability import realized_minute_volatility, terminal_above_probability
+from contract_calibration import apply as apply_contract_calibration
 from research_dashboard import render_research_dashboard
 from background_paper import (
     latest_shared_call_entry,
@@ -1704,6 +1707,7 @@ def master_decision(
             orderbook=kctx.get("orderbook") or {},
             source_health=source_health,
         )
+        contract_view = apply_contract_calibration(contract_view, remote_learning)
         contract_up_probability = safe_float(
             contract_view.get("probability_up"), up_prob
         )
@@ -1970,6 +1974,9 @@ def master_decision(
         "contract_probability_up": safe_float(
             contract_view.get("probability_up"), np.nan
         ),
+        "raw_contract_probability_up": safe_float(contract_view.get("raw_probability_up"), np.nan),
+        "contract_probability_basis": contract_view.get("probability_basis"),
+        "contract_calibrator_active": bool(contract_view.get("calibrator_active", False)),
         "contract_probability_edge": safe_float(
             contract_view.get("edge_vs_market"), np.nan
         ),

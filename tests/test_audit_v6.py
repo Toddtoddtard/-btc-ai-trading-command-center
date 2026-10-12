@@ -46,6 +46,7 @@ class AuditV6Tests(unittest.TestCase):
         state = {
             "specialists": {"Whale AI": {"adaptive_weight": 1.0, "regimes": {}}},
             "bot_intelligence_v4": {"label_basis": "official_kalshi_directional_calls_v1",
+                "evaluation_mode": "causal_prior_only_ablation",
                 "ranking": [{
                     "name": "Whale AI",
                     "samples": 20,
@@ -57,6 +58,9 @@ class AuditV6Tests(unittest.TestCase):
         harmful = specialist_weight("Whale AI", state, "LOW_VOL_RANGE")
         baseline = specialist_weight("Whale AI", {}, "LOW_VOL_RANGE")
         self.assertLess(harmful, baseline * 0.70)
+        # Old in-sample reports are descriptive, not evidence for tuning.
+        state["bot_intelligence_v4"]["evaluation_mode"] = "retrospective_current_policy_ablation"
+        self.assertEqual(specialist_weight("Whale AI", state, "LOW_VOL_RANGE"), baseline)
 
     def test_regime_resolver_prefers_active_pending_window(self):
         state = {

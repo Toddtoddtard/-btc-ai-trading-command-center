@@ -19,6 +19,8 @@ import learner as legacy
 import learner_v3 as v3
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from contract_probability import realized_minute_volatility, terminal_above_probability
+from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration
+from council_accounting import reconcile_master_learning
 from forward_outlook import build_next_market_outlooks
 from horizon_models import (
     baseline_probabilities,
@@ -601,6 +603,7 @@ def current_shadow_call(state, df, market_info):
         orderbook=market_info.get("orderbook") or {},
         source_health=source_health,
     )
+    contract_view = apply_contract_calibration(contract_view, state)
     contract_probability_up = safe_float(contract_view.get("probability_up"))
     direction = (
         "UP" if contract_probability_up >= 0.5 else "DOWN"
@@ -609,6 +612,9 @@ def current_shadow_call(state, df, market_info):
     )
     consensus = specialist_consensus(specialists, direction, vote)
     call["contract_probability_up"] = contract_probability_up
+    call["raw_contract_probability_up"] = contract_view.get("raw_probability_up")
+    call["contract_probability_basis"] = contract_view.get("probability_basis")
+    call["contract_calibrator_active"] = contract_view.get("calibrator_active", False)
     call["contract_probability_edge"] = safe_float(contract_view.get("edge_vs_market"))
     call["strike_distance_sigma"] = safe_float(
         contract_view.get("normalized_strike_distance")
@@ -672,6 +678,9 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         "specialists", "master_confidence", "master_base_score", "council_vote",
         "master_action", "would_wait", "lock_focus",
         "execution_approved", "execution_reason",
+        "contract_probability_up", "raw_contract_probability_up",
+        "contract_probability_basis", "contract_calibrator_active",
+        "contract_probability_edge",
     ):
         pending[key] = live_call.get(key)
     if str(pending.get("master_action") or "").startswith("LOCK"):
@@ -753,6 +762,10 @@ def main():
     research_resolved = resolve_shadows(state, legacy.official_result)
     official_resolved = legacy.resolve_official_results(state)
     reconcile_specialists(state)
+    reconcile_master_learning(state)
+    state["contract_calibration"] = fit_contract_calibration(
+        state.get("research_lab", {}).get("history", []), as_of=time.time()
+    )
     registered = register_with_snapshot(state, df, market_info)
     live_call = current_shadow_call(state, df, market_info)
     lock_gate_recorded = record_lock_gate_evaluation(state, live_call, market_info)

@@ -259,6 +259,16 @@ def _projected_side_value(pending, market, side):
     if yes_bid is None or yes_ask is None:
         return None
     market_up = min(0.99, max(0.01, (yes_bid + yes_ask) / 2.0))
+    from contract_calibration import BASIS
+    if pending.get("contract_probability_basis") == BASIS:
+        # Use the same validated probability as the dashboard/learner. An
+        # inactive calibrator uses this cycle's midpoint, never stale geometry
+        # transformed into a second, untested paper-profit forecast.
+        projected_up = (_f(pending.get("contract_probability_up"))
+                        if pending.get("contract_calibrator_active") else market_up)
+        if projected_up is None or not 0 <= projected_up <= 1:
+            return None
+        return projected_up if side == "YES" else 1.0 - projected_up
     start = _f(pending.get("start_price"))
     predicted = _f(pending.get("predicted_end"))
     target = _f(pending.get("target"))

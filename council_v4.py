@@ -77,7 +77,8 @@ def _contribution_multiplier(state, name):
     """
     state = state if isinstance(state, dict) else {}
     intel = state.get("bot_intelligence_v4", {}) if isinstance(state.get("bot_intelligence_v4", {}), dict) else {}
-    if intel.get("label_basis") != "official_kalshi_directional_calls_v1":
+    if (intel.get("label_basis") != "official_kalshi_directional_calls_v1"
+            or intel.get("evaluation_mode") != "causal_prior_only_ablation"):
         return 1.0
     ranking = intel.get("ranking", []) if isinstance(intel.get("ranking", []), list) else []
     row = next((r for r in ranking if isinstance(r, dict) and r.get("name") == name), None)
@@ -195,7 +196,7 @@ def analyze_bot_contributions(state, min_samples=12):
     harmful specialists instead of rewarding raw agreement alone.
     """
     state = state if isinstance(state, dict) else {}
-    from council_accounting import official_snapshots
+    from council_accounting import official_snapshots, reconcile_specialists, reconcile_master_learning
     stats = defaultdict(lambda: {
         "samples": 0,
         "standalone_hits": 0,
@@ -208,7 +209,8 @@ def analyze_bot_contributions(state, min_samples=12):
     })
     evaluated = 0
 
-    for snap, outcome in official_snapshots(state):
+    records = sorted(official_snapshots(state), key=lambda pair: _safe_float(pair[0].get("opened_at")))
+    for index, (snap, outcome) in enumerate(records):
         ticker = str(snap.get("ticker") or "")
         specialists = ((snap.get("snapshot") or {}).get("specialists") or {})
         if not specialists:
@@ -216,9 +218,19 @@ def analyze_bot_contributions(state, min_samples=12):
 
         actual_dir = 1 if outcome["kalshi_result"] == "yes" else -1
         from specialist_knowledge_v5 import knowledge_adjust_results
-        adjusted, _ = knowledge_adjust_results(specialists, state, str((snap.get("snapshot") or {}).get("regime") or "UNKNOWN"))
+        # Today's fitted weights already contain this row's outcome. Never use
+        # them to decide which historical bots earned additional influence.
+        # Reconstruct learning using only earlier, already-ended markets.
+        opened = _safe_float(snap.get("opened_at"))
+        prior = [(s, o) for s, o in records[:index]
+                 if _safe_float(s.get("expires_at"), float("inf")) <= opened]
+        replay_state = {"prediction_snapshots": [s for s, _ in prior],
+                        "master_history": [o for _, o in prior], "specialists": {}}
+        reconcile_specialists(replay_state)
+        reconcile_master_learning(replay_state)
+        adjusted, _ = knowledge_adjust_results(specialists, replay_state, str((snap.get("snapshot") or {}).get("regime") or "UNKNOWN"))
         regime = str((snap.get("snapshot") or {}).get("regime") or "UNKNOWN")
-        full = council_vote(adjusted, state, regime)
+        full = council_vote(adjusted, replay_state, regime)
         full_dir = _direction(full["base_score"])
         full_hit = int(full_dir != 0 and full_dir == actual_dir)
         evaluated += 1
@@ -235,7 +247,7 @@ def analyze_bot_contributions(state, min_samples=12):
             st["score_abs_sum"] += abs(_safe_float((call or {}).get("score"), 0.0))
             st["full_hits"] += full_hit
 
-            without = council_vote(adjusted, state, regime, exclude={name})
+            without = council_vote(adjusted, replay_state, regime, exclude={name})
             without_dir = _direction(without["base_score"])
             without_hit = int(without_dir != 0 and without_dir == actual_dir)
             st["without_hits"] += without_hit
@@ -287,7 +299,7 @@ def analyze_bot_contributions(state, min_samples=12):
     return {
         "version": 4,
         "label_basis": "official_kalshi_directional_calls_v1",
-        "evaluation_mode": "retrospective_current_policy_ablation",
+        "evaluation_mode": "causal_prior_only_ablation",
         "evaluated_snapshots": evaluated,
         "minimum_samples_for_verdict": int(min_samples),
         "ranking": ranking,
