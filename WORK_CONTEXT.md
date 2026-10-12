@@ -1,14 +1,14 @@
 # Work context — BTC AI Trading Command Center
 
-Use this file as the first-pass map for future maintenance/audits so the active runtime does not have to be rediscovered from the full repository history.
+Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
 ## Authoritative runtime path
 
 1. `app.py` — Streamlit UI, live orchestration, master decision display, and calls into the paper engine.
 2. `ai_core.py` — shared specialist/forecast logic used by the app and learner.
-3. `kalshi_paper_engine.py` — authoritative Streamlit-side SQLite paper-contract ledger and SCALP/LOCK lifecycle.
-4. `background_paper.py` — scheduled learner's persistent paper-only mirror stored in learning state; shares constants/fee helpers from `kalshi_paper_engine.py`.
-5. `learner.py` — scheduled learning/grade loop and learning-state updates.
+3. `kalshi_paper_engine.py` — SQLite contract engine and shared lifecycle/fee/strategy helpers; its local totals are not the displayed persistent ledger.
+4. `background_paper.py` — authoritative persistent paper ledger stored in learning state and consumed by the dashboard; shares constants/fee helpers from `kalshi_paper_engine.py`.
+5. `learner_v31.py` — active scheduled learning/grade entrypoint; imports `learner.py` and `learner_v3.py` for supporting functionality.
 6. `bot_intelligence_dashboard.py` — bot/specialist review UI.
 7. `research_lab.py` / `research_dashboard.py` — official-settlement shadow trials, calibration baseline, phase results, advisory lifecycle, and UI.
 8. `.github/workflows/learn.yml` — scheduled learner execution and learning-state branch writes.
@@ -18,7 +18,7 @@ Use this file as the first-pass map for future maintenance/audits so the active 
 ## Supporting modules extracted from `app.py`
 
 - `dashboard_ui.py` — display formatting, directional badges, and themed table rendering. It has no trading logic.
-- `live_feeds.py` — concurrent orchestration of the six independent live reads. Feed functions are injected so failures and timing can be tested offline.
+- `live_feeds.py` — concurrent orchestration of independent live reads. Feed functions are injected so failures and timing can be tested offline.
 
 Keep business rules in the authoritative modules above. New display-only helpers belong in
 `dashboard_ui.py`; new feed orchestration belongs in `live_feeds.py`. This keeps the Streamlit
@@ -50,7 +50,7 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 
 ## Fast path for common questions
 
-- Paper trade stuck OPEN / wrong P&L / entry or exit rule: inspect `kalshi_paper_engine.py`, then contract regressions.
+- Persistent paper trade stuck OPEN / wrong P&L: inspect `background_paper.py`, its saved source timestamps, and shared helpers in `kalshi_paper_engine.py`.
 - Bot prediction or specialist disagreement: inspect `ai_core.py`, `learner.py`, and the intelligence dashboard.
 - Live display/layout issue: inspect `app.py` only after checking whether the displayed value is already wrong upstream.
 - Scheduled/background behavior differs from Streamlit: compare `background_paper.py` with `kalshi_paper_engine.py` and `learner.py`.
@@ -123,3 +123,7 @@ Many versioned files under `tools/` and `.github/workflows/` are one-off migrati
 
 ### r95 publication-cache follow-up
 Live verification found raw.githubusercontent.com still returning the prior snapshot after a successful learner publication. Added rate-limited public Contents/blob recovery when source data is delayed and monotonic snapshot selection so a stale CDN response cannot roll back newer cached data. Recovery is limited to one attempt per five minutes to respect unauthenticated API limits.
+
+## Efficient maintenance navigation (2026-10-12)
+
+Added concise repository instructions in `AGENTS.md`, task-to-module/test routing in `docs/CODE_MAP.md`, and `tools/code_map.py` for bounded, on-demand source definition/import navigation. Corrected stale architecture and runtime ownership guidance. This is a local standard-library tool, not an installation of Ponytail, OmniRoute or Graphify; no external provider, API cost or runtime trading changes. Token savings are not measured. Validate navigation with a few representative commands; retain existing CI gates.

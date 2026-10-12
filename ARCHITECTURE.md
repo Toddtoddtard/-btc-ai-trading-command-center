@@ -1,62 +1,29 @@
 # BTC AI Trading Command Center — Architecture
 
-```text
-Binance spot (price, 1m candles, aggregate trades, completed 30m/1h/4h/12h/1d/1w/1M candles)
-                 │
-                 ├──────────────┐
-                 │              │
-Binance futures (depth, funding, OI)
-                 │              │
-                 └──────┬───────┘
-                        │
-Kalshi public BTC markets (KXBTC15M / hourly)
-                        │
-                        ▼
-                 Shared AI Core
-                    ai_core.py
-        ┌───────────────┼────────────────┐
-        │               │                │
-  indicators      specialist AIs   15m candle path
-        │               │                │
-        └───────────────┼────────────────┘
-                        │
-              ┌─────────┴─────────┐
-              ▼                   ▼
-          Streamlit app       24/7 learner
-            app.py             learner.py
-              │
-              ├─ dashboard_ui.py (presentation only)
-              ├─ live_feeds.py (concurrent reads)
-              │                   │
-              │                   ├─ grade final-price error
-              │                   ├─ grade 15-candle path error
-              │                   ├─ adapt specialist weights
-              │                   ├─ check official Kalshi result
-              │                   └─ grade shadow policies/phases vs market Brier
-              │
-              ▼
-      Master 15-minute AI
- SCALP UP / SCALP DOWN / LOCK UP /
-       LOCK DOWN / HOLD
-              │
-              ▼
-          Risk engine
-              │
-              ▼
-     PAPER-ONLY execution
-              │
-      prediction journal /
-         walk-forward test
+For focused maintenance, start with [the code map](docs/CODE_MAP.md) and
+`python tools/code_map.py <file.py> --symbol <name>`.
 
-24/7 learner ──every 10 min──> learning-state branch
-                                 │
-                                 ▼
-                         Streamlit reads state
-```
+The Streamlit entrypoint is `app.py`. Kalshi's public event chart supplies its
+main BTC chart and current-price cards. Binance supplies technical candles,
+aggregate trades and derivatives context. `live_feeds.py` coordinates concurrent
+reads, while `dashboard_ui.py` owns presentation helpers.
+
+Shared specialist and forecast functions live in `ai_core.py`. The council,
+reliability checks and contract calibration feed the dashboard and scheduled
+learner. `lock_focus.py` owns LOCK qualification; paper execution uses shared
+strategy and fee helpers in `kalshi_paper_engine.py`.
+
+The active scheduled entrypoint is `learner_v31.py`, supported by `learner.py`
+and `learner_v3.py`. `.github/workflows/learn.yml` runs learning, enrichment and
+`background_paper.py`, then publishes the persistent ledger and model state to
+`learning-state`. The dashboard reads that state through `shared_learning.py`.
+Scheduled requests are every five minutes, but actual GitHub execution is best
+effort; source timestamps determine whether a displayed snapshot is current.
+
 
 ## Shared-model guarantee
 
-`app.py` and `learner.py` use the same specialist and forecast implementations from `ai_core.py`. This prevents the dashboard from showing one set of formulas while the scheduled learner grades another.
+`app.py` and the learner stack reuse specialist and forecast implementations from `ai_core.py`. Shared formulas reduce drift, but input sources and eligibility paths still need parity checks; reuse alone does not prove identical decisions.
 
 Independent horizon models live in `horizon_models.py`. Their 21-feature schema combines 14 short-horizon features with seven scale-normalized higher-timeframe returns. `multi_timeframe.py` rejects the currently forming candle; historical training reconstructs the same features only after each bar's close boundary. Predictions are persisted before their labels exist, graded in timestamp order, and updated only after grading. Offline candidates use chronological train/calibration/untouched-test partitions. They must pass historical validation plus repeated live Brier-score gates before a bounded 25% blend can influence the forecast. Until then they are diagnostic shadow models.
 
@@ -74,7 +41,7 @@ The shared specialist council contains Trend, Momentum, Volume, Pattern, Support
 
 The current KXBTC15M contract is chosen deterministically and then re-fetched by exact ticker. The target remains pinned to that contract until expiration. The app, chart, decision engine, and learner use the same target semantics.
 
-The live BTC underlying is a Binance proxy. For learning, final-price/path errors are therefore measured from Binance 1-minute data. Separately, the learner checks the official settled Kalshi market `result` and records YES/NO accuracy when the result becomes available.
+The main chart and current-price cards use the Kalshi event chart feed. Technical candle/path learning uses Binance closed-minute data and keeps price errors separate from binary correctness. Official Kalshi market `result` values determine contract outcomes and council calibration; see `docs/ACCURACY_LEARNING.md` for the October 12 accounting repair.
 
 ## Learning state
 
