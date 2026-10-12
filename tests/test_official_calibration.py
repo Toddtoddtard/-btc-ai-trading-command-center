@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from contract_calibration import BASIS, apply, fit, observations
-from council_accounting import MASTER_BASIS, reconcile_master_learning
+from council_accounting import MASTER_BASIS, reconcile_master_learning, reconcile_specialists
 from background_paper import _projected_side_value
 from learner_v31 import refresh_pending_lock_focus
 from council_v4 import analyze_bot_contributions
@@ -32,6 +32,23 @@ class OfficialCalibrationTests(unittest.TestCase):
         repaired = copy.deepcopy(state)
         reconcile_master_learning(state)
         self.assertEqual(state, repaired)
+
+    def test_specialist_learning_is_independent_of_snapshot_storage_order(self):
+        state = self.state()
+        state['prediction_snapshots'].append({
+            'ticker': 'B', 'opened_at': 30, 'expires_at': 40,
+            'snapshot': {'regime': 'RANGE',
+                         'specialists': {'Trend AI': {'score': .8, 'confidence': .8}}}})
+        state['master_history'].append({'ticker': 'B', 'kalshi_result': 'yes'})
+        chronological = copy.deepcopy(state)
+        reversed_order = copy.deepcopy(state)
+        reversed_order['prediction_snapshots'].reverse()
+        reconcile_specialists(chronological)
+        reconcile_specialists(reversed_order)
+        self.assertEqual(chronological['specialists'], reversed_order['specialists'])
+        self.assertEqual(chronological['specialist_history'], reversed_order['specialist_history'])
+        # A (wrong) then B (right): the latest right call must have more EWMA influence.
+        self.assertAlmostEqual(chronological['specialists']['Trend AI']['ewma_accuracy'], .505)
 
     def test_missing_official_result_and_neutral_council_never_train(self):
         state = self.state()
