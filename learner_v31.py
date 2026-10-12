@@ -20,6 +20,8 @@ import learner_v3 as v3
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration
+from kalshi_chart_data import fetch_chart
+from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
 from council_accounting import reconcile_master_learning
 from forward_outlook import build_next_market_outlooks
 from horizon_models import (
@@ -595,6 +597,10 @@ def current_shadow_call(state, df, market_info):
     confidence, base_score = vote["confidence"], vote["base_score"]
     call["master_confidence"] = confidence
     call["master_base_score"] = base_score
+    call["settlement_prediction"] = predict_settlement(
+        market_info, market_info.get("settlement_reference") or {}, state,
+        now=opened_at, council_score=base_score,
+    )
     source_health = source_health_from_specialists(specialists)
     seconds_remaining = expires_at - opened_at
     predicted_end = safe_float(forecast.get("predicted_end"), None)
@@ -795,7 +801,13 @@ def main():
         state.get("research_lab", {}).get("history", []), as_of=time.time()
     )
     registered = register_with_snapshot(state, df, market_info)
+    if market_info:
+        market_info["settlement_reference"] = fetch_chart(market_info.get("ticker"))
     live_call = current_shadow_call(state, df, market_info)
+    state["settlement_predictor"] = {
+        "latest": (live_call or {}).get("settlement_prediction"),
+        "scorecard": settlement_scorecard(state),
+    }
     lock_gate_recorded = record_lock_gate_evaluation(state, live_call, market_info)
     lock_gate_resolved = resolve_lock_gate_history(state)
     summarize_lock_gate_history(state)
