@@ -39,13 +39,15 @@ def detect_regime(hist):
     return "RANGE"
 
 
-def source_health_from_specialists(results):
+def source_health_from_specialists(results, exclude=None):
     if not results:
         return 0.0
     health = 1.0
     penalties = 0.0
     checks = 0
     for name in ("Liquidity AI", "Derivatives AI", "Kalshi Context AI", "Whale AI"):
+        if name in (exclude or ()):
+            continue
         item = results.get(name)
         if not item:
             penalties += 1.0

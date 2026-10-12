@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from signal_education import summarize_signals
 from datetime import datetime, timezone
+import time
 
 from external_teacher_lab import (
     build_teacher_calls,
@@ -658,6 +659,7 @@ def resolve_shadows(state, result_reader):
         grade_teacher_calls(lab, row, result)
         row.update({
             "result": result,
+            "result_observed_at": time.time(),
             "won": won,
             "paper_pnl": pnl,
             "model_brier": model_brier,

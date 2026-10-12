@@ -47,11 +47,15 @@ class AuditV6Tests(unittest.TestCase):
             "specialists": {"Whale AI": {"adaptive_weight": 1.0, "regimes": {}}},
             "bot_intelligence_v4": {"label_basis": "official_kalshi_directional_calls_v1",
                 "evaluation_mode": "causal_prior_only_ablation",
+                "evidence_version": 2,
                 "ranking": [{
                     "name": "Whale AI",
                     "samples": 20,
                     "directional_calls": 20,
                     "contribution_score": -0.30,
+                    "evidence_passed": True,
+                    "evidence_streak": 3,
+                    "stable_multiplier": .65,
                 }]
             },
         }

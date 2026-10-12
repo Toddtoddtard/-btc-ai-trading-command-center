@@ -35,6 +35,15 @@ The shared specialist council contains Trend, Momentum, Volume, Pattern, Support
 
 `Kalshi Context AI` is intentionally named this way because its inputs are Kalshi market probability and BTC distance from the active target; it is not a news/event feed.
 
+Council contribution analysis tests gated council subdecisions using prior
+available official outcomes, with WAIT excluded from win rates. It is a controlled
+comparison without contribution multipliers in either arm, not a replay of
+Master fills. `contribution_evidence.py` requires active-market evidence,
+multiple-comparison correction and persistence over new outcomes before a bounded
+weight change. `outcome_timing.py` uses recorded observation times, or an explicitly
+assumed two-minute legacy settlement lag. See `docs/COUNCIL_REVIEW.md` for scope
+and limitations.
+
 `contract_probability.py` converts the settlement question into a calibrated binary probability using strike distance measured in remaining-window volatility, the council score, and weighted order-book pressure. Kalshi's midpoint remains the dominant anchor until independent walk-forward evidence proves incremental Brier value.
 
 ## Kalshi target handling

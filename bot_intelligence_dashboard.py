@@ -51,7 +51,9 @@ def _verdict_icon(verdict):
 
 def build_bot_intelligence_rows(results, learning_state, regime):
     intel = (learning_state or {}).get("bot_intelligence_v4", {}) or {}
-    ranking = (intel.get("ranking", []) or []) if intel.get("label_basis") == "official_kalshi_directional_calls_v1" else []
+    ranking = (intel.get("ranking", []) or []) if (
+        intel.get("label_basis") == "official_kalshi_directional_calls_v1"
+        and intel.get("evidence_version") == 2) else []
     by_name = {str(row.get("name")): row for row in ranking if isinstance(row, dict)}
     specialist_state = (learning_state or {}).get("specialists", {}) or {}
 
@@ -75,8 +77,8 @@ def build_bot_intelligence_rows(results, learning_state, regime):
             "Standalone accuracy": _f(contribution.get("standalone_accuracy")),
             "Marginal accuracy": _f(contribution.get("marginal_accuracy")),
             "Contribution score": _f(contribution.get("contribution_score")),
-            "Unique saves": _f(contribution.get("unique_save_rate")),
-            "Harmful flips": _f(contribution.get("harmful_flip_rate")),
+            "Helpful decisions": _f(contribution.get("beneficial_decision_rate")),
+            "Harmful decisions": _f(contribution.get("harmful_decision_rate")),
             "Reason": str((live or {}).get("reason", "")),
         })
 
@@ -92,7 +94,7 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
 
     st.markdown("### Bot Intelligence v4")
     st.caption(
-        "Accuracy uses active directional predictions and official Kalshi outcomes. Contribution is a retrospective comparison using current weights, not a live win rate. "
+        "Specialist accuracy compares active votes with official Kalshi outcomes. Contribution compares qualified council calls using earlier outcomes; WAIT is excluded from win rates. This is not paper-trade accuracy. "
         f"Current regime: {regime} • official-result snapshots reviewed: {evaluated:,} • verdict minimum: {minimum} samples."
     )
 
@@ -124,7 +126,8 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
     harmful = sum(r["Status"] == "HURTING COUNCIL" for r in rows)
     redundant = sum(r["Status"] == "REDUNDANT" for r in rows)
 
-    best = max(rows, key=lambda r: _f(r["Contribution score"], -999.0))
+    qualified = [r for r in rows if r["Status"] == "HIGH VALUE"]
+    best = max(qualified, key=lambda r: _f(r["Contribution score"], -999.0)) if qualified else None
     top_weight = max(rows, key=lambda r: _f(r["Council weight"], 0.0))
 
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -132,7 +135,8 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
     c2.metric("Useful", useful)
     c3.metric("Still learning", learning)
     c4.metric("Needs review", harmful + redundant, f"{harmful} harmful • {redundant} redundant")
-    c5.metric("Top contributor", best["Specialist"], _num(best["Contribution score"], 3))
+    c5.metric("Top contributor", best["Specialist"] if best else "Collecting evidence",
+              _num(best["Contribution score"], 3) if best else None)
 
     if harmful:
         names = ", ".join(r["Specialist"] for r in rows if r["Status"] == "HURTING COUNCIL")
@@ -188,12 +192,12 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
     detail["Council vote share %"] = detail["Council weight"] * 100.0
     detail["Standalone accuracy %"] = detail["Standalone accuracy"] * 100.0
     detail["Marginal accuracy %"] = detail["Marginal accuracy"] * 100.0
-    detail["Unique saves %"] = detail["Unique saves"] * 100.0
-    detail["Harmful flips %"] = detail["Harmful flips"] * 100.0
+    detail["Helpful decisions %"] = detail["Helpful decisions"] * 100.0
+    detail["Harmful decisions %"] = detail["Harmful decisions"] * 100.0
     detail = detail[[
         "Specialist", "Status", "Live signal", "Live score", "Live confidence %", "Council vote share %",
         "Samples", "Standalone accuracy %", "Marginal accuracy %", "Contribution score",
-        "Unique saves %", "Harmful flips %", "Reason",
+        "Helpful decisions %", "Harmful decisions %", "Reason",
     ]]
 
     with st.expander("Detailed bot contribution table", expanded=False):
@@ -208,11 +212,11 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
                 "Standalone accuracy %": st.column_config.NumberColumn(format="%.1f%%"),
                 "Marginal accuracy %": st.column_config.NumberColumn(format="%+.2f%%"),
                 "Contribution score": st.column_config.NumberColumn(format="%+.3f"),
-                "Unique saves %": st.column_config.NumberColumn(format="%.2f%%"),
-                "Harmful flips %": st.column_config.NumberColumn(format="%.2f%%"),
+                "Helpful decisions %": st.column_config.NumberColumn(format="%.2f%%"),
+                "Harmful decisions %": st.column_config.NumberColumn(format="%.2f%%"),
             },
         )
         st.caption(
             "Marginal accuracy compares the full council with the same historical windows after removing that bot. "
-            "Unique saves are windows the full council got right but would have missed without the bot. Harmful flips are the reverse."
+            "Helpful decisions improve the qualified council decision: correct calls beat WAIT, and WAIT beats wrong calls. Harmful decisions are the reverse; these are not paper profits."
         )

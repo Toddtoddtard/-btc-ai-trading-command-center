@@ -5,6 +5,7 @@ uses only markets that expired before it was captured. Unproven corrections
 fall back to the contemporaneous Kalshi midpoint, without inventing an edge.
 """
 import math
+from outcome_timing import outcome_available_at
 
 BASIS = "official_kalshi_terminal_probability_v1"
 MIN_TRAIN = 100
@@ -37,6 +38,7 @@ def observations(history):
                 or row.get("result") not in {"yes", "no"}):
             continue
         rows.append({"ticker": ticker, "opened": opened, "expires": expires,
+                     "available_at": outcome_available_at(row, expires),
                      "market": market, "raw": raw, "y": int(row["result"] == "yes")})
     unique = {}
     for row in sorted(rows, key=lambda r: (r["opened"], r["ticker"])):
@@ -80,10 +82,10 @@ def score(rows):
 def fit(history, as_of=None):
     rows = observations(history)
     if as_of is not None:
-        rows = [r for r in rows if r["expires"] <= float(as_of)]
+        rows = [r for r in rows if r["available_at"] <= float(as_of)]
     validation = []
     for index, row in enumerate(rows):
-        prior = [r for r in rows[:index] if r["expires"] <= row["opened"]]
+        prior = [r for r in rows[:index] if r["available_at"] <= row["opened"]]
         if len(prior) < MIN_TRAIN:
             continue
         p = candidate(row["raw"], row["market"], coefficients(prior))
