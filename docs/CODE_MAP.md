@@ -1,0 +1,41 @@
+# Code map and focused maintenance
+
+Start here for a specific issue. This is a navigation guide, not a current health or accuracy report.
+
+| Area | Start with | Relevant checks |
+| --- | --- | --- |
+| Current BTC price, active target, main chart | `kalshi_chart_data.py`; `app.py`: `stable_kalshi_contract`, `refresh_market_chart`, `live_dashboard` | `test_kalshi_chart_data`, `test_chart_target`, `test_dashboard_freshness` |
+| Stale learning or paper figures | `shared_learning.py`; `app.py`: `refresh_learning_summary` | `test_shared_learning`, `test_dashboard_freshness` |
+| Specialist votes, council weights, abstentions | `council_v4.py`, `specialist_knowledge_v5.py`, `ai_core.py`, `reliability_v31.py` | `test_council_v4`, `test_council_parity`, `test_official_calibration` |
+| Official outcome labels and calibration | `council_accounting.py`, `contract_calibration.py`, `contract_probability.py`; `docs/ACCURACY_LEARNING.md` | `test_official_calibration`, `test_contract_probability` |
+| LOCK/SCALP qualification | `lock_focus.py`, `pro_trade_ticket.py`; app/learner callers | `test_lock_focus`, `test_entry_caps`, `test_contract_regressions` |
+| Persistent paper balance, positions, settlements | `background_paper.py`, shared helpers in `kalshi_paper_engine.py`; `app.py` consumes `shared_paper_summary` | `test_background_paper`, `test_paper_recovery`, `test_state_preservation` |
+| Journal correctness and resolved counts | `prediction_journal.py`, `council_accounting.py` | `test_persistent_journal`, `test_journal_integration` |
+| Closed-candle catch-up and predicted paths | `candle_learning.py`, `learning_prices.py`, `horizon_models.py`, `ai_core.py` | `test_candle_learning`, `test_learning_prices`, `test_prediction_horizon_v17` |
+| MACD and chart presentation | `macd_engine.py`, `technical_fvg_macd.py`, `dashboard_ui.py`; app render functions | `test_macd_v2`, `test_dashboard_ui`, `test_chart_execution` |
+| Live technical feeds and latency | `live_feeds.py`, `public_futures.py`, `kalshi_reference.py`, `kalshi_microstructure.py` | `test_live_feeds`, `test_futures_latency`, `test_kalshi_reference` |
+| Worker schedule, publication and recovery | `.github/workflows/learn.yml` runs `learner_v31.py`, then enrichment and `background_paper.py`; `worker_watchdog.py` | `test_worker_watchdog`, `test_learning_gaps` |
+| Other market pages | `pages/`, `multi_asset_command_center.py`, `multi_asset_paper.py` | `test_multi_asset_paper`, `test_multi_market_nav_routes` |
+| Login and deployed build label | `access_control.py` | `test_access_control` |
+
+## Source navigation without rereading whole files
+
+```bash
+python tools/code_map.py shared_learning.py
+python tools/code_map.py app.py --symbol refresh_market_chart
+python tools/code_map.py council_v4.py --symbol analyze_bot_contributions
+rg -n 'shared_paper_summary|evaluate_lock_focus' app.py background_paper.py learner_v31.py
+python -m unittest discover -s tests -p 'test_shared_learning.py' -v
+```
+
+The local command uses Python's standard-library AST parser. It reads source without importing or executing app code, prints matching top-level definitions with line ranges, and lists direct local imports/importers. It rebuilds this information in memory on demand. It has no model calls, installation step, credentials, saved graph or network access. Output is bounded with `--limit` (default 30).
+
+This is a small project-specific navigation tool, not Graphify. Static imports are a starting point, not a complete runtime call graph: dynamic imports, injected callbacks, workflows, string-based test references and embedded JavaScript still require targeted inspection. Test names in the table live under `tests/`; they are suggestions, not exhaustive dependency coverage.
+
+## Operational facts to keep separate
+
+- Main chart/current-price cards use Kalshi's public event chart. Technical candles and order flow use Binance; worker price proxies are identified separately from official settlement outcomes.
+- The displayed authoritative paper ledger comes from `learning-state` / `background_paper`. The SQLite engine also supplies shared lifecycle, fee and strategy helpers; do not substitute its local totals for the persistent summary.
+- Active scheduled entrypoint: `learner_v31.py`, which imports `learner.py` and `learner_v3.py` for supporting functionality. Cron requests are best effort; verify actual snapshot and paper-cycle ages.
+- Older patch installers under `tools/` are not the main runtime. Some are still invoked by workflows, so verify references before touching them.
+- `WORK_CONTEXT.md` is the dated handoff log. `ARCHITECTURE.md` explains component relationships. Avoid duplicating numeric strategy settings here; inspect the current constants and explicit user instructions.
