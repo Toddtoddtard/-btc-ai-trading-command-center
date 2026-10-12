@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 # their exports, so a deployment cannot mix old helpers or price caps with new UI.
 for _runtime_module in (
     "access_control", "lock_focus", "kalshi_paper_engine",
-    "contract_calibration", "reliability_v31", "council_v4",
+    "outcome_timing", "contribution_evidence", "contract_calibration", "reliability_v31", "council_v4",
     "council_accounting", "specialist_knowledge_v5",
     "background_paper", "pro_trade_ticket", "live_feeds", "shared_learning",
 ):

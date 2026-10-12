@@ -604,6 +604,7 @@ def resolve_official_results(state):
             if row.get("ticker") == item["ticker"]:
                 row["kalshi_correct"] = hit
                 row["kalshi_result"] = result
+                row["official_observed_at"] = time.time()
                 break
         resolved_count += 1
     state["official_pending"] = unresolved[-100:]

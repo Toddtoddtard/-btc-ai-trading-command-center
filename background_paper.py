@@ -828,6 +828,7 @@ def _repair_master_learning_credit(learning_state, corrected_tickers):
         trade = winning[ticker]
         row["kalshi_correct"] = 1
         row["kalshi_result"] = str(trade.get("exit_reason")).split(":", 1)[-1]
+        row.setdefault("official_observed_at", _f(trade.get("settlement_verified_at"), time.time()))
         row["paper_truth_repaired"] = True
         row["reward_correction"] = "OFFICIAL_KALSHI_PAPER_WIN"
         repaired += 1
