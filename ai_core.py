@@ -61,6 +61,8 @@ def enrich_history_core(df):
     loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
     x["rsi"] = 100 - (100 / (1 + rs))
+    x.loc[(loss == 0) & (gain > 0), "rsi"] = 100.0
+    x.loc[(loss == 0) & (gain == 0), "rsi"] = 50.0
     x = add_macd_features(x)
 
     # Three-candle fair-value gaps (ICT-style imbalance zones).

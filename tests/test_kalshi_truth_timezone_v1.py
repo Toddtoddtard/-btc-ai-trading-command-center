@@ -85,7 +85,7 @@ class KalshiTruthTimezoneTests(unittest.TestCase):
         self.assertAlmostEqual(trade["pnl"], 5.90)
         self.assertEqual(trade["correction_reason"], "REFETCHED_OWN_KALSHI_TICKER")
 
-    def test_master_learning_credit_is_restored_once(self):
+    def test_official_paper_result_scores_original_forecast_without_rewriting_proxy_rewards(self):
         ticker = "KXBTC15M-CREDIT"
         state = {
             "forecast": {"direction_hits": 10},
@@ -95,6 +95,7 @@ class KalshiTruthTimezoneTests(unittest.TestCase):
                 "direction_correct": 0,
                 "time_reward": -1.5,
                 "reward_magnitude": 1.5,
+                "predicted_settlement_direction": -1,
             }],
             "background_paper": {
                 "trades": [{
@@ -106,12 +107,32 @@ class KalshiTruthTimezoneTests(unittest.TestCase):
         }
         repaired = bg._repair_master_learning_credit(state, [ticker])
         self.assertEqual(repaired, 1)
-        self.assertEqual(state["master_history"][0]["direction_correct"], 1)
-        self.assertEqual(state["master_history"][0]["time_reward"], 1.5)
-        self.assertEqual(state["forecast"]["direction_hits"], 11)
-        self.assertAlmostEqual(state["reward_system"]["master_points"], 8.0)
+        self.assertEqual(state["master_history"][0]["kalshi_correct"], 1)
+        self.assertEqual(state["master_history"][0]["direction_correct"], 0)
+        self.assertEqual(state["master_history"][0]["time_reward"], -1.5)
+        self.assertEqual(state["forecast"]["direction_hits"], 10)
+        self.assertAlmostEqual(state["reward_system"]["master_points"], 5.0)
         self.assertEqual(bg._repair_master_learning_credit(state, [ticker]), 0)
-        self.assertAlmostEqual(state["reward_system"]["master_points"], 8.0)
+        self.assertAlmostEqual(state["reward_system"]["master_points"], 5.0)
+
+    def test_paper_win_does_not_credit_opposite_or_unknown_original_forecast(self):
+        for direction, correct in ((1, 0), (None, None)):
+            for paper_result in ('WIN', 'LOSS'):
+                with self.subTest(direction=direction, paper_result=paper_result):
+                    row = dict(ticker='ORIGINAL', predicted_settlement_direction=direction,
+                               direction_correct=0, time_reward=-1.5,
+                               paper_truth_repaired=True, kalshi_correct=1)
+                    state = dict(master_history=[row], forecast={'direction_hits': 10},
+                                 reward_system={'master_points': 5}, background_paper={
+                        'trades': [dict(ticker='ORIGINAL', result=paper_result,
+                                       exit_reason='OFFICIAL_SETTLEMENT:no')]})
+                    self.assertEqual(bg._repair_master_learning_credit(state, ['ORIGINAL']), 1)
+                    self.assertEqual(row['kalshi_correct'], correct)
+                    self.assertEqual(row['kalshi_result'], 'no')
+                    self.assertEqual(row['direction_correct'], 0)
+                    self.assertEqual(row['time_reward'], -1.5)
+                    self.assertEqual(state['forecast']['direction_hits'], 10)
+                    self.assertEqual(state['reward_system']['master_points'], 5)
 
     def test_source_grades_kalshi_calls_against_target_and_displays_eastern(self):
         learner = Path("learner.py").read_text(encoding="utf-8")

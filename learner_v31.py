@@ -317,10 +317,8 @@ def evaluate_cfg(df, cfg):
     if df is None or len(df) < 120:
         return {"samples": 0, "accuracy": None, "median_error": None}
     outcomes = []
-    # Use all locally available closed history (normally 500 rows) instead of
-    # discarding the oldest 80 rows. This yields several additional independent
-    # 15-minute outcomes per challenger evaluation without introducing future
-    # data or relaxing promotion requirements.
+    # Retrospective diagnostic only: configs may already have learned from
+    # these outcomes, and rolling worker frames reuse the same candles.
     start = max(60, len(df) - 900)
     for end in range(start, len(df) - 15, 15):
         train = df.iloc[: end + 1]
@@ -469,6 +467,7 @@ def record_lock_gate_evaluation(state, live_call, market_info, now=None):
 
 
 def challenger_qualifies(champ, challenger):
+    """Check historical metric thresholds; this does not authorize promotion."""
     if champ.get("samples", 0) < PROMOTION_MIN_SAMPLES or challenger.get("samples", 0) < PROMOTION_MIN_SAMPLES:
         return False
     champ_acc = champ.get("accuracy")
@@ -484,8 +483,14 @@ def challenger_qualifies(champ, challenger):
 
 
 def champion_challenger(state, df):
+    """Compare historical replays in shadow mode, without changing forecasts.
+
+    Current learned configs are not frozen before the evaluated outcomes.
+    Repeated or newer rolling frames therefore cannot supply untouched paired
+    evidence. Promotion requires a separate prospective comparison, which this
+    evaluator does not collect.
+    """
     forecast = state.get("forecast", {})
-    previous = state.get("champion_challenger", {}) if isinstance(state.get("champion_challenger"), dict) else {}
     champion_cfg = {k: safe_float(forecast.get(k), d) for k, d in {
         "w_ret3": 0.46, "w_ret8": 0.34, "w_ret15": 0.20,
         "momentum_scale": 2.2, "target_influence": 0.18, "bias": 0.0,
@@ -503,26 +508,23 @@ def champion_challenger(state, df):
 
     champ = evaluate_cfg(df, champion_cfg)
     scored = [(evaluate_cfg(df, cfg), cfg) for cfg in challengers]
-    best_metrics, best_cfg = max(
+    best_metrics, _ = max(
         scored,
         key=lambda x: ((x[0]["accuracy"] or 0.0), -(x[0]["median_error"] or 1e18)),
     )
-
-    qualifies = challenger_qualifies(champ, best_metrics)
-    streak = int(previous.get("qualification_streak", 0)) + 1 if qualifies else 0
-    promoted = False
-    if qualifies and streak >= PROMOTION_REQUIRED_STREAK:
-        for key, value in best_cfg.items():
-            forecast[key] = value
-        promoted = True
-        streak = 0
 
     state["champion_challenger"] = {
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "champion": champ,
         "best_challenger": best_metrics,
-        "qualification_streak": streak,
-        "promoted": promoted,
+        "qualification_streak": 0,
+        "promoted": False,
+        "evaluation_basis": "HISTORICAL_REPLAY",
+        "shadow_only": True,
+        "historical_thresholds_met": challenger_qualifies(champ, best_metrics),
+        "predictive_improvement_proven": False,
+        "independent_evidence_samples": 0,
+        "promotion_blocker": "UNTOUCHED_PROSPECTIVE_COMPARISON_REQUIRED",
         "minimum_samples": PROMOTION_MIN_SAMPLES,
         "required_streak": PROMOTION_REQUIRED_STREAK,
         "minimum_margin": PROMOTION_ACCURACY_MARGIN,
@@ -561,6 +563,9 @@ def current_shadow_call(state, df, market_info):
     """Recompute a paper-only call for the current phase without touching pending."""
     if not market_info:
         return None
+    expires_at = safe_float(market_info.get("expires_at"), 0.0)
+    if time.time() >= expires_at:
+        return None
     price = float(df.close.iloc[-1])
     specialists = legacy.run_specialists_core(
         df,
@@ -574,9 +579,12 @@ def current_shadow_call(state, df, market_info):
     )
     if not forecast:
         return None
+    opened_at = time.time()
+    if opened_at >= expires_at:
+        return None
     call = {
         "ticker": market_info.get("ticker"),
-        "opened_at": time.time(),
+        "opened_at": opened_at,
         "expires_at": market_info.get("expires_at"),
         "predicted_direction": forecast.get("predicted_direction"),
         "specialists": specialists,
@@ -588,9 +596,9 @@ def current_shadow_call(state, df, market_info):
     call["master_confidence"] = confidence
     call["master_base_score"] = base_score
     source_health = source_health_from_specialists(specialists)
-    seconds_remaining = safe_float(market_info.get("expires_at"), 0.0) - time.time()
-    predicted_end = safe_float(forecast.get("predicted_end"))
-    target = safe_float(market_info.get("target"))
+    seconds_remaining = expires_at - opened_at
+    predicted_end = safe_float(forecast.get("predicted_end"), None)
+    target = safe_float(market_info.get("target"), None)
     contract_view = terminal_above_probability(
         spot=price,
         strike=target,
@@ -598,13 +606,13 @@ def current_shadow_call(state, df, market_info):
         volatility_per_minute=realized_minute_volatility(
             df.close.astype(float).tail(61).tolist()
         ),
-        market_probability=safe_float(market_info.get("prob")),
+        market_probability=safe_float(market_info.get("prob"), None),
         model_score=base_score,
         orderbook=market_info.get("orderbook") or {},
         source_health=source_health,
     )
     contract_view = apply_contract_calibration(contract_view, state)
-    contract_probability_up = safe_float(contract_view.get("probability_up"))
+    contract_probability_up = safe_float(contract_view.get("probability_up"), None)
     direction = (
         "UP" if contract_probability_up >= 0.5 else "DOWN"
     ) if contract_probability_up is not None else (
@@ -615,9 +623,9 @@ def current_shadow_call(state, df, market_info):
     call["raw_contract_probability_up"] = contract_view.get("raw_probability_up")
     call["contract_probability_basis"] = contract_view.get("probability_basis")
     call["contract_calibrator_active"] = contract_view.get("calibrator_active", False)
-    call["contract_probability_edge"] = safe_float(contract_view.get("edge_vs_market"))
+    call["contract_probability_edge"] = safe_float(contract_view.get("edge_vs_market"), None)
     call["strike_distance_sigma"] = safe_float(
-        contract_view.get("normalized_strike_distance")
+        contract_view.get("normalized_strike_distance"), None
     )
     call["microstructure_signal"] = safe_float(
         contract_view.get("microstructure_signal"), 0.0
@@ -665,22 +673,42 @@ def current_shadow_call(state, df, market_info):
 
 
 def refresh_pending_lock_focus(state, live_call, market_info):
-    """Refresh WAIT into a qualified LOCK without altering grading geometry."""
+    """Refresh execution evidence while preserving a called LOCK's geometry."""
     pending = state.get("pending")
-    if not isinstance(pending, dict) or not isinstance(live_call, dict):
+    if not isinstance(pending, dict):
         return False
-    if str(pending.get("ticker") or "") != str((market_info or {}).get("ticker") or ""):
+    if (
+        not isinstance(live_call, dict)
+        or str(pending.get("ticker") or "") != str((market_info or {}).get("ticker") or "")
+        or (live_call.get("ticker") and live_call["ticker"] != pending.get("ticker"))
+    ):
+        pending["execution_approved"] = False
+        pending["execution_reason"] = "FRESH_SAME_TICKER_EVALUATION_UNAVAILABLE"
+        pending["execution_checked_at"] = time.time()
         return False
     old_action = str(pending.get("master_action") or "WAIT").upper()
+    for key in (
+        "contract_probability_up", "raw_contract_probability_up",
+        "contract_probability_basis", "contract_calibrator_active",
+        "contract_probability_edge", "strike_distance_sigma",
+        "execution_approved", "execution_reason",
+    ):
+        pending[key] = live_call.get(key)
+    pending["execution_checked_at"] = live_call.get("opened_at")
     if old_action.startswith("LOCK"):
+        # Approval for a different side or for SCALP cannot authorize the
+        # immutable original LOCK. Its confidence and grading snapshot remain
+        # those of the call; fresh terminal probabilities still drive entry EV.
+        fresh_action = str(live_call.get("master_action") or "WAIT").upper()
+        if live_call.get("execution_approved") is not True:
+            pending["execution_approved"] = False
+        elif fresh_action != old_action:
+            pending["execution_approved"] = False
+            pending["execution_reason"] = "CURRENT_LOCK_DIRECTION_OR_QUALIFICATION_CHANGED"
         return False
     for key in (
         "specialists", "master_confidence", "master_base_score", "council_vote",
         "master_action", "would_wait", "lock_focus",
-        "execution_approved", "execution_reason",
-        "contract_probability_up", "raw_contract_probability_up",
-        "contract_probability_basis", "contract_calibrator_active",
-        "contract_probability_edge",
     ):
         pending[key] = live_call.get(key)
     if str(pending.get("master_action") or "").startswith("LOCK"):

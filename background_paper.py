@@ -38,6 +38,8 @@ from kalshi_paper_engine import (
     lock_target_pnl,
     scalp_execution_policy,
     projected_net_pnl,
+    executable_entry_quote,
+    expected_lock_net_pnl,
 )
 
 STATE_INPUT = os.environ.get("LEARNING_STATE_OUTPUT", "/tmp/learning_state.json")
@@ -786,56 +788,44 @@ def _repair_closed_settlements(paper, market_reader, now):
 
 
 def _repair_master_learning_credit(learning_state, corrected_tickers):
-    """Restore master credit when a paper trade is proven to be an official win.
+    """Observe official labels against the original forecast, never paper P/L.
 
-    This does not blindly rewrite specialist calls. It only reverses a prior
-    master-level wrong mark for the exact ticker whose executed paper side is
-    now confirmed as the winning Kalshi side.
+    Binance proxy rewards and direction hits retain their original accounting.
+    A later executed side cannot replace the persisted settlement prediction.
     """
-    if not corrected_tickers:
-        return 0
+    tickers = set(corrected_tickers)
     paper = learning_state.get("background_paper") or {}
-    winning = {
+    settled = {
         str(t.get("ticker")): t
         for t in paper.get("trades", [])
         if isinstance(t, dict)
-        and str(t.get("ticker")) in set(corrected_tickers)
+        and str(t.get("ticker")) in tickers
         and str(t.get("status", "CLOSED")).upper() == "CLOSED"
-        and str(t.get("result") or "").upper() == "WIN"
-        and str(t.get("exit_reason") or "").startswith("OFFICIAL_SETTLEMENT:")
+        and str(t.get("exit_reason") or "") in {
+            "OFFICIAL_SETTLEMENT:yes", "OFFICIAL_SETTLEMENT:no"
+        }
     }
-    if not winning:
-        return 0
     repaired = 0
-    reward_system = learning_state.setdefault("reward_system", {})
-    forecast = learning_state.setdefault("forecast", {})
     for row in learning_state.get("master_history", []):
-        ticker = str(row.get("ticker") or "")
-        if ticker not in winning or row.get("paper_truth_repaired"):
+        if not isinstance(row, dict):
             continue
-        old_hit = int(_f(row.get("direction_correct"), 0.0) or 0)
-        if old_hit != 1:
-            row["direction_correct"] = 1
-            forecast["direction_hits"] = int(forecast.get("direction_hits", 0)) + 1
-        old_reward = _f(row.get("time_reward"), 0.0)
-        magnitude = abs(_f(row.get("reward_magnitude"), old_reward))
-        if old_reward < 0 and magnitude > 0:
-            new_reward = magnitude
-            reward_system["master_points"] = float(
-                reward_system.get("master_points", 0.0)
-            ) + (new_reward - old_reward)
-            row["time_reward"] = new_reward
-        trade = winning[ticker]
-        row["kalshi_correct"] = 1
-        row["kalshi_result"] = str(trade.get("exit_reason")).split(":", 1)[-1]
-        row.setdefault("official_observed_at", _f(trade.get("settlement_verified_at"), time.time()))
-        row["paper_truth_repaired"] = True
-        row["reward_correction"] = "OFFICIAL_KALSHI_PAPER_WIN"
+        trade = settled.get(str(row.get("ticker") or ""))
+        if trade is None:
+            continue
+        result = str(trade["exit_reason"]).split(":", 1)[-1]
+        predicted = _f(row.get("predicted_settlement_direction"))
+        hit = (int(predicted == (1 if result == "yes" else -1))
+               if predicted in {-1, 1} else None)
+        if (row.get("paper_truth_basis") == "ORIGINAL_SETTLEMENT_FORECAST"
+                and row.get("kalshi_result") == result
+                and row.get("kalshi_correct") == hit):
+            continue
+        row["kalshi_correct"] = hit
+        row["kalshi_result"] = result
+        if row.get("official_observed_at") is None:
+            row["official_observed_at"] = _f(trade.get("settlement_verified_at"), time.time())
+        row["paper_truth_basis"] = "ORIGINAL_SETTLEMENT_FORECAST"
         repaired += 1
-    if repaired:
-        reward_system["paper_truth_repairs"] = int(
-            reward_system.get("paper_truth_repairs", 0)
-        ) + repaired
     return repaired
 
 
@@ -860,8 +850,11 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         return paper
 
     corrected = _repair_closed_settlements(paper, market_reader, now)
-    if corrected:
-        _repair_master_learning_credit(learning_state, corrected)
+    observed = corrected + [
+        str(trade.get("ticker")) for trade in paper.get("trades", [])
+        if isinstance(trade, dict) and trade.get("settlement_verified") is True
+    ]
+    _repair_master_learning_credit(learning_state, observed)
 
     # Ended calls wait here for their OWN official Kalshi result while the next
     # 15-minute window is free to trade. Multiple pending windows are supported.
@@ -954,12 +947,23 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 gain = bid - entry_price
                 master_action = _resolved_master_action(pending)
                 signal_side = _action_side(master_action)
-                # If the master upgrades a same-side SCALP to LOCK, mirror that
-                # decision immediately. LOCK can never be downgraded or reversed.
+                # Entry costs are sunk. Promote only when validated settlement
+                # proceeds beat what selling this exposure now would return.
+                contracts = int(_f(position.get("contracts"), 0.0))
+                expected_proceeds = expected_lock_net_pnl(
+                    contracts, 0.0, pending, position["side"]
+                )
+                liquidation = contracts * bid - kalshi_taker_fee(contracts, bid)
                 if (
                     position["strategy"] == "SCALP"
                     and master_action.startswith("LOCK")
                     and signal_side == position["side"]
+                    and pending.get("execution_approved") is True
+                    and _f(pending.get("master_confidence"), 0.0) >= LOCK_MIN_CONFIDENCE
+                    and 0 <= bid <= 1
+                    and contracts > 0
+                    and expected_proceeds is not None
+                    and expected_proceeds > liquidation
                 ):
                     position["strategy"] = "LOCK"
                     position["promoted_to_lock_at"] = now
@@ -1054,7 +1058,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     # LOCK is an explicit master action. 95% belongs only to the exit bid target.
     strategy = "LOCK" if explicit_action.startswith("LOCK") else "SCALP"
     bid, ask = _quotes(market, side)
-    if ask is None or bid is None:
+    if not executable_entry_quote(bid, ask):
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, "Skipped PAPER entry: executable quote unavailable.", "BLOCKED", now)
         return paper
     if strategy == "LOCK" and confidence < LOCK_MIN_CONFIDENCE:
@@ -1133,6 +1137,15 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
                               "Skipped PAPER SCALP: projected profit is not positive after entry and exit fees.", "BLOCKED", now)
         return paper
+    if strategy == "LOCK":
+        expected_net = expected_lock_net_pnl(contracts, ask, pending, side)
+        if expected_net is None or expected_net <= 0:
+            _record_signal_outcome(
+                paper, pending, ticker, side, strategy, confidence,
+                "Skipped PAPER LOCK: expected settlement profit is unavailable or not positive after entry fees.",
+                "BLOCKED", now,
+            )
+            return paper
     # A final deadline check protects the actual fill, not just the forecast.
     if live_clock:
         now = time.time()

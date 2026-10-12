@@ -13,10 +13,8 @@ AUTO_SCALPING_ENABLED = True
 LOCK_FOCUS_ENABLED = True
 LOCK_EARLIEST_SECONDS = 15 * 60
 LOCK_LATEST_SECONDS = 30
-# The retained calibrated history contains no observations at 0.80, while the
-# original 0.68 tail produced 28 correct Kalshi directions in 29 resolved
-# observations. Keep the independent score, consensus, feed, target, quote and
-# entry-price checks below; 0.68 is the evidence-supported confidence gate.
+# Preserve the configured council-confidence floor. Its historical accuracy is
+# measured separately; it cannot substitute for fee-aware contract economics.
 LOCK_MIN_CONFIDENCE = 0.68
 LOCK_MIN_CONSENSUS = 0.55
 LOCK_MIN_SOURCE_HEALTH = 0.70

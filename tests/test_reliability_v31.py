@@ -1,11 +1,14 @@
 import unittest
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pandas as pd
 import learner
+import background_paper
+from contract_calibration import BASIS
 
 from learner_v3 import ensure_v3
-from learner_v31 import _historical_expiry_frame, challenger_qualifies
+from learner_v31 import _historical_expiry_frame, challenger_qualifies, current_shadow_call, refresh_pending_lock_focus
 from reliability_v31 import (
     calibrate_confidence,
     exact_expiry_row,
@@ -17,6 +20,110 @@ from reliability_v31 import (
 
 
 class ReliabilityTests(unittest.TestCase):
+    def locked_pending(self):
+        return dict(ticker="X", expires_at=2000, opened_at=1000,
+                    master_action="LOCK UP", predicted_direction=1,
+                    lock_called_at=1100, lock_called_seconds_remaining=900,
+                    start_price=100, predicted_end=102, target=100,
+                    forecast_path=[{"close": 102}], master_confidence=.95,
+                    master_base_score=.5, execution_approved=True,
+                    contract_probability_up=.9, contract_probability_basis=BASIS,
+                    contract_calibrator_active=True)
+
+    def test_locked_call_refreshes_current_veto_and_probability_before_paper_entry(self):
+        pending = self.locked_pending()
+        state = {"pending": pending}
+        live = dict(ticker="X", opened_at=1500, master_action="WAIT",
+                    execution_approved=False, execution_reason="CURRENT_VETO",
+                    contract_probability_up=.2, contract_probability_basis=BASIS,
+                    contract_calibrator_active=True)
+        refresh_pending_lock_focus(state, live, {"ticker": "X"})
+        self.assertEqual(pending["contract_probability_up"], .2)
+        self.assertFalse(pending["execution_approved"])
+        self.assertEqual(pending["execution_checked_at"], 1500)
+        self.assertEqual(pending["execution_reason"], "CURRENT_VETO")
+        paper = background_paper.run_cycle(state, lambda _: {
+            "ticker": "X", "status": "open", "yes_bid": .59, "yes_ask": .60,
+            "no_bid": .39, "no_ask": .40,
+        }, now=1500)
+        self.assertIsNone(paper["open_position"])
+
+    def test_opposite_fresh_approval_cannot_authorize_original_lock_side(self):
+        pending = self.locked_pending()
+        before = dict(pending)
+        live = dict(ticker="X", opened_at=1500, master_action="LOCK DOWN",
+                    execution_approved=True, execution_reason="APPROVED_DOWN",
+                    master_confidence=.99, master_base_score=-.9,
+                    contract_probability_up=.2, contract_probability_basis=BASIS,
+                    contract_calibrator_active=True)
+        refresh_pending_lock_focus({"pending": pending}, live, {"ticker": "X"})
+        self.assertFalse(pending["execution_approved"])
+        self.assertIn("DIRECTION", pending["execution_reason"])
+        for key in ("master_action", "predicted_direction", "opened_at", "expires_at",
+                    "lock_called_at", "lock_called_seconds_remaining", "start_price",
+                    "predicted_end", "target", "forecast_path", "master_confidence", "master_base_score"):
+            self.assertEqual(pending[key], before[key], key)
+
+    def test_unavailable_fresh_evaluation_cannot_fill_old_unfilled_lock(self):
+        for live, market in ((None, None), (None, {"ticker": "X"}),
+                             ({"ticker": "OTHER", "execution_approved": True}, {"ticker": "X"}),
+                             ({"ticker": "OTHER", "execution_approved": True}, {"ticker": "OTHER"})):
+            with self.subTest(live=live, market=market):
+                pending = self.locked_pending()
+                original = dict(pending)
+                state = {"pending": pending}
+                with patch("learner_v31.time.time", return_value=1500):
+                    self.assertFalse(refresh_pending_lock_focus(state, live, market))
+                self.assertFalse(pending["execution_approved"])
+                self.assertEqual(pending["execution_checked_at"], 1500)
+                self.assertIn("UNAVAILABLE", pending["execution_reason"])
+                for key in ("master_action", "opened_at", "lock_called_at", "forecast_path",
+                            "predicted_end", "contract_probability_up"):
+                    self.assertEqual(pending[key], original[key], key)
+                paper = background_paper.run_cycle(state, lambda _: {
+                    "ticker": "X", "status": "open", "yes_bid": .59, "yes_ask": .60,
+                    "no_bid": .39, "no_ask": .40,
+                }, now=1500)
+                self.assertIsNone(paper["open_position"])
+
+    def shadow_dependencies(self, stack):
+        for name in ("aggregate_trades", "futures_snapshot", "kalshi_context", "run_specialists_core"):
+            stack.enter_context(patch("learner_v31.legacy." + name, return_value={}))
+        stack.enter_context(patch("learner_v31.legacy.rows_for_forecast", return_value=[]))
+        stack.enter_context(patch("learner_v31.forecast_path_core", return_value={"predicted_end": 102, "predicted_direction": 1}))
+        stack.enter_context(patch("learner_v31.knowledge_council_vote", return_value={
+            "confidence": .8, "base_score": .5, "precision_gate_passed": True,
+        }))
+
+    def test_shadow_unavailable_probability_is_not_zero_percent_yes(self):
+        frame = pd.DataFrame({"close": [100.0]})
+        market = {"ticker": "TEST", "target": 100.0, "expires_at": 2000, "prob": None}
+        with ExitStack() as stack:
+            self.shadow_dependencies(stack)
+            stack.enter_context(patch("learner_v31.time.time", return_value=1000))
+            terminal = stack.enter_context(patch("learner_v31.terminal_above_probability", return_value={"probability_up": None}))
+            call = current_shadow_call({"forecast": {}}, frame, market)
+        self.assertIsNone(terminal.call_args.kwargs["market_probability"])
+        self.assertIsNone(call["contract_probability_up"])
+        self.assertIsNone(call["contract_probability_edge"])
+        self.assertIsNone(call["strike_distance_sigma"])
+        self.assertEqual(call["lock_focus"]["direction"], "UP")
+
+    def test_shadow_rejects_expired_market_before_fetching(self):
+        with ExitStack() as stack:
+            self.shadow_dependencies(stack)
+            stack.enter_context(patch("learner_v31.time.time", return_value=1000))
+            fetch = stack.enter_context(patch("learner_v31.legacy.aggregate_trades", return_value={}))
+            self.assertIsNone(current_shadow_call({}, pd.DataFrame({"close": [100.0]}), {"expires_at": 1000}))
+        fetch.assert_not_called()
+
+    def test_shadow_rechecks_expiry_after_fetching(self):
+        with ExitStack() as stack:
+            self.shadow_dependencies(stack)
+            stack.enter_context(patch("learner_v31.time.time", side_effect=[990.0, 1000.0, 1000.0]))
+            call = current_shadow_call({}, pd.DataFrame({"close": [100.0]}), {"expires_at": 1000})
+        self.assertIsNone(call)
+
     def test_registration_rejects_expired_market_before_fetching(self):
         with patch.object(learner.time, "time", return_value=1000), patch.object(learner, "aggregate_trades") as fetch:
             self.assertFalse(learner.register({}, None, {"expires_at": 1000}))

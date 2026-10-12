@@ -290,6 +290,8 @@ def market():
     expires, ticker, item, target = sorted(choices, key=lambda row: (row[0], row[1]))[0]
     exact = exact_market(ticker)
     if exact:
+        if str(exact.get("ticker") or ticker) != ticker:
+            return None
         exact_target = strike(exact)
         if exact_target is not None:
             target = exact_target
@@ -297,13 +299,8 @@ def market():
         if raw_expiry:
             expires = pd.Timestamp(raw_expiry).timestamp()
         item = {**item, **exact}
-    vals = []
-    for key in ["yes_bid_dollars", "yes_ask_dollars"]:
-        try:
-            vals.append(float(item[key]))
-        except Exception:
-            pass
-    prob = sum(vals) / len(vals) if vals else 0.5
+    if expires <= time.time() or str(item.get("status") or "active").lower() not in {"open", "active"}:
+        return None
     def quote_value(name):
         try:
             return float(item[name + "_dollars"])
@@ -314,6 +311,7 @@ def market():
                 return None
 
     yes_bid, yes_ask = quote_value("yes_bid"), quote_value("yes_ask")
+    prob = (yes_bid + yes_ask) / 2 if yes_bid is not None and yes_ask is not None else None
     no_bid, no_ask = quote_value("no_bid"), quote_value("no_ask")
     book = orderbook(ticker)
     if book.get("available"):
@@ -343,7 +341,7 @@ def kalshi_context(market_info, price):
         "available": True,
         "ticker": market_info["ticker"],
         "target": target,
-        "up_probability": float(market_info.get("prob", 0.5)),
+        "up_probability": market_info.get("prob"),
         "distance": distance,
         "distance_pct": distance / target if target else 0.0,
         "orderbook": market_info.get("orderbook", {}),

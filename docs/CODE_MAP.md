@@ -17,6 +17,8 @@ Start here for a specific issue. This is a navigation guide, not a current healt
 | Worker schedule, publication and recovery | `.github/workflows/learn.yml` runs `learner_v31.py`, then enrichment and `background_paper.py`; `worker_watchdog.py` | `test_worker_watchdog`, `test_learning_gaps` |
 | Other market pages | `pages/`, `multi_asset_command_center.py`, `multi_asset_paper.py` | `test_multi_asset_paper`, `test_multi_market_nav_routes` |
 | Login and deployed build label | `access_control.py` | `test_access_control` |
+| Archive replay, label deadlines, training inputs | Shared `historical_backtest.py` archive reader; `council_backtest_v4.py`, `historical_specialist_backtest_v7.py`, `train_horizon_models.py` | `test_historical_deadlines`, `test_historical_cross_month_v16`, `test_council_backtest_v4`, `test_train_horizon_models` |
+| LOCK fee economics and fresh execution evidence | `kalshi_paper_engine.py`: `expected_lock_net_pnl`; `learner_v31.py`: `refresh_pending_lock_focus`; `background_paper.py`; `pro_trade_ticket.py` | `test_lock_expected_return`, `test_reliability_v31`, `test_pro_trade_ticket` |
 
 ## Source navigation without rereading whole files
 
@@ -38,4 +40,5 @@ This is a small project-specific navigation tool, not Graphify. Static imports a
 - The displayed authoritative paper ledger comes from `learning-state` / `background_paper`. The SQLite engine also supplies shared lifecycle, fee and strategy helpers; do not substitute its local totals for the persistent summary.
 - Active scheduled entrypoint: `learner_v31.py`, which imports `learner.py` and `learner_v3.py` for supporting functionality. Cron requests are best effort; verify actual snapshot and paper-cycle ages.
 - Older patch installers under `tools/` are not the main runtime. Some are still invoked by workflows, so verify references before touching them.
+- `tools/run_offline_tests.py` executes both `unittest.TestCase` methods and standalone `test_*` functions with sockets disabled. Bare unittest discovery does not include the latter.
 - `WORK_CONTEXT.md` is the dated handoff log. `ARCHITECTURE.md` explains component relationships. Avoid duplicating numeric strategy settings here; inspect the current constants and explicit user instructions.

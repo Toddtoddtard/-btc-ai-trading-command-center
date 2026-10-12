@@ -431,10 +431,33 @@ def projected_net_pnl(contracts, entry, projected_exit):
             - kalshi_taker_fee(contracts, projected_exit))
 
 
+def executable_entry_quote(bid, ask):
+    """Require a finite, non-crossed selected-side book before a paper fill."""
+    bid, ask = _f(bid), _f(ask)
+    return bid is not None and ask is not None and 0 <= bid <= ask < 1 and ask > 0
+
+
+def expected_lock_net_pnl(contracts, entry, decision, side):
+    """Expected $1/$0 settlement proceeds less cost and entry fee; no exit fee."""
+    from contract_calibration import BASIS
+    if (decision.get("contract_probability_basis") != BASIS
+            or decision.get("contract_calibrator_active") is not True
+            or isinstance(decision.get("contract_probability_up"), bool)):
+        return None
+    probability = _f(decision.get("contract_probability_up"))
+    if probability is None or not 0 <= probability <= 1 or side not in {"YES", "NO"}:
+        return None
+    if side == "NO":
+        probability = 1.0 - probability
+    return contracts * (probability - entry) - kalshi_taker_fee(contracts, entry)
+
+
 def open_position(db_path, starting_cash, decision, risk, spot_price):
     action = str(decision.get("action", "")).upper()
     side = _side_from_action(action)
     if side is None:
+        return None
+    if decision.get("execution_approved") is False:
         return None
     strategy = "LOCK" if action.startswith("LOCK") else "SCALP"
     # Explicit LOCK calls are authoritative in PAPER mode. They bypass the
@@ -451,7 +474,8 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
     if strategy == "SCALP" and not scalp_gate["approved"]:
         return None
     entry = _quote(decision, side, ask=True)
-    if entry is None or entry > entry_price_limit(strategy):
+    bid = _quote(decision, side)
+    if not executable_entry_quote(bid, entry) or entry > entry_price_limit(strategy):
         return None
     if strategy == "SCALP":
         market_probability = _selected_side_market_probability(decision, side)
@@ -515,6 +539,14 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
         if contracts < 1:
             return None
         if strategy == "SCALP" and projected_net_pnl(contracts, entry, projected_exit) <= 0:
+            return None
+        if strategy == "LOCK":
+            expected_net = expected_lock_net_pnl(contracts, entry, decision, side)
+            if expected_net is None or expected_net <= 0:
+                return None
+        # Database work can cross the deadline after the initial window check.
+        now = time.time()
+        if expires_at <= now:
             return None
         fee = kalshi_taker_fee(contracts, entry)
         total_cost = entry * contracts + fee

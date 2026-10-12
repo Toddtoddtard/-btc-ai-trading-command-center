@@ -8,21 +8,19 @@ far-future price after a data gap.
 """
 from __future__ import annotations
 
-import io
 import json
 import os
 import time
-import zipfile
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 import numpy as np
 import pandas as pd
 
 from ai_core import PATTERN_STRUCTURE_VERSION, enrich_history_core, run_specialists_core
 from council_v4 import council_vote
+from historical_backtest import fetch_month, month_iter, month_url
 from reliability_v31 import detect_regime
 
 SYMBOL = "BTCUSDT"
@@ -39,44 +37,6 @@ ELIGIBLE = {
     "Historical Pattern AI", "FVG / MACD AI",
 }
 HORIZON_NS = 15 * 60 * 1_000_000_000
-MAX_RESOLUTION_LATENESS_NS = 90 * 1_000_000_000
-
-
-def month_iter(start_year, start_month, end_year, end_month):
-    y, m = start_year, start_month
-    while (y, m) <= (end_year, end_month):
-        yield y, m
-        m += 1
-        if m == 13:
-            y += 1
-            m = 1
-
-
-def month_url(year, month):
-    stem = f"{SYMBOL}-{INTERVAL}-{year}-{month:02d}.zip"
-    return f"{BASE}/{SYMBOL}/{INTERVAL}/{stem}"
-
-
-def fetch_month(year, month):
-    req = Request(month_url(year, month), headers={"User-Agent": "BTC-AI-Specialist-History-v16/1.0"})
-    with urlopen(req, timeout=45) as response:
-        raw = response.read()
-    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-        data = zf.read(zf.namelist()[0])
-    cols = ["open_time", "open", "high", "low", "close", "volume", "close_time", "qv", "trades", "tb", "tq", "ignore"]
-    df = pd.read_csv(io.BytesIO(data), header=None, names=cols)
-    ot = pd.to_numeric(df["open_time"], errors="coerce")
-    unit = "us" if float(ot.dropna().median()) > 1e14 else "ms"
-    df["time"] = pd.to_datetime(ot, unit=unit, utc=True, errors="coerce")
-    for c in ("open", "high", "low", "close", "volume"):
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    return (
-        df.dropna(subset=["time", "open", "high", "low", "close", "volume"])
-        [["time", "open", "high", "low", "close", "volume"]]
-        .drop_duplicates("time")
-        .sort_values("time")
-        .reset_index(drop=True)
-    )
 
 
 def blank_stat():
@@ -197,8 +157,7 @@ def main():
 
             while pending and pending[0][0] <= ts.value:
                 expiry_ns, start_px, regime, calls, is_holdout = pending.popleft()
-                lateness = ts.value - expiry_ns
-                if lateness > MAX_RESOLUTION_LATENESS_NS:
+                if ts.value != expiry_ns:
                     stale_windows += 1
                     continue
                 actual_dir = 1 if px >= start_px else -1
@@ -216,6 +175,10 @@ def main():
                 continue
             hist_slice = enriched.iloc[: i + 1].tail(500).copy()
             if len(hist_slice) < 241 or hist_slice[["ema50", "ema200", "ret60", "ret240", "rsi", "atr14"]].tail(1).isna().any(axis=None):
+                continue
+            # ret240 is a four-hour feature only across 240 exact minute steps.
+            steps = pd.to_datetime(hist_slice["time"].tail(241), utc=True).diff().iloc[1:]
+            if not steps.eq(pd.Timedelta(minutes=1)).all():
                 continue
             results = run_specialists_core(hist_slice, pd.DataFrame(), {}, {"available": False})
             calls = {name: float(item.get("score", 0.0)) for name, item in results.items() if name in ELIGIBLE}

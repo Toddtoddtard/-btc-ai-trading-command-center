@@ -9,6 +9,7 @@ regression-tested independently from Streamlit.
 from __future__ import annotations
 
 import math
+import time
 
 from kalshi_paper_engine import (
     entry_price_limit,
@@ -16,6 +17,11 @@ from kalshi_paper_engine import (
     SCALP_STOP_LOSS_POINTS,
     UNPROVEN_POSITION_CAP,
     kalshi_taker_fee,
+    executable_entry_quote,
+    expected_lock_net_pnl,
+    LOCK_MIN_CONFIDENCE,
+    _quote as _execution_quote,
+    _projected_scalp_exit,
 )
 
 
@@ -39,17 +45,7 @@ def _side_from_action(action):
 def _quote(decision, side, ask=True):
     if side not in {"YES", "NO"}:
         return None
-    prefix = "yes" if side == "YES" else "no"
-    price = _finite(decision.get(f"{prefix}_{'ask' if ask else 'bid'}_dollars"))
-    if price is not None:
-        return min(1.0, max(0.0, price))
-    # Kalshi binary sides are complements.  Use the opposing executable quote
-    # only when the selected-side quote is absent.
-    opposing = "no" if side == "YES" else "yes"
-    fallback = _finite(
-        decision.get(f"{opposing}_{'bid' if ask else 'ask'}_dollars")
-    )
-    return None if fallback is None else min(1.0, max(0.0, 1.0 - fallback))
+    return _execution_quote(decision, side, ask=ask)
 
 
 def _contract_count(budget, entry_price):
@@ -96,7 +92,8 @@ def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=Fals
     risk_pct = max(0.0, _finite((risk or {}).get("position_pct"), 0.0))
     allocation_pct = min(UNPROVEN_POSITION_CAP, risk_pct)
     budget = cash * allocation_pct
-    contracts = _contract_count(budget, entry)
+    valid_quote = executable_entry_quote(bid, entry)
+    contracts = _contract_count(budget, entry) if valid_quote else 0
     entry_fee = (
         kalshi_taker_fee(contracts, entry)
         if contracts and entry is not None
@@ -111,7 +108,7 @@ def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=Fals
 
     projected_exit = None
     if strategy == "SCALP":
-        projected_exit = _finite((decision or {}).get("scalp_projected_exit_price"))
+        projected_exit = _projected_scalp_exit(decision or {})
     elif strategy == "LOCK":
         projected_exit = 1.0
     if projected_exit is not None:
@@ -144,14 +141,40 @@ def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=Fals
         blockers.append("Master AI is waiting for a qualified call")
     if has_open_position:
         blockers.append("one paper position is already open")
-    if entry is None and side is not None:
-        blockers.append("selected-side Kalshi ask is unavailable")
+    now = time.time()
+    expires = _finite((decision or {}).get("kalshi_close_ts"))
+    if expires is None:
+        remaining = _finite((decision or {}).get("seconds_remaining"))
+        expires = now + remaining if remaining is not None else None
+    if expires is None or expires <= now:
+        blockers.append("Kalshi window is expired or expiry is unavailable")
+    if not valid_quote and side is not None:
+        blockers.append("selected-side Kalshi executable quote is unavailable or invalid")
+    if (decision or {}).get("execution_approved") is False:
+        blockers.append("reliability gate blocked PAPER entry")
     if strategy == "SCALP" and not bool((risk or {}).get("approved")):
         blockers.append("risk manager has not approved the SCALP")
+    if strategy == "SCALP":
+        if (projected_exit is None or entry is None
+                or projected_exit < entry * (1.0 + SCALP_MIN_GROSS_RETURN) - 1e-12):
+            blockers.append("projected SCALP exit is below the required gross-return target")
+        if projected_net is None or projected_net <= 0:
+            blockers.append("projected SCALP profit is not positive after entry and exit fees")
     if strategy in {"SCALP", "LOCK"} and entry is not None and entry > entry_price_limit(strategy):
         blockers.append(f"{strategy} entry is above the {entry_price_limit(strategy) * 100:.0f}% cap")
     if side is not None and contracts < 1:
         blockers.append("paper allocation is too small for one contract")
+    expected_net = None
+    if strategy == "LOCK":
+        confidence = _finite((decision or {}).get("confidence"), 0.0)
+        if confidence > 1:
+            confidence /= 100.0
+        if confidence < LOCK_MIN_CONFIDENCE:
+            blockers.append("LOCK confidence is below the 68% floor")
+        if contracts:
+            expected_net = expected_lock_net_pnl(contracts, entry, decision or {}, side)
+        if expected_net is None or expected_net <= 0:
+            blockers.append("expected LOCK settlement profit is unavailable or not positive after entry fees")
 
     return {
         "action": action,
@@ -175,6 +198,7 @@ def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=Fals
         "projected_exit_fee": projected_exit_fee,
         "projected_net_pnl": projected_net,
         "projected_return": projected_return,
+        "expected_settlement_net_pnl": expected_net,
         "protection": (
             "AI reversal exit + 15-point emergency stop"
             if strategy == "SCALP"

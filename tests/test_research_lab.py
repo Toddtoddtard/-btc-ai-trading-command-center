@@ -17,6 +17,70 @@ from research_lab import (
 
 
 class ResearchLabTests(unittest.TestCase):
+    @staticmethod
+    def calibration_history(count=180):
+        return [{
+            "ticker": f"T-{i}", "opened_at": i * 1000,
+            "expires_at": i * 1000 + 900,
+            "result_observed_at": i * 1000 + 950,
+            "result": "yes" if i % 2 == 0 else "no",
+            "market_yes_probability": .55 if i % 2 == 0 else .45,
+            "model_yes_probability": .85 if i % 2 == 0 else .15,
+        } for i in range(count)]
+
+    def test_calibrator_is_invariant_to_history_order(self):
+        history = self.calibration_history()
+        for row in history[90:]:
+            row["model_yes_probability"] = .2 if row["result"] == "yes" else .8
+        self.assertEqual(fit_guarded_calibrator(history),
+                         fit_guarded_calibrator(list(reversed(history))))
+
+    def test_delayed_official_labels_cannot_train_earlier_forecasts(self):
+        history = self.calibration_history()
+        for row in history:
+            row["result_observed_at"] = 200000
+        calibration = fit_guarded_calibrator(history)
+        self.assertEqual(calibration["validation_samples"], 0)
+        self.assertFalse(calibration["active"])
+
+    def test_multiple_phases_do_not_inflate_independent_calibration_samples(self):
+        history = self.calibration_history(40)
+        phases = [dict(row, opened_at=row["opened_at"] + lead,
+                       model_yes_probability=.99)
+                  for row in history for lead in (300, 600, 800)]
+        calibration = fit_guarded_calibrator(history + phases)
+        self.assertEqual(calibration["training_samples"], 40)
+        self.assertEqual(calibration["validation_samples"], 0)
+        self.assertEqual(calibration, fit_guarded_calibrator(history))
+
+    def test_legacy_labels_use_existing_settlement_lag(self):
+        history = self.calibration_history(61)
+        for row in history:
+            row.pop("result_observed_at")
+        # Expiry + the 120s legacy lag is after the next forecast capture.
+        calibration = fit_guarded_calibrator(history)
+        self.assertEqual(calibration["validation_samples"], 0)
+
+    def test_missing_or_invalid_timing_cannot_support_calibration(self):
+        history = self.calibration_history()
+        for i, row in enumerate(history):
+            if i % 3 == 0:
+                row.pop("opened_at")
+            elif i % 3 == 1:
+                row["expires_at"] = row["opened_at"]
+            else:
+                row["result_observed_at"] = "invalid"
+        self.assertEqual(fit_guarded_calibrator(history)["training_samples"], 0)
+
+    def test_shadow_calibrator_excludes_labels_unavailable_at_capture(self):
+        state = {"research_lab": {"history": self.calibration_history()}}
+        pending = {"ticker": "CURRENT", "opened_at": 100, "expires_at": 1000,
+                   "master_base_score": .8}
+        self.assertTrue(register_shadow(state, pending, {"yes_bid": .59, "yes_ask": .61}))
+        calibration = state["research_lab"]["guarded_calibrator"]
+        self.assertEqual(calibration["training_samples"], 0)
+        self.assertFalse(calibration["active"])
+
     def test_scorecard_counts_each_market_once(self):
         history = [
             {
@@ -86,6 +150,8 @@ class ResearchLabTests(unittest.TestCase):
             outcome = 1.0 if i % 2 == 0 else 0.0
             history.append({
                 "ticker": f"T-{i}",
+                "opened_at": i * 1000, "expires_at": i * 1000 + 900,
+                "result_observed_at": i * 1000 + 950,
                 "result": "yes" if outcome else "no",
                 "market_yes_probability": 0.55 if outcome else 0.45,
                 "model_yes_probability": 0.85 if outcome else 0.15,

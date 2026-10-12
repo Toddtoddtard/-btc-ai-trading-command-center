@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 for _runtime_module in (
     "access_control", "lock_focus", "kalshi_paper_engine",
     "outcome_timing", "contribution_evidence", "contract_calibration", "reliability_v31", "council_v4",
+    "research_lab", "horizon_models", "ai_core",
     "council_accounting", "specialist_knowledge_v5",
     "background_paper", "pro_trade_ticket", "live_feeds", "shared_learning",
 ):
