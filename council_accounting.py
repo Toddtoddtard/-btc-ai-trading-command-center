@@ -57,18 +57,28 @@ def reconcile_master_learning(state):
 def official_snapshots(state):
     outcomes = {str(r.get('ticker')): r for r in state.get('master_history', [])
                 if r.get('kalshi_result') in ('yes','no')}
-    seen = set()
+    # Retain the earliest valid pre-expiry observation for each market.
+    # Storage order must not determine the label used for learning.
+    selected = {}
     for row in state.get('prediction_snapshots', []):
         ticker = str(row.get('ticker') or '')
-        if not ticker or ticker in seen or ticker not in outcomes:
+        if not ticker or ticker not in outcomes:
             continue
-        if row.get("opened_at") is not None and row.get("expires_at") is not None and float(row["opened_at"]) >= float(row["expires_at"]):
+        try:
+            opened = float(row.get('opened_at'))
+            expires = float(row.get('expires_at'))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(opened) and math.isfinite(expires) and opened < expires):
             continue
         snapshot = row.get('snapshot') or {}
-        if not snapshot.get('specialists'):
+        if not isinstance(snapshot, dict) or not snapshot.get('specialists'):
             continue
-        seen.add(ticker)
-        yield row, outcomes[ticker]
+        previous = selected.get(ticker)
+        if previous is None or opened < previous[0]:
+            selected[ticker] = (opened, row)
+    for ticker in sorted(selected):
+        yield selected[ticker][1], outcomes[ticker]
 
 
 def reconcile_specialists(state):
