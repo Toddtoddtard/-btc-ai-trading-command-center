@@ -64,19 +64,26 @@ def official_snapshots(state):
         ticker = str(row.get('ticker') or '')
         if not ticker or ticker not in outcomes:
             continue
-        try:
-            opened = float(row.get('opened_at'))
-            expires = float(row.get('expires_at'))
-        except (TypeError, ValueError):
-            continue
-        if not (math.isfinite(opened) and math.isfinite(expires) and opened < expires):
-            continue
+        opened_at, expires_at = row.get('opened_at'), row.get('expires_at')
+        # Legacy retained snapshots can lack both timestamps; keep their
+        # evidence, but prefer a dated capture whenever one exists.
+        undated = opened_at is None and expires_at is None
+        if undated:
+            capture_order = (1, 0.0)
+        else:
+            try:
+                opened, expires = float(opened_at), float(expires_at)
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(opened) and math.isfinite(expires) and opened < expires):
+                continue
+            capture_order = (0, opened)
         snapshot = row.get('snapshot') or {}
         if not isinstance(snapshot, dict) or not snapshot.get('specialists'):
             continue
         previous = selected.get(ticker)
-        if previous is None or opened < previous[0]:
-            selected[ticker] = (opened, row)
+        if previous is None or capture_order < previous[0]:
+            selected[ticker] = (capture_order, row)
     for ticker in sorted(selected):
         yield selected[ticker][1], outcomes[ticker]
 
