@@ -302,9 +302,9 @@ def enhanced_grade(state, df):
         state["master_history"][-1]["master_confidence"] = safe_float(pending_copy.get("master_confidence"), 0.5)
         state["master_history"][-1]["realized_return"] = realized_return
 
-    update_regime_learning(state, pending_copy, actual_direction, realized_return, master_hit)
-    recalibrate_weights(state, pending_copy, actual_direction, realized_return)
-    update_confidence_model(state, pending_copy, master_hit)
+    # This is a Binance price label for the candle-path predictor. Council
+    # confidence and specialist weights are rebuilt from official Kalshi
+    # outcomes and immutable council snapshots by council_accounting.
     robustify_forecast_metrics(state, state.get("master_history", [{}])[-1])
     update_rolling(state)
     return True
