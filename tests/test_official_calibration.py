@@ -50,6 +50,30 @@ class OfficialCalibrationTests(unittest.TestCase):
         # A (wrong) then B (right): the latest right call must have more EWMA influence.
         self.assertAlmostEqual(chronological['specialists']['Trend AI']['ewma_accuracy'], .505)
 
+    def test_duplicate_snapshots_use_earliest_valid_market_observation(self):
+        state = self.state()
+        first = state['prediction_snapshots'][0]
+        later = copy.deepcopy(first)
+        later['opened_at'] = 15
+        later['snapshot']['specialists']['Trend AI']['score'] = .8
+        state['prediction_snapshots'] = [later, first]
+        forward = copy.deepcopy(state)
+        backward = copy.deepcopy(state)
+        backward['prediction_snapshots'].reverse()
+        reconcile_specialists(forward)
+        reconcile_specialists(backward)
+        self.assertEqual(forward['specialists'], backward['specialists'])
+        self.assertEqual(forward['specialist_history'], backward['specialist_history'])
+        self.assertEqual(forward['specialists']['Trend AI']['direction_hits'], 0)
+
+    def test_malformed_snapshot_time_cannot_break_specialist_learning(self):
+        state = self.state()
+        bad = copy.deepcopy(state['prediction_snapshots'][0])
+        bad['opened_at'] = 'not-a-time'
+        state['prediction_snapshots'].insert(0, bad)
+        reconcile_specialists(state)
+        self.assertEqual(state['specialists']['Trend AI']['samples'], 1)
+
     def test_missing_official_result_and_neutral_council_never_train(self):
         state = self.state()
         state['master_history'][0]['kalshi_result'] = None
