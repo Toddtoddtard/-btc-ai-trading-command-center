@@ -6,6 +6,7 @@ import background_paper as bg
 import kalshi_paper_engine as engine
 from lock_focus import evaluate_lock_focus
 from pro_trade_ticket import build_pro_trade_ticket
+from contract_calibration import BASIS
 
 
 class EntryCapTests(unittest.TestCase):
@@ -21,7 +22,10 @@ class EntryCapTests(unittest.TestCase):
                     quotes.update({f'{other}_ask_dollars': 1-(ask-.01), f'{other}_bid_dollars': 1-ask})
                     action = f'{strategy} {direction}'
                     decision = dict(action=action, confidence=.95, kalshi_ticker='TEST',
-                                    kalshi_close_ts=now+600, scalp_projected_exit_price=.99, **quotes)
+                                    kalshi_close_ts=now+600, scalp_projected_exit_price=.99,
+                                    contract_probability_up=.99 if direction=='UP' else .01,
+                                    contract_probability_basis=BASIS, contract_calibrator_active=True,
+                                    **quotes)
                     risk = dict(approved=True, position_pct=.02)
                     opened = engine.open_position(tmp+'/paper.db', 500, decision, risk, 100000)
                     self.assertEqual(bool(opened), allowed)
@@ -29,6 +33,8 @@ class EntryCapTests(unittest.TestCase):
                     self.assertEqual(ticket['status'] == 'READY', allowed)
                     state = {'pending': dict(ticker='TEST', expires_at=now+600,
                              master_action=action, execution_approved=True, master_confidence=.95,
+                             contract_probability_up=.99 if direction=='UP' else .01,
+                             contract_probability_basis=BASIS, contract_calibrator_active=True,
                              start_price=100000, target=100000,
                              predicted_end=101000 if direction=='UP' else 99000)}
                     paper = bg.run_cycle(state, lambda _: dict(ticker='TEST', status='open', **quotes), now=now)

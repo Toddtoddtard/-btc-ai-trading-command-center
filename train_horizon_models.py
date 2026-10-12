@@ -52,7 +52,7 @@ def feature_frame(df):
     out["range_position_20"] = ((close - low20) / span20) * 2.0 - 1.0
     out["zscore_20"] = (close - mean20) / (2.0 * close.rolling(20).std(ddof=0).clip(lower=close * 1e-6))
     volume = x.get("volume", pd.Series(0.0, index=x.index)).astype(float)
-    out["volume_z"] = ((volume - volume.rolling(20).mean()) / volume.rolling(20).std().replace(0, np.nan)) / 3.0
+    out["volume_z"] = (((volume - volume.rolling(20).mean()) / volume.rolling(20).std().replace(0, np.nan)) / 3.0).fillna(0.0)
     stamp = pd.to_datetime(x["time"], utc=True)
     angle = 2.0 * math.pi * (stamp.dt.hour * 60 + stamp.dt.minute) / 1440.0
     out["tod_sin"], out["tod_cos"] = np.sin(angle), np.cos(angle)
@@ -66,7 +66,11 @@ def feature_frame(df):
     scales = {name: scale for name, _interval, scale in TIMEFRAME_SPECS}
     for name in CONTEXT_FEATURE_NAMES:
         rule = CONTEXT_RULES[name]
-        bars = source.resample(rule, label="right", closed="left").agg({"open": "first", "close": "last"}).dropna()
+        grouped = source.resample(rule, label="right", closed="left")
+        bars = grouped.agg({"open": "first", "close": "last"}).dropna()
+        starts = bars.index - pd.tseries.frequencies.to_offset(rule)
+        expected_minutes = (bars.index - starts).total_seconds() / 60
+        bars = bars[grouped['close'].count().reindex(bars.index).eq(expected_minutes)]
         bars[name] = np.tanh((bars["close"] / bars["open"] - 1.0) / scales[name])
         available = bars[[name]].reset_index().rename(columns={"_time": "_available"})
         available["_available_ns"] = (
@@ -108,6 +112,12 @@ def month_samples(df, horizon, features=None, selection_mask=None):
     baseline_scale = np.maximum(avg_range * math.sqrt(horizon), close * .00025)
     baseline = _sigmoid((baseline_move / baseline_scale).to_numpy())
     valid = features.notna().all(axis=1) & close.shift(-horizon).notna()
+    # Row offsets represent minute horizons only when timestamps are contiguous.
+    # A missing archive/month must not turn a 15-minute label into a longer move.
+    stamp = pd.to_datetime(df['time'], utc=True, errors='coerce')
+    seconds = stamp.diff().dt.total_seconds()
+    valid &= seconds.rolling(60).min().eq(60) & seconds.rolling(60).max().eq(60)
+    valid &= (stamp.shift(-horizon) - stamp).eq(pd.Timedelta(minutes=horizon))
     if selection_mask is not None:
         valid &= pd.Series(selection_mask, index=df.index).astype(bool)
     idx = np.flatnonzero(valid.to_numpy())[::STEP]

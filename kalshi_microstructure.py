@@ -15,7 +15,8 @@ def _finite(value, default=None):
 
 def _levels(payload, side):
     book = (payload or {}).get("orderbook_fp") or (payload or {}).get("orderbook") or {}
-    raw = book.get(f"{side}_dollars") or book.get(side) or []
+    dollars = f"{side}_dollars" in book
+    raw = book.get(f"{side}_dollars" if dollars else side) or []
     levels = []
     for row in raw:
         if not isinstance(row, (list, tuple)) or len(row) < 2:
@@ -24,7 +25,7 @@ def _levels(payload, side):
         quantity = _finite(row[1], 0.0)
         if price is None or quantity <= 0:
             continue
-        if price > 1.0:
+        if not dollars:
             price /= 100.0
         if 0.0 <= price <= 1.0:
             levels.append((price, quantity))

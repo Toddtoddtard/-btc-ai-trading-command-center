@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 import kalshi_paper_engine as engine
+from contract_calibration import BASIS
 from learner_v31 import cadence_health
 
 
@@ -18,7 +19,10 @@ class ContractRegressionTests(unittest.TestCase):
                              kalshi_close_ts=time.time()+900, target_price=100,
                              yes_ask_dollars=.50, yes_bid_dollars=.48,
                              no_ask_dollars=.52, no_bid_dollars=.50,
-                             confidence=.95, scalp_projected_exit_price=.80)
+                             confidence=.95, scalp_projected_exit_price=.80,
+                             contract_probability_up=.99,
+                             contract_probability_basis=BASIS,
+                             contract_calibrator_active=True)
         self.risk = dict(approved=True, position_pct=.1)
 
     def test_learner_cadence_reports_normal_best_effort_interval(self):
@@ -133,6 +137,7 @@ class ContractRegressionTests(unittest.TestCase):
 
     def test_no_settles_from_official_result(self):
         self.decision['action'] = 'LOCK DOWN'
+        self.decision['contract_probability_up'] = .01
         self.open()
         self.expire()
         self.cycle('no', spot=10000)
@@ -690,7 +695,7 @@ def test_live_master_imports_shared_specialist_consensus():
     lock_import = source[source.index("from lock_focus import ("):]
     lock_import = lock_import[:lock_import.index(")")]
     assert "specialist_consensus," in lock_import
-    assert "settlement_consensus = specialist_consensus(results, raw_side)" in source
+    assert "settlement_consensus = specialist_consensus(results, raw_side, v5_council)" in source
 
 
 def test_call_entry_card_uses_shared_ledger_not_local_sqlite_adapter():
@@ -732,6 +737,8 @@ def test_lock_can_bypass_risk_approval_only_when_lock_first_guards_pass():
             kalshi_close_ts=time.time()+900, target_price=100,
             yes_ask_dollars=.75, yes_bid_dollars=.74,
             no_ask_dollars=.26, no_bid_dollars=.25, confidence=.80,
+            contract_probability_up=.90, contract_probability_basis=BASIS,
+            contract_calibrator_active=True,
         )
         risk = dict(approved=False, position_pct=.10)
         opened = engine.open_position(db, 500, decision, risk, 100)

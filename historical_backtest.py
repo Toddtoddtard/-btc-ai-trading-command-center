@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from ai_core import forecast_path_core
+from candle_learning import closed_frame
 
 SYMBOL = "BTCUSDT"
 INTERVAL = "1m"
@@ -65,9 +66,9 @@ def fetch_month(year, month):
     ot = pd.to_numeric(df["open_time"], errors="coerce")
     unit = "us" if float(ot.dropna().median()) > 1e14 else "ms"
     df["time"] = pd.to_datetime(ot, unit=unit, utc=True, errors="coerce")
-    for c in ("open", "high", "low", "close"):
+    for c in ("open", "high", "low", "close", "volume", "qv", "tb", "tq"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df.dropna(subset=["time", "open", "high", "low", "close"])
+    return closed_frame(df)
 
 
 def rows_for_forecast(buffer):
@@ -92,6 +93,8 @@ def main():
     months_loaded = []
     months_failed = []
     last_eval_minute = None
+    last_timestamp = None
+    missing_deadlines = 0
     started = time.time()
 
     for year, month in month_iter(start_year, start_month, end_year, end_month):
@@ -105,9 +108,15 @@ def main():
         for r in df.itertuples(index=False):
             ts = pd.Timestamp(r.time)
             px = float(r.close)
+            if last_timestamp is not None and ts - last_timestamp != pd.Timedelta(minutes=1):
+                buffer.clear()
+            last_timestamp = ts
 
             while pending and pending[0][0] <= ts.value:
                 target_ns, start_px, pred_end, eval_year = pending.popleft()
+                if target_ns != ts.value:
+                    missing_deadlines += 1
+                    continue
                 actual = px
                 correct = int((pred_end >= start_px) == (actual >= start_px))
                 err = abs(actual - pred_end)
@@ -148,6 +157,7 @@ def main():
         }
 
     report = {
+        "missing_deadlines_excluded": missing_deadlines,
         "version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "symbol": SYMBOL,

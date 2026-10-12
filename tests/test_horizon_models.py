@@ -1,4 +1,5 @@
 import unittest
+import copy
 
 import numpy as np
 import pandas as pd
@@ -102,6 +103,64 @@ class HorizonModelTests(unittest.TestCase):
         self.assertTrue(np.isfinite(before).all())
         np.testing.assert_allclose(before, after)
 
+    def test_invalid_candles_cannot_register_features(self):
+        for column in ("open", "high", "low", "close", "volume"):
+            for value in (float("inf"), float("nan"), -1.0):
+                with self.subTest(column=column, value=value):
+                    frame = candles()
+                    frame["volume"] = frame["volume"].astype(float)
+                    frame.loc[70, column] = value
+                    self.assertIsNone(feature_vector(frame.to_dict("records")))
+                    state = {}
+                    self.assertFalse(register_horizon_predictions(state, frame.to_dict("records")))
+                    self.assertEqual(state["horizon_models"]["pending"], [])
+        frame = candles()
+        frame.loc[70, "close"] = 0.0
+        self.assertIsNone(feature_vector(frame.to_dict("records")))
+
+    def test_optional_volume_can_be_absent_or_zero(self):
+        frame = candles()
+        frame["volume"] = 0.0
+        zero = feature_vector(frame.to_dict("records"))
+        absent = feature_vector(frame.drop(columns="volume").to_dict("records"))
+        self.assertTrue(np.isfinite(zero).all())
+        self.assertEqual(zero[11], 0.0)
+        np.testing.assert_allclose(zero, absent)
+
+    def test_invalid_persisted_features_cannot_poison_models(self):
+        for value in (float("nan"), float("inf"), "bad"):
+            with self.subTest(value=value):
+                state = {}
+                root = ensure_horizon_state(state)
+                features = [1.0] * len(FEATURE_NAMES)
+                features[0] = value
+                root["pending"] = [{"start_price": 100_000.0, "features": features,
+                    "predictions": {"1": {"target_at": pd.Timestamp("2026-01-01T00:02:00Z").timestamp(),
+                        "probability_up": .8, "baseline_probability_up": .5}}}]
+                self.assertEqual(resolve_horizon_predictions(state, candles(), now=2e9), 0)
+                self.assertEqual(root["models"]["1"]["samples"], 0)
+                self.assertTrue(np.isfinite(root["models"]["1"]["weights"]).all())
+                self.assertEqual(root["pending"], [])
+
+    def test_pending_insertion_order_does_not_change_learning(self):
+        root = ensure_horizon_state({})
+        origin = pd.Timestamp("2026-01-01T00:00:00Z").timestamp()
+        for minute in range(1, 6):
+            root["pending"].append({"created_at": origin + minute * 60 - 60,
+                "start_price": 100_000.0, "features": [float(minute)] * len(FEATURE_NAMES),
+                "predictions": {"1": {"target_at": origin + minute * 60,
+                    "probability_up": .1 * minute, "baseline_probability_up": .5}}})
+        root["models"]["1"]["samples"] = 100
+        first = {"horizon_models": copy.deepcopy(root)}
+        second = {"horizon_models": copy.deepcopy(root)}
+        second["horizon_models"]["pending"].reverse()
+        self.assertEqual(resolve_horizon_predictions(first, candles(), now=origin + 600), 5)
+        self.assertEqual(resolve_horizon_predictions(second, candles(), now=origin + 600), 5)
+        a = first["horizon_models"]["models"]["1"]
+        b = second["horizon_models"]["models"]["1"]
+        self.assertEqual(a["weights"], b["weights"])
+        self.assertEqual(a["recent"], b["recent"])
+
     def test_context_adds_seven_bounded_features(self):
         frame = candles()
         plain = feature_vector(frame.to_dict("records"))
@@ -166,7 +225,7 @@ class HorizonModelTests(unittest.TestCase):
         self.assertEqual(model["qualification_streak"], 0)
         self.assertEqual(model["metrics"]["minimum_directional_accuracy"], .70)
 
-    def test_model_needs_three_seventy_percent_qualifying_evaluations(self):
+    def test_model_needs_three_distinct_qualifying_sample_counts(self):
         model = default_model(15)
         model.update({
             "historical_validated": True,
@@ -181,10 +240,14 @@ class HorizonModelTests(unittest.TestCase):
             ],
         })
         self.assertTrue(_evaluate_promotion(model))
+        for _ in range(4):
+            self.assertTrue(_evaluate_promotion(model))
+        self.assertEqual(model["qualification_streak"], 1)
         self.assertFalse(model["enabled"])
-        self.assertTrue(_evaluate_promotion(model))
-        self.assertFalse(model["enabled"])
-        self.assertTrue(_evaluate_promotion(model))
+        for sample_count in (201, 202):
+            model["samples"] = sample_count
+            model["hits"] += 1
+            self.assertTrue(_evaluate_promotion(model))
         self.assertTrue(model["enabled"])
 
     def test_enabled_model_is_disabled_below_seventy_percent_accuracy(self):

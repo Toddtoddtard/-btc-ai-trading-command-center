@@ -62,7 +62,16 @@ def _as_frame(rows):
     for column in required | {"volume"}:
         if column in frame:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    return frame.dropna(subset=["open", "high", "low", "close"])
+    prices = frame[list(required)].to_numpy(dtype=float)
+    # Dropping a bad bar compresses time and changes the meaning of lagged
+    # features. Reject the input instead of training on fabricated continuity.
+    if not np.isfinite(prices).all() or (prices <= 0).any():
+        return pd.DataFrame()
+    if "volume" in frame:
+        volumes = frame["volume"].to_numpy(dtype=float)
+        if not np.isfinite(volumes).all() or (volumes < 0).any():
+            return pd.DataFrame()
+    return frame
 
 
 def feature_vector(rows, context=None):
@@ -140,6 +149,7 @@ def default_model(horizon):
         "baseline_hits": 0,
         "recent": [],
         "qualification_streak": 0,
+        "last_qualification_samples": 0,
         "enabled": False,
         "historical_validated": False,
         "offline_metrics": {},
@@ -321,7 +331,12 @@ def _evaluate_promotion(model):
         and accuracy >= MIN_DIRECTIONAL_ACCURACY
         and accuracy >= baseline_accuracy
     )
-    streak = int(model.get("qualification_streak", 0)) + 1 if qualifies else 0
+    streak = int(model.get("qualification_streak", 0))
+    if samples > int(model.get("last_qualification_samples", 0)):
+        streak = streak + 1 if qualifies else 0
+        model["last_qualification_samples"] = samples
+    elif not qualifies:
+        streak = 0
     model["qualification_streak"] = streak
     if streak >= PROMOTION_REQUIRED_STREAK:
         model["enabled"] = True
@@ -356,8 +371,16 @@ def resolve_horizon_predictions(state, frame, now=None):
     now = time.time() if now is None else float(now)
     unresolved = []
     graded = 0
+    matured = []
     for record in root.get("pending", []):
-        features = np.asarray(record.get("features", []), dtype=float)
+        try:
+            features = np.asarray(record.get("features", []), dtype=float)
+            start_price = float(record.get("start_price"))
+        except (TypeError, ValueError):
+            continue
+        if (features.shape != (len(FEATURE_NAMES),) or not np.isfinite(features).all()
+                or not math.isfinite(start_price) or start_price <= 0):
+            continue
         remaining = {}
         for key, prediction in (record.get("predictions") or {}).items():
             target_at = _finite(prediction.get("target_at"), now + 1)
@@ -368,17 +391,23 @@ def resolve_horizon_predictions(state, frame, now=None):
             if actual_price is None:
                 remaining[key] = prediction
                 continue
-            outcome = int(actual_price >= _finite(record.get("start_price"), actual_price))
+            outcome = int(actual_price >= start_price)
             probability = float(np.clip(_finite(prediction.get("probability_up"), 0.5), 0.01, 0.99))
             baseline_probability = float(np.clip(_finite(prediction.get("baseline_probability_up"), 0.5), 0.01, 0.99))
             model = root["models"].get(key)
             if model is not None and len(features) == len(FEATURE_NAMES):
-                _update_model(model, features, outcome, probability, baseline_probability)
-                _evaluate_promotion(model)
-                graded += 1
+                # JSON content is a stable tie-breaker for equal deadlines;
+                # persisted list insertion order must never drive SGD or L2.
+                order = (target_at, _finite(record.get("created_at"), target_at), key,
+                         json.dumps(record, sort_keys=True))
+                matured.append((order, model, features, outcome, probability, baseline_probability))
         if remaining:
             record["predictions"] = remaining
             unresolved.append(record)
+    for _order, model, features, outcome, probability, baseline_probability in sorted(matured, key=lambda row: row[0]):
+        _update_model(model, features, outcome, probability, baseline_probability)
+        _evaluate_promotion(model)
+        graded += 1
     root["pending"] = unresolved[-MAX_PENDING:]
     root["affects_execution"] = any(bool(model.get("enabled")) for model in root["models"].values())
     root["graded_this_run"] = graded
@@ -437,6 +466,7 @@ def merge_offline_bundle(state, bundle):
             "offline_trained_through": incoming.get("trained_through"),
             "enabled": False,
             "qualification_streak": 0,
+            "last_qualification_samples": 0,
             # A new offline candidate is a new model. Never attach the prior
             # candidate's live scorecard to different weights.
             "samples": 0,

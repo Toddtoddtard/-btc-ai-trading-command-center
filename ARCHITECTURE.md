@@ -13,6 +13,13 @@ reliability checks and contract calibration feed the dashboard and scheduled
 learner. `lock_focus.py` owns LOCK qualification; paper execution uses shared
 strategy and fee helpers in `kalshi_paper_engine.py`.
 
+New LOCK entries require validated terminal probability and positive expected
+settlement proceeds after entry fees. Council confidence is a separate measure
+and cannot substitute for contract probability. An immutable LOCK direction
+does not freeze authorization: current probability and reliability evidence
+must still approve an unfilled call. Promotion of existing SCALP exposure also
+requires current approval and a validated advantage to holding versus selling.
+
 The active scheduled entrypoint is `learner_v31.py`, supported by `learner.py`
 and `learner_v3.py`. `.github/workflows/learn.yml` runs learning, enrichment and
 `background_paper.py`, then publishes the persistent ledger and model state to
@@ -59,6 +66,14 @@ GitHub Actions runs `.github/workflows/learn.yml` every five minutes. The worker
 The research lab can record one independent shadow call in each `OPEN`, `MIDDLE`, `FINAL 5`, and `FINAL 2` phase. It grades model Brier score against the contemporaneous Kalshi midpoint, counterfactual WAIT outcomes, fee-aware one-contract paper P/L, and simultaneous entry-policy candidates. Specialist lifecycle labels are advisory and never disable execution.
 
 Evaluation also publishes an independent-market scorecard that retains only the earliest forecast per ticker. This prevents multiple refreshes or phase observations from being misreported as independent samples. The scorecard reports directional accuracy, Brier score, log loss, calibration bins, and paired edge versus Kalshi.
+
+Research calibration uses one earliest valid capture per ticker and only labels
+observed before that capture. The legacy rolling champion/challenger comparison
+is explicitly retrospective and cannot promote parameters; ordinary outcome
+learning continues. Horizon promotion requires new graded samples at each
+checkpoint. Historical replay shares one validated archive reader, skips missing
+exact deadlines, and excludes incomplete higher-frame context and time gaps.
+Archived BTC direction results are distinct from official Kalshi settlements.
 
 ## Safety boundary
 

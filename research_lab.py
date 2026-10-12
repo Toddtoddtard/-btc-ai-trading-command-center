@@ -22,6 +22,7 @@ from external_teacher_lab import (
     teacher_leaderboard,
 )
 from kalshi_paper_engine import kalshi_taker_fee
+from outcome_timing import outcome_available_at, timestamp
 
 
 POLICIES = (
@@ -181,6 +182,9 @@ def _calibration_row(row):
         "market": max(0.01, min(0.99, market)),
         "raw_model": max(0.01, min(0.99, raw_model)),
         "outcome": 1.0 if result == "yes" else 0.0,
+        "opened_at": timestamp(row.get("opened_at")),
+        "expires_at": timestamp(row.get("expires_at")),
+        "available_at": outcome_available_at(row, row.get("expires_at")),
     }
 
 
@@ -220,32 +224,43 @@ def _candidate_probability(raw_model, market, coefficients):
     return max(0.02, min(0.98, probability))
 
 
-def fit_guarded_calibrator(history):
+def fit_guarded_calibrator(history, as_of=None):
     """Return a causal, walk-forward-tested probability calibrator.
 
-    All observations from one ticker are validated before that ticker is added
-    to training, so later phases of a market cannot learn its own settlement.
+    One earliest capture per ticker earns one training/validation sample.
+    Each validation forecast uses only official outcomes available at capture.
     If the candidate has not beaten Kalshi both overall and recently, the live
     research forecast falls back exactly to the contemporaneous market price.
     """
-    grouped = {}
+    rows = []
+    cutoff = timestamp(as_of) if as_of is not None else float("inf")
     for original in history or []:
         row = _calibration_row(original)
-        if row is not None:
-            grouped.setdefault(row["ticker"] or f"row-{len(grouped)}", []).append(row)
+        if (row is None or not row["ticker"] or row["opened_at"] is None
+                or row["expires_at"] is None or row["opened_at"] >= row["expires_at"]
+                or not math.isfinite(row["available_at"])):
+            continue
+        rows.append(row)
 
-    training = []
+    earliest = {}
+    for row in sorted(rows, key=lambda r: (
+            r["opened_at"], r["ticker"], r["available_at"],
+            r["market"], r["raw_model"], r["outcome"])):
+        earliest.setdefault(row["ticker"], row)
+    training = [row for row in earliest.values()
+                if cutoff is not None and row["available_at"] <= cutoff]
+
     validation = []
-    for group in grouped.values():
-        if len(training) >= CALIBRATION_MIN_TRAINING_ROWS:
-            coefficients = _fit_calibration_coefficients(training)
-            for row in group:
-                candidate = _candidate_probability(row["raw_model"], row["market"], coefficients)
-                validation.append({
-                    "candidate_brier": (candidate - row["outcome"]) ** 2,
-                    "market_brier": (row["market"] - row["outcome"]) ** 2,
-                })
-        training.extend(group)
+    for index, row in enumerate(training):
+        prior = [r for r in training[:index] if r["available_at"] <= row["opened_at"]]
+        if len(prior) < CALIBRATION_MIN_TRAINING_ROWS:
+            continue
+        coefficients = _fit_calibration_coefficients(prior)
+        candidate = _candidate_probability(row["raw_model"], row["market"], coefficients)
+        validation.append({
+            "candidate_brier": (candidate - row["outcome"]) ** 2,
+            "market_brier": (row["market"] - row["outcome"]) ** 2,
+        })
 
     coefficients = _fit_calibration_coefficients(training) if training else (1.0, 0.0)
     samples = len(validation)
@@ -321,7 +336,7 @@ def register_shadow(state, pending, market_info):
     no_ask = _f(market_info.get("no_ask"), 1.0 - yes_bid)
     raw_model_yes = _yes_probability(pending)
     market_yes = max(0.01, min(0.99, (yes_bid + yes_ask) / 2.0))
-    calibrator = fit_guarded_calibrator(lab.get("history") or [])
+    calibrator = fit_guarded_calibrator(lab.get("history") or [], as_of=opened_at)
     calibrator["updated_at"] = datetime.now(timezone.utc).isoformat()
     lab["guarded_calibrator"] = calibrator
     model_yes = guarded_probability(raw_model_yes, market_yes, calibrator)

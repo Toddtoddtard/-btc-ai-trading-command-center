@@ -11,6 +11,8 @@ class RuntimeImportTests(unittest.TestCase):
         import lock_focus
         import kalshi_paper_engine
         import background_paper
+        import ai_core
+        import research_lab
         tree = ast.parse(Path('app.py').read_text())
         refresh = next(n for n in tree.body if isinstance(n, ast.For)
                        and isinstance(n.target, ast.Name) and n.target.id == '_runtime_module')
@@ -18,6 +20,8 @@ class RuntimeImportTests(unittest.TestCase):
         del live_feeds.parallel_calls
         lock_focus.LOCK_MAX_ENTRY_PRICE = .75
         del kalshi_paper_engine.entry_price_limit
+        ai_core.enrich_history_core = None
+        research_lab.fit_guarded_calibrator = None
         try:
             with self.assertRaises(ImportError):
                 exec('from live_feeds import load_live_feeds, parallel_calls', {})
@@ -31,8 +35,10 @@ class RuntimeImportTests(unittest.TestCase):
             self.assertEqual(background_paper.entry_price_limit('LOCK'), .93)
             self.assertEqual(background_paper.entry_price_limit('SCALP'), .75)
             self.assertTrue(lock_focus.AUTO_SCALPING_ENABLED)
+            self.assertTrue(callable(ai_core.enrich_history_core))
+            self.assertTrue(callable(research_lab.fit_guarded_calibrator))
         finally:
-            for module in (lock_focus, kalshi_paper_engine, background_paper, live_feeds):
+            for module in (lock_focus, kalshi_paper_engine, background_paper, live_feeds, ai_core, research_lab):
                 importlib.reload(module)
 
     def test_full_app_starts_at_private_access_without_import_error(self):

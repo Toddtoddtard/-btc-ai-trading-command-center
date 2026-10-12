@@ -8,21 +8,17 @@ book/funding/open-interest and Kalshi contracts are not available in the spot
 archive, so those specialists remain neutral and are explicitly reported as
 non-replayable rather than fabricated.
 """
-import io
 import json
 import os
 import time
-import zipfile
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.request import Request, urlopen
-
-import numpy as np
 import pandas as pd
 
 from ai_core import enrich_history_core, run_specialists_core
-from council_v4 import EXCLUDED_FROM_COUNCIL, council_vote
+from council_v4 import EXCLUDED_FROM_COUNCIL, _action_direction, _direction, council_vote
+from historical_backtest import fetch_month, month_iter, month_url
 
 SYMBOL = "BTCUSDT"
 INTERVAL = "1m"
@@ -35,37 +31,6 @@ REPLAYABLE = [
     "Whale AI", "Historical Pattern AI", "FVG / MACD AI",
 ]
 NON_REPLAYABLE = ["Liquidity AI", "Derivatives AI", "Kalshi Context AI"]
-
-
-def month_iter(start_year, start_month, end_year, end_month):
-    y, m = start_year, start_month
-    while (y, m) <= (end_year, end_month):
-        yield y, m
-        m += 1
-        if m == 13:
-            y += 1
-            m = 1
-
-
-def month_url(year, month):
-    stem = f"{SYMBOL}-{INTERVAL}-{year}-{month:02d}.zip"
-    return f"{BASE}/{SYMBOL}/{INTERVAL}/{stem}"
-
-
-def fetch_month(year, month):
-    req = Request(month_url(year, month), headers={"User-Agent": "BTC-AI-Council-v4/1.0"})
-    with urlopen(req, timeout=45) as response:
-        raw = response.read()
-    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-        data = zf.read(zf.namelist()[0])
-    cols = ["open_time", "open", "high", "low", "close", "volume", "close_time", "qv", "trades", "tb", "tq", "ignore"]
-    df = pd.read_csv(io.BytesIO(data), header=None, names=cols)
-    ot = pd.to_numeric(df["open_time"], errors="coerce")
-    unit = "us" if float(ot.dropna().median()) > 1e14 else "ms"
-    df["time"] = pd.to_datetime(ot, unit=unit, utc=True, errors="coerce")
-    for c in ("open", "high", "low", "close", "volume", "qv", "tb", "tq"):
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df.dropna(subset=["time", "open", "high", "low", "close", "volume"])
 
 
 def regime_from_hist(hist):
@@ -98,7 +63,7 @@ def flow_proxy(raw_recent):
 
 
 def stats_bucket():
-    return {"samples": 0, "hits": 0, "calls": 0, "standalone_hits": 0, "unique_saves": 0, "harmful_flips": 0}
+    return defaultdict(int)
 
 
 def main():
@@ -114,11 +79,13 @@ def main():
     pending = deque()
     months_loaded, months_failed = [], []
     total = hits = waits = 0
+    missing_deadline_prices = 0
     traded = traded_hits = 0
     by_regime = defaultdict(lambda: {"samples": 0, "hits": 0, "trades": 0, "trade_hits": 0})
     bot_stats = defaultdict(stats_bucket)
     started = time.time()
     last_eval_minute = None
+    last_timestamp = None
 
     for year, month in month_iter(start_year, start_month, end_year, end_month):
         try:
@@ -130,6 +97,9 @@ def main():
 
         for r in month_df.itertuples(index=False):
             ts = pd.Timestamp(r.time)
+            if last_timestamp is not None and ts - last_timestamp != pd.Timedelta(minutes=1):
+                raw_buffer.clear()
+            last_timestamp = ts
             raw_buffer.append({
                 "time": ts, "open": float(r.open), "high": float(r.high), "low": float(r.low),
                 "close": float(r.close), "volume": float(r.volume),
@@ -137,16 +107,19 @@ def main():
             })
 
             while pending and pending[0][0] <= ts.value:
-                _, start_px, vote, specialist_scores, regime = pending.popleft()
+                deadline, start_px, vote, specialist_results, regime = pending.popleft()
+                if deadline != ts.value:
+                    missing_deadline_prices += 1
+                    continue
                 actual_dir = 1 if float(r.close) >= start_px else -1
-                full_dir = 1 if vote["base_score"] > 0.03 else -1 if vote["base_score"] < -0.03 else 0
+                full_dir = _action_direction(vote)
                 full_hit = int(full_dir != 0 and full_dir == actual_dir)
                 total += 1
                 hits += full_hit
                 rb = by_regime[regime]
                 rb["samples"] += 1
                 rb["hits"] += full_hit
-                if vote["action"] == "WAIT":
+                if not full_dir:
                     waits += 1
                 else:
                     traded += 1
@@ -154,24 +127,35 @@ def main():
                     rb["trades"] += 1
                     rb["trade_hits"] += full_hit
 
-                for name, score in specialist_scores.items():
+                for name, call in specialist_results.items():
                     if name in EXCLUDED_FROM_COUNCIL or name in NON_REPLAYABLE:
                         continue
                     st = bot_stats[name]
                     st["samples"] += 1
-                    d = 1 if score > 0.03 else -1 if score < -0.03 else 0
+                    d = _direction(call.get("score"))
                     if d:
                         st["calls"] += 1
                         st["standalone_hits"] += int(d == actual_dir)
-                    without_results = {k: {"score": v, "confidence": 0.70} for k, v in specialist_scores.items() if k != name}
-                    without = council_vote(without_results, {}, regime)
-                    wd = 1 if without["base_score"] > 0.03 else -1 if without["base_score"] < -0.03 else 0
+                    without = council_vote(specialist_results, {}, regime, exclude={name})
+                    wd = _action_direction(without)
                     without_hit = int(wd != 0 and wd == actual_dir)
+                    st["full_calls"] += int(full_dir != 0)
+                    st["full_hits"] += full_hit
+                    st["without_calls"] += int(wd != 0)
                     st["hits"] += without_hit
-                    if full_hit and not without_hit:
-                        st["unique_saves"] += 1
-                    if (not full_hit) and without_hit:
-                        st["harmful_flips"] += 1
+                    if full_dir and wd:
+                        st["paired_calls"] += 1
+                        st["unique_saves"] += int(full_hit and not without_hit)
+                        st["harmful_flips"] += int(not full_hit and without_hit)
+                    elif full_dir or wd:
+                        st["abstention_changes"] += 1
+                    if full_dir or wd:
+                        st["paired_decisions"] += 1
+                        full_value = (1 if full_hit else -1) if full_dir else 0
+                        without_value = (1 if without_hit else -1) if wd else 0
+                        st["utility_delta"] += full_value - without_value
+                        st["beneficial_decisions"] += int(full_value > without_value)
+                        st["harmful_decisions"] += int(full_value < without_value)
 
             if len(raw_buffer) < 60:
                 continue
@@ -193,31 +177,40 @@ def main():
             )
             regime = regime_from_hist(hist)
             vote = council_vote(results, {}, regime)
-            scores = {name: float(item.get("score", 0.0)) for name, item in results.items()}
-            pending.append((ts.value + 15 * 60 * 1_000_000_000, float(r.close), vote, scores, regime))
+            pending.append((ts.value + 15 * 60 * 1_000_000_000, float(r.close), vote, results, regime))
 
     bots = []
-    full_acc = hits / total if total else None
     for name, st in bot_stats.items():
         n = st["samples"]
-        without_acc = st["hits"] / n if n else None
+        full_acc = st["full_hits"] / st["full_calls"] if st["full_calls"] else None
+        without_acc = st["hits"] / st["without_calls"] if st["without_calls"] else None
+        paired = st["paired_calls"]
+        decisions = st["paired_decisions"]
         bots.append({
             "name": name,
             "samples": n,
             "standalone_accuracy": st["standalone_hits"] / st["calls"] if st["calls"] else None,
             "full_council_accuracy": full_acc,
             "without_bot_accuracy": without_acc,
-            "marginal_accuracy": (full_acc - without_acc) if full_acc is not None and without_acc is not None else None,
-            "unique_save_rate": st["unique_saves"] / n if n else None,
-            "harmful_flip_rate": st["harmful_flips"] / n if n else None,
+            "full_council_calls": st["full_calls"],
+            "without_bot_calls": st["without_calls"],
+            "paired_calls": paired,
+            "marginal_accuracy": (st["unique_saves"] - st["harmful_flips"]) / paired if paired else None,
+            "unique_save_rate": st["unique_saves"] / paired if paired else None,
+            "harmful_flip_rate": st["harmful_flips"] / paired if paired else None,
+            "abstention_changes": st["abstention_changes"],
+            "paired_decisions": decisions,
+            "beneficial_decisions": st["beneficial_decisions"],
+            "harmful_decisions": st["harmful_decisions"],
+            "marginal_decision_utility": st["utility_delta"] / decisions if decisions else None,
         })
-    bots.sort(key=lambda x: (x["marginal_accuracy"] if x["marginal_accuracy"] is not None else -999), reverse=True)
+    bots.sort(key=lambda x: (x["marginal_decision_utility"] if x["marginal_decision_utility"] is not None else -999), reverse=True)
 
     regime_out = {}
     for name, b in sorted(by_regime.items()):
         regime_out[name] = {
             **b,
-            "accuracy": b["hits"] / b["samples"] if b["samples"] else None,
+            "accuracy": b["trade_hits"] / b["trades"] if b["trades"] else None,
             "trade_accuracy": b["trade_hits"] / b["trades"] if b["trades"] else None,
         }
 
@@ -229,20 +222,31 @@ def main():
         "period_requested_years": YEARS,
         "horizon_minutes": 15,
         "walk_forward": True,
+        "label_basis": "archived_btc_15m_direction_v1",
+        "decision_basis": "gated_council_subdecision_with_empty_learning_state",
+        "decision_utility": "correct +1, incorrect -1, WAIT 0; no trade-profit inference",
+        "actual_master_execution_replayed": False,
+        "affects_execution": False,
+        "paper_only": True,
+        "missing_deadline_prices": missing_deadline_prices,
+        "ungraded_pending": len(pending),
         "replayable_specialists": REPLAYABLE,
         "non_replayable_specialists": NON_REPLAYABLE,
         "limitations": [
             "Whale AI uses Binance taker-buy quote-volume flow as a historical proxy, not raw aggTrades.",
             "Historical futures depth/funding/open-interest are unavailable in the spot archive and are not fabricated.",
             "Historical Kalshi KXBTC15M context is unavailable in the Binance archive and is not fabricated.",
-            "This report measures signal direction; it is not a claim of profitable execution after all real-world costs.",
+            "Labels measure archived BTC price direction at the exact 15-minute deadline, not official Kalshi settlement.",
+            "Council subdecisions use empty learning state; actual Master execution and trade P/L are not replayed.",
+            "Missing deadline candles are skipped; later prices cannot substitute for the requested horizon.",
         ],
         "months_loaded": months_loaded,
         "months_failed": months_failed,
         "overall": {
             "samples": total,
             "direction_hits": hits,
-            "direction_accuracy": hits / total if total else None,
+            "direction_calls": traded,
+            "direction_accuracy": hits / traded if traded else None,
             "waits": waits,
             "trade_signals": traded,
             "trade_signal_accuracy": traded_hits / traded if traded else None,

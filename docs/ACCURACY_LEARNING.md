@@ -54,3 +54,19 @@ GitHub Actions scheduling remains best effort. This change does not make its
 cron a guaranteed continuous worker, and delayed runs cannot recreate missed
 live order-book observations. The candle catch-up learner remains responsible
 for recovering closed-minute price history.
+
+## Repository audit follow-up
+
+The subsequent r98 audit adds fee-aware expected settlement economics to new
+LOCK entries. An inactive terminal calibrator uses the midpoint; buying at the
+ask plus fees does not establish positive expected return. Such calls can remain
+directional forecasts while paper entry is blocked. Existing entry caps and all
+specialists remain intact. A later paper win never relabels an opposite original
+forecast or rewrites its Binance proxy reward.
+
+Research calibration now follows capture/result observation chronology and uses
+independent markets, not repeated phase captures, for activation. The older
+archive council ablation also compares the actual gated subdecisions with their
+original specialist confidences. It remains archived BTC research, not historical
+Master fills. See `REPOSITORY_AUDIT_2026-10-12.md` and
+`audit-evidence-2026-10-12.json` for the measured retained-data scope and limits.
