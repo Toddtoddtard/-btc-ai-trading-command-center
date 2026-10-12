@@ -79,7 +79,9 @@ def reconcile_specialists(state):
             'specialists': copy.deepcopy(state.get('specialists', {})),
             'reason': 'Mixed labels and neutral penalties; retained official evidence is authoritative.'}
     names = set(state.get('specialists', {}))
-    records = list(official_snapshots(state))
+    # EWMA and regime weights must follow market chronology, not storage order.
+    records = sorted(official_snapshots(state),
+                     key=lambda pair: (float(pair[0].get('opened_at') or 0), str(pair[0].get('ticker') or '')))
     names.update(n for s,_ in records for n in s['snapshot']['specialists'])
     for name in names:
         learned = state.setdefault('specialists', {}).setdefault(name, {})
