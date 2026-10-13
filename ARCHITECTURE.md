@@ -24,8 +24,15 @@ The active scheduled entrypoint is `learner_v31.py`, supported by `learner.py`
 and `learner_v3.py`. `.github/workflows/learn.yml` runs learning, enrichment and
 `background_paper.py`, then publishes the persistent ledger and model state to
 `learning-state`. The dashboard reads that state through `shared_learning.py`.
-Scheduled requests are every five minutes, but actual GitHub execution is best
-effort; source timestamps determine whether a displayed snapshot is current.
+After its first validated publication, `worker_session.py` repeats the same
+pipeline for a bounded 55-minute session, starting cycles every 150 seconds
+and publishing each validated checkpoint. Publication uses a separate Git
+worktree, so runner code remains on its original main revision and unrelated
+state files are preserved. Ordinary pushes and bounded rebase retries retain
+concurrent unrelated branch updates; conflicting ledger writes fail visibly.
+Scheduled requests remain every five minutes with one pending run behind the
+active session. GitHub startup remains best effort; source timestamps still
+determine freshness, and the watchdog handles stopped sessions.
 
 
 ## Shared-model guarantee

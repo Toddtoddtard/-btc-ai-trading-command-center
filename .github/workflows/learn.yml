@@ -55,6 +55,9 @@ on:
       - 'tests/test_multi_asset_paper.py'
       - 'tests/test_background_paper.py'
       - 'kalshi_paper_engine.py'
+      - 'worker_session.py'
+      - 'scripts/validate_learning_state.py'
+      - 'tests/test_worker_session.py'
       - '.github/workflows/learn.yml'
   schedule:
     # Avoid the top-of-hour scheduling peak. GitHub cron is still best effort.
@@ -65,13 +68,12 @@ permissions:
 
 concurrency:
   group: btc-ai-learning-state
-  queue: max
   cancel-in-progress: false
 
 jobs:
   learn:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 70
     steps:
       - name: Checkout app code
         uses: actions/checkout@v4
@@ -86,7 +88,7 @@ jobs:
       - name: Validate learner code
         run: python -m py_compile learner.py learner_v3.py learner_v31.py lock_focus.py forward_outlook.py reliability_v31.py ai_core.py horizon_models.py multi_timeframe.py kalshi_microstructure.py market_research.py council_v4.py bot_intelligence_report.py specialist_knowledge_v5.py enrich_learning_state_v5.py profitability_v5.py time_rewards_v1.py audit_scorecard_v7.py background_paper.py multi_asset_paper.py external_teacher_lab.py research_lab.py research_dashboard.py shared_learning.py tests/test_horizon_models.py tests/test_multi_timeframe.py tests/test_train_horizon_models.py tests/test_audit_v6.py tests/test_market_research.py tests/test_background_paper.py tests/test_multi_asset_paper.py tests/test_external_teacher_lab.py tests/test_research_lab.py tests/test_lock_focus.py tests/test_forward_outlook.py tests/test_shared_learning.py
       - name: Verify candle catch-up and leakage protection
-        run: python -m unittest tests.test_candle_learning tests.test_signal_education -v
+        run: python -m unittest tests.test_worker_session tests.test_worker_watchdog tests.test_candle_learning tests.test_signal_education -v
       - name: Verify shared council and official scoring
         run: python -m unittest tests.test_settlement_predictor tests.test_council_parity tests.test_council_evidence tests.test_official_calibration tests.test_state_preservation tests.test_persistent_journal -v
       - name: Run audit v6 regression tests
@@ -160,135 +162,15 @@ jobs:
       - name: Run persistent Gold, Gas, ZEC and WTI AUTO PAPER cycles
         run: python multi_asset_paper.py --state /tmp/learning_state.json
       - name: Validate generated learning state
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path('/tmp/learning_state.json')
-          data=json.loads(p.read_text())
-          assert data.get('version') == 31
-          assert data.get('status', {}).get('worker_ok') is True
-          assert data.get('status', {}).get('shared_core') is True
-          assert data.get('status', {}).get('learning_version') == 31
-          assert data.get('status', {}).get('strict_expiry_grading') is True
-          assert data.get('status', {}).get('bot_intelligence_v4_ok') is True
-          assert data.get('status', {}).get('specialist_self_learning_v5') is True
-          assert data.get('status', {}).get('intelligence_version') in {6, 7, 9, 10}
-          assert data.get('status', {}).get('regime_tagged_specialist_history') is True
-          assert data.get('status', {}).get('current_regime') in {'HIGH_VOL', 'TREND_UP', 'TREND_DOWN', 'LOW_VOL_RANGE', 'RANGE'}
-          assert data.get('status', {}).get('specialist_knowledge_regime') == data.get('status', {}).get('current_regime') or data.get('specialist_knowledge_v5', {}).get('regime') == data.get('pending', {}).get('regime')
-          assert 'Kalshi Context AI' in data.get('specialists', {})
-          assert 'Cross-Market Research AI' in data.get('specialists', {})
-          assert 'Event AI' not in data.get('specialists', {})
-          assert 'rolling' in data
-          assert 'regimes' in data
-          assert 'confidence_model' in data
-          assert 'wait_policy' in data
-          assert 'validation' in data
-          assert 'champion_challenger' in data
-          assert data.get('champion_challenger', {}).get('minimum_samples') == 20
-          assert data.get('champion_challenger', {}).get('required_streak') == 3
-          assert 'prediction_snapshots' in data
-          assert 'wait_counterfactual' in data
-          assert data.get('status', {}).get('research_lab_ok') is True
-          mode=data.get('btc_execution_mode', {})
-          assert mode.get('name') == 'BALANCED_CALLS'
-          assert mode.get('paper_only') is True
-          assert mode.get('auto_scalping_enabled') is True
-          assert mode.get('earliest_lock_seconds') == 900
-          assert mode.get('confidence_floor') == 0.68
-          assert mode.get('maximum_entry_price') == 0.93
-          assert mode.get('maximum_lock_entry_price') == 0.93
-          assert mode.get('maximum_scalp_entry_price') == 0.75
-          assert data.get('status', {}).get('btc_execution_mode') == 'BALANCED_CALLS'
-          assert data.get('status', {}).get('auto_scalping_enabled') is True
-          assert data.get('status', {}).get('schedule_target_minutes') == 10.0
-          assert data.get('status', {}).get('schedule_late_after_minutes') == 20.0
-          assert data.get('status', {}).get('scheduler') == 'GitHub Actions best effort'
-          assert data.get('status', {}).get('continuous_lock_evaluation') is True
-          assert isinstance(data.get('lock_gate_history', []), list)
-          assert data.get('lock_gate_stats', {}).get('paper_only') is True
-          assert data.get('horizon_models', {}).get('paper_only') is True
-          assert data.get('status', {}).get('horizon_models_paper_only') is True
-          assert data.get('horizon_models', {}).get('version') == 2
-          assert data.get('horizon_models', {}).get('minimum_directional_accuracy') == 0.70
-          assert data.get('status', {}).get('higher_timeframes_requested') == 7
-          context=data.get('horizon_models', {}).get('latest_context', {})
-          assert len(context.get('features', {})) == 7
-          assert all(row.get('closed') is True for row in context.get('details', {}).values())
-          outlooks=data.get('next_market_outlooks', [])
-          assert len(outlooks) in {0, 3}
-          assert all(row.get('research_only') is True for row in outlooks)
-          assert all(row.get('executable') is False for row in outlooks)
-          assert isinstance(data.get('forward_outlook_stats', {}), dict)
-          assert data.get('research_lab', {}).get('paper_only') is True
-          assert data.get('research_lab', {}).get('affects_execution') is False
-          assert data.get('research_lab', {}).get('version') == 3
-          guarded=data.get('research_lab', {}).get('guarded_calibrator', {})
-          assert guarded.get('version') == 1
-          assert guarded.get('affects_execution') is False
-          assert len(data.get('research_lab', {}).get('policies', {})) == 8
-          league=data.get('research_lab', {}).get('strategy_league', {})
-          assert league.get('minimum_samples') == 100
-          assert league.get('required_streak') == 3
-          assert league.get('active_policy') == 'Current 75 / 5'
-          assert league.get('affects_execution') is False
-          teachers=data.get('research_lab', {}).get('external_teacher_lab', {})
-          assert teachers.get('paper_only') is True
-          assert teachers.get('affects_execution') is False
-          assert teachers.get('minimum_samples') == 100
-          assert teachers.get('required_streak') == 3
-          assert len(teachers.get('teachers', {})) == 5
-          assert data.get('specialist_accounting', {}).get('basis') == 'official_kalshi_directional_calls_v1'
-          assert data.get('bot_intelligence_v4', {}).get('label_basis') == 'official_kalshi_directional_calls_v1'
-          assert 'bot_intelligence_v4' in data
-          assert data.get('background_paper', {}).get('paper_only') is True
-          assert data.get('background_paper', {}).get('worker_ok') is True
-          multi=data.get('multi_asset_paper', {})
-          assert multi.get('version') == 2
-          assert multi.get('paper_only') is True
-          assert multi.get('real_money_execution') is False
-          assert multi.get('enabled') is True
-          assert set(multi.get('assets', {})) == {'gold', 'gas', 'zec', 'wti'}
-          assert all(row.get('enabled') is True for row in multi.get('assets', {}).values())
-          assert all(row.get('starting_cash') == 500.0 for row in multi.get('assets', {}).values())
-          assert all(row.get('risk_mode') in {'LEARNING', 'STANDARD', 'PROBATION'} for row in multi.get('assets', {}).values())
-          assert isinstance(data.get('bot_intelligence_v4', {}).get('ranking', []), list)
-          assert 'specialist_knowledge_v5' in data
-          assert isinstance(data.get('specialist_knowledge_v5', {}).get('bots', {}), dict)
-          assert data.get('audit_v6_scorecard', {}).get('baseline_total_samples') == 15
-          assert data.get('audit_v6_scorecard', {}).get('milestones') == [25, 50, 100, 250, 500, 1000]
-          before=int(data.get('status', {}).get('samples_before_run', 0))
-          after=int(data.get('status', {}).get('samples_after_run', 0))
-          assert after >= before, (before, after)
-          if data.get('status', {}).get('historical_specialist_v7_loaded'):
-              historical = data.get('historical_specialist_knowledge_v7', {})
-              assert historical.get('evaluated_windows', 0) >= 10000
-              historical_version = historical.get('version')
-              assert historical_version in {7, 9, 10}
-              expected_intelligence_version = int(historical_version)
-              assert data.get('status', {}).get('intelligence_version') == expected_intelligence_version
-          print('learning-state v3.1 + v4 + Specialist Intelligence validation passed; samples', before, '->', after)
-          PY
-      - name: Publish learning state
-        shell: bash
-        run: |
-          set -e
-          git config user.name "btc-ai-learning-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git fetch --depth=1 origin +learning-state:refs/remotes/origin/learning-state
-          if git show-ref --verify --quiet refs/remotes/origin/learning-state; then
-            git checkout -B learning-state refs/remotes/origin/learning-state
-          else
-            git checkout --orphan learning-state
-            git rm -rf . || true
-          fi
-          cp /tmp/learning_state.json ./learning_state.json
-          git add learning_state.json
-          if git diff --cached --quiet; then
-            echo "No learning-state change to publish."
-            exit 0
-          fi
-          git commit -m "Update BTC AI learning state"
-          git push origin learning-state --force-with-lease
-
+        run: python scripts/validate_learning_state.py
+      - name: Publish learning state without replacing runner code
+        run: python worker_session.py --publish-only
+      - name: Continue learning and paper checkpoints between scheduled starts
+        env:
+          LEARNING_STATE_INPUT: /tmp/previous_learning_state.json
+          LEARNING_STATE_OUTPUT: /tmp/learning_state.json
+          HORIZON_MODELS_INPUT: /tmp/horizon_models.json
+          HISTORICAL_SPECIALIST_INPUT: /tmp/historical_specialist_knowledge_v7.json
+          BACKGROUND_PAPER_CYCLES: "4"
+          BACKGROUND_PAPER_INTERVAL_SECONDS: "30"
+        run: python -u worker_session.py --minutes 55
