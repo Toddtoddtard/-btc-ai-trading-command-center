@@ -29,10 +29,10 @@ to cents, with the target. A single terminal Bitcoin price is a different event.
 
 ## Evidence and limits
 
-Eight focused regressions cover the average/spot distinction, cent threshold,
+Nine focused regressions cover the average/spot distinction, cent threshold,
 identity/freshness/rule rejection, missing final-minute seconds, closed candles,
 frozen independent scoring, label chronology, persistence and malformed state.
-Local repository runner: 377 tests, one skipped Streamlit startup dependency
+Local repository runner: 378 tests, one skipped Streamlit startup dependency
 check, no failures. The hosted suite must verify that startup check before merge.
 
 A live public-data smoke check returned a valid exact-contract prediction from

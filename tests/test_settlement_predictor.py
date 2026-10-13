@@ -78,6 +78,11 @@ class SettlementPredictorTests(unittest.TestCase):
         self.assertGreater(result['average_probability_yes'], .5)
         self.assertEqual(result['comparison'], 'rounded final-minute average >= target')
 
+    def test_last_reference_sample_is_observed_not_forecast_past_expiry(self):
+        result = model.predict(market(), feed(EXPIRY-1), {}, now=EXPIRY-1)
+        self.assertLess(result['average_sigma_dollars'], 1e-8)
+        self.assertEqual(result['expected_final_average'], 83000)
+
     def test_research_saves_exact_frozen_prediction(self):
         from research_lab import register_shadow
         prediction = model.predict(market(), feed(EXPIRY-600), {}, now=EXPIRY-600)

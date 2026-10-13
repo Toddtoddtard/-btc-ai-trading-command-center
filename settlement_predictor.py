@@ -85,13 +85,15 @@ def predict(market, reference, state, now=None, council_score=0.0):
     known = {}
     for tick in reference.get('ticks') or []:
         ts, price = _finite(tick.get('timestamp')), _finite(tick.get('price'))
-        if ts is not None and price is not None and price > 1000 and start <= ts < now:
+        if ts is not None and price is not None and price > 1000 and start <= ts <= timestamp and ts < expiry:
             known[int(ts)] = price
-    completed = range(start, min(int(now), end)) if now > start else range(0)
+    if start <= timestamp < expiry:
+        known[int(timestamp)] = spot
+    completed = range(start, min(int(now)+1, end)) if now >= start else range(0)
     if any(second not in known for second in completed):
         return dict(unavailable, reason='Missing elapsed final-minute reference samples')
-    future = range(max(start, int(now)), end)
-    delays = [max(0.001, second+1-timestamp) for second in future]
+    future = range(max(start, int(now)+1), end)
+    delays = [max(0.001, second-timestamp) for second in future]
     mean = (sum(known[s] for s in completed) + len(delays)*spot)/60
     # Cov(B(t_i), B(t_j)) = min(t_i,t_j). The sorted increment form
     # computes variance of the 60-sample average without a covariance matrix.
