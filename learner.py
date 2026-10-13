@@ -328,7 +328,7 @@ def market():
     return {
         "ticker": ticker, "expires_at": expires, "target": float(target), "prob": prob,
         "yes_bid": yes_bid, "yes_ask": yes_ask, "no_bid": no_bid, "no_ask": no_ask,
-        "orderbook": book,
+        "orderbook": book, "strike_type": item.get("strike_type"),
     }
 
 

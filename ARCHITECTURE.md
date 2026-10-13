@@ -51,7 +51,9 @@ weight change. `outcome_timing.py` uses recorded observation times, or an explic
 assumed two-minute legacy settlement lag. See `docs/COUNCIL_REVIEW.md` for scope
 and limitations.
 
-`contract_probability.py` converts the settlement question into a calibrated binary probability using strike distance measured in remaining-window volatility, the council score, and weighted order-book pressure. Kalshi's midpoint remains the dominant anchor until independent walk-forward evidence proves incremental Brier value.
+`contract_probability.py` supplies the existing execution probability using strike distance measured in remaining-window volatility, the council score, and weighted order-book pressure. Kalshi's midpoint remains the dominant anchor until independent walk-forward evidence proves incremental Brier value.
+
+`settlement_predictor.py` is a separate shadow challenger for the exact active KXBTC15M contract: the rounded final 60-second reference average must be at least its target for YES. It uses fresh matching Kalshi event-chart ticks and closed reference candles, accounts for the already observed final-minute prefix, and approximates remaining average uncertainty with arithmetic Brownian motion. Missing prefix seconds, unsupported strike rules, stale data and contract mismatches return unavailable. The worker freezes its probability/features into existing research observations; only official results with an observed timestamp can train a bounded ridge residual after 100 distinct markets. Stored forecasts supply an independent earliest-per-market accuracy/Brier/calibration scorecard. This experimental model never changes paper execution approval. Legacy Binance snapshots are not backfilled as official reference features, and the new predictor has no historical performance claim.
 
 ## Kalshi target handling
 

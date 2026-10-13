@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 for _runtime_module in (
     "access_control", "lock_focus", "kalshi_paper_engine",
     "outcome_timing", "contribution_evidence", "contract_calibration", "reliability_v31", "council_v4",
-    "research_lab", "horizon_models", "ai_core",
+    "kalshi_chart_data", "settlement_predictor", "research_lab", "horizon_models", "ai_core",
     "council_accounting", "specialist_knowledge_v5",
     "background_paper", "pro_trade_ticket", "live_feeds", "shared_learning",
 ):
@@ -54,6 +54,7 @@ from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration
+from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
 from research_dashboard import render_research_dashboard
 from background_paper import (
     latest_shared_call_entry,
@@ -5267,6 +5268,15 @@ def live_dashboard():
     risk = risk_evaluate(decision, account, hist, futures)
 
     _shared_learning_state = fetch_remote_learning_state() or {}
+    _settlement_market = _display_context.get("market") or {}
+    _settlement_expiry = kalshi_close_timestamp(_settlement_market)
+    _settlement_prediction = predict_settlement(
+        dict(ticker=_display_context.get("ticker"), expires_at=_settlement_expiry,
+             target=_display_context.get("target"), prob=_display_context.get("up_probability"),
+             strike_type=_settlement_market.get("strike_type"),
+             orderbook=_display_context.get("orderbook") or {}),
+        _display_feed, _shared_learning_state, council_score=decision.get("base_score", 0.),
+    )
     _shared_paper = _shared_learning_state.get("background_paper", {})
     auto_result = {
         "event": False,
@@ -5349,6 +5359,34 @@ def live_dashboard():
         st.caption("Current BTC price and target distance use Kalshi's chart feed. Technical candles and order flow use Binance.")
     else:
         st.warning("Live Kalshi price unavailable. Current-price cards show Unavailable; internal spot-proxy diagnostics are not Kalshi prices. New LOCK qualification is blocked until the Kalshi feed recovers.")
+    st.markdown("#### Kalshi 15-minute settlement prediction")
+    if _settlement_prediction.get("available"):
+        _p_yes = _settlement_prediction["probability_yes"]
+        _outcome = _settlement_prediction["outcome"]
+        st.metric("Predicted final outcome", _outcome,
+                  help="Experimental prediction of this exact contract's official YES/NO settlement; not trade confidence.")
+        st.caption(
+            f"YES {_p_yes:.1%} • NO {1-_p_yes:.1%} • "
+            f"Target {fmt_money(_settlement_prediction['target'])} • "
+            f"Kalshi market YES {_settlement_prediction['market_probability_yes']:.1%}"
+        )
+        st.caption(
+            f"{_settlement_prediction['ticker']} • closes "
+            + datetime.fromtimestamp(_settlement_prediction['expires_at'], timezone.utc).strftime("%H:%M:%S UTC")
+            + " • YES means the rounded final-minute reference average is at least the target."
+        )
+        st.caption("Shadow estimate, not yet proven accurate. Official settled outcomes train a bounded correction; this forecast does not authorize paper entries.")
+    else:
+        st.info("Settlement prediction unavailable: " + _settlement_prediction.get("reason", "fresh contract data required"))
+    _settlement_score = settlement_scorecard(_shared_learning_state)
+    if _settlement_score["samples"]:
+        st.caption(
+            f"Frozen forecasts: {_settlement_score['samples']} independent settled markets • "
+            f"YES/NO accuracy {_settlement_score['accuracy']:.1%} • "
+            f"Brier {_settlement_score['brier']:.4f} versus market {_settlement_score['market_brier']:.4f} (lower is better)"
+        )
+    else:
+        st.caption("No prospective official settlement results yet; historical Bitcoin candle accuracy is not this predictor's accuracy.")
     render_learning_freshness(_shared_learning_state)
 
     st.caption(

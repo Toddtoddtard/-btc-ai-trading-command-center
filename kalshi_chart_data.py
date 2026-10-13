@@ -55,6 +55,7 @@ def parse_chart(payload, event, now=None):
     if not rows or timestamp - max(candles) > 120:
         raise ValueError('Kalshi chart candles are missing or stale')
     return dict(available=True, price=price, timestamp=timestamp, candles=rows,
+                ticks=[dict(timestamp=t, price=v) for t, v in sorted(dict(points).items())],
                 event_ticker=event, source='Kalshi BTC/USD chart feed')
 
 

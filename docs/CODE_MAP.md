@@ -8,6 +8,7 @@ Start here for a specific issue. This is a navigation guide, not a current healt
 | Stale learning or paper figures | `shared_learning.py`; `app.py`: `refresh_learning_summary` | `test_shared_learning`, `test_dashboard_freshness` |
 | Specialist votes, council weights, abstentions | `council_v4.py`, `contribution_evidence.py`, `specialist_knowledge_v5.py`, `ai_core.py`, `reliability_v31.py`; `docs/COUNCIL_REVIEW.md` | `test_council_v4`, `test_council_parity`, `test_council_evidence`, `test_official_calibration` |
 | Official outcome labels and calibration | `council_accounting.py`, `outcome_timing.py`, `contract_calibration.py`, `contract_probability.py`; `docs/ACCURACY_LEARNING.md` | `test_official_calibration`, `test_council_evidence`, `test_contract_probability` |
+| Exact 15-minute YES/NO settlement challenger | `settlement_predictor.py`; `kalshi_chart_data.py`; worker captures in `research_lab.py`; main dashboard in `app.py` | `test_settlement_predictor`, `test_kalshi_chart_data` |
 | LOCK/SCALP qualification | `lock_focus.py`, `pro_trade_ticket.py`; app/learner callers | `test_lock_focus`, `test_entry_caps`, `test_contract_regressions` |
 | Persistent paper balance, positions, settlements | `background_paper.py`, shared helpers in `kalshi_paper_engine.py`; `app.py` consumes `shared_paper_summary` | `test_background_paper`, `test_paper_recovery`, `test_state_preservation` |
 | Journal correctness and resolved counts | `prediction_journal.py`, `council_accounting.py` | `test_persistent_journal`, `test_journal_integration` |

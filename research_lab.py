@@ -386,6 +386,10 @@ def register_shadow(state, pending, market_info):
         "selected_ask": ask,
         "policies": policies,
     }
+    # Freeze the actual prospective output; later weights cannot rewrite it.
+    if pending.get("settlement_prediction"):
+        import copy
+        observation["settlement_prediction"] = copy.deepcopy(pending["settlement_prediction"])
     observation["external_teachers"] = build_teacher_calls(lab, pending, market_info)
     observation["named_signals"] = pending.get("named_signals", [])
     lab["pending"].append(observation)
