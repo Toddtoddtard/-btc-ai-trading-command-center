@@ -4,7 +4,7 @@ Start here for a specific issue. This is a navigation guide, not a current healt
 
 | Area | Start with | Relevant checks |
 | --- | --- | --- |
-| Current BTC price, active target, main chart | `kalshi_chart_data.py`; `app.py`: `stable_kalshi_contract`, `refresh_market_chart`, `live_dashboard` | `test_kalshi_chart_data`, `test_chart_target`, `test_dashboard_freshness` |
+| Current BTC price, active target, main chart | `kalshi_chart_data.py`; `app.py`: `stable_kalshi_contract`, `refresh_market_chart`, `publish_market_chart_update`, `persistent_kalshi_market_chart`, `live_dashboard` | `test_kalshi_chart_data`, `test_chart_target`, `test_dashboard_freshness`, `test_smooth_chart`; `scripts/check_smooth_chart.py` |
 | Stale learning or paper figures | `shared_learning.py`; `app.py`: `refresh_learning_summary` | `test_shared_learning`, `test_dashboard_freshness` |
 | Specialist votes, council weights, abstentions | `council_v4.py`, `contribution_evidence.py`, `specialist_knowledge_v5.py`, `ai_core.py`, `reliability_v31.py`; `docs/COUNCIL_REVIEW.md` | `test_council_v4`, `test_council_parity`, `test_council_evidence`, `test_official_calibration` |
 | Official outcome labels and calibration | `council_accounting.py`, `outcome_timing.py`, `contract_calibration.py`, `contract_probability.py`; `docs/ACCURACY_LEARNING.md` | `test_official_calibration`, `test_council_evidence`, `test_contract_probability` |

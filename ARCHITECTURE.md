@@ -39,6 +39,15 @@ Five-minute cron requests and the stale-state watchdog remain recovery backups.
 GitHub runner startup is still best effort; source timestamps determine freshness,
 and a queued successor is never reported as proof of a fresh publication.
 
+The market chart mounts once outside the live fragments. The dashboard's refresh
+cadence (one second by default) sends a compact same-origin data packet from a
+zero-height Streamlit component into that retained chart. Plotly updates traces
+in place, retaining zoom and the selected prediction horizon. The server chart
+feed is cached for one second; browser-side Kalshi polling remains a fallback.
+Only the forming candle incorporates the latest observed tick. Closed history
+and learning/paper source timestamps retain their original meaning; a one-second
+display update does not imply a new completed outcome or worker publication.
+
 
 ## Shared-model guarantee
 

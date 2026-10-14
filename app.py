@@ -752,7 +752,7 @@ def fetch_kalshi_reference_price():
     return fetch_kalshi_reference()
 
 
-@st.cache_data(ttl=2, show_spinner=False)
+@st.cache_data(ttl=1, show_spinner=False)
 def fetch_kalshi_chart(market_ticker):
     return fetch_chart(market_ticker)
 
@@ -4275,13 +4275,13 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         let targetBusy = false;
 
         const learning = initial.learning || {{}};
-        const W_RET3 = Number(learning.w_ret3 ?? 0.46);
-        const W_RET8 = Number(learning.w_ret8 ?? 0.34);
-        const W_RET15 = Number(learning.w_ret15 ?? 0.20);
-        const MOMENTUM_SCALE = Number(learning.momentum_scale ?? 2.20);
-        const TARGET_INFLUENCE = Number(learning.target_influence ?? 0.18);
-        const MODEL_BIAS = Number(learning.bias ?? 0.0);
-        const HORIZON_MODELS = learning.horizon_models || {{}};
+        let W_RET3 = Number(learning.w_ret3 ?? 0.46);
+        let W_RET8 = Number(learning.w_ret8 ?? 0.34);
+        let W_RET15 = Number(learning.w_ret15 ?? 0.20);
+        let MOMENTUM_SCALE = Number(learning.momentum_scale ?? 2.20);
+        let TARGET_INFLUENCE = Number(learning.target_influence ?? 0.18);
+        let MODEL_BIAS = Number(learning.bias ?? 0.0);
+        let HORIZON_MODELS = learning.horizon_models || {{}};
 
         const paperBg = "{paper}";
         const plotBg = "{bg}";
@@ -4655,6 +4655,42 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 
         let lastChartPrice = NaN;
         let lastChartTimestamp = 0;
+        let serverFeed = null;
+        let serverReceivedAt = 0;
+
+        // Only accept updates from a sibling Streamlit component, never a
+        // different site. The chart iframe itself remains mounted.
+        window.addEventListener("message", event => {{
+            if (event.origin !== window.parent.location.origin) return;
+            const siblings = Array.from(window.parent.document.querySelectorAll("iframe"));
+            if (!siblings.some(frame => frame.contentWindow === event.source)) return;
+            const packet = event.data;
+            if (!packet || packet.type !== "btc-live-chart" || !packet.available) return;
+            const expiry = Date.parse(packet.close_time || "");
+            const stamp = Number(packet.timestamp) * 1000;
+            const now = Date.now();
+            if (!(expiry > now && expiry <= (Math.floor(now / 900000)+1)*900000) ||
+                !/^KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}}(?:-\\d+)?$/.test(packet.ticker) ||
+                !Number.isFinite(stamp) || stamp < lastChartTimestamp ||
+                now-stamp > 30000 || stamp > now+5000 ||
+                !Number.isFinite(packet.price) || packet.price <= 1000 ||
+                !Number.isFinite(packet.target) || packet.target <= 1000 ||
+                !Array.isArray(packet.candles) || !packet.candles.length) return;
+            serverFeed = packet;
+            serverReceivedAt = now;
+            currentTicker = packet.ticker;
+            currentTarget = packet.target;
+            kalshiWindowKey = Math.floor(now / 900000);
+            const learned = packet.learning || {{}};
+            W_RET3 = Number(learned.w_ret3 ?? W_RET3);
+            W_RET8 = Number(learned.w_ret8 ?? W_RET8);
+            W_RET15 = Number(learned.w_ret15 ?? W_RET15);
+            MOMENTUM_SCALE = Number(learned.momentum_scale ?? MOMENTUM_SCALE);
+            TARGET_INFLUENCE = Number(learned.target_influence ?? TARGET_INFLUENCE);
+            MODEL_BIAS = Number(learned.bias ?? MODEL_BIAS);
+            HORIZON_MODELS = learned.horizon_models || HORIZON_MODELS;
+            updateCandles();
+        }});
 
         function parseKalshiCandles(payload, event, now = Date.now()) {{
             const live = (payload || {{}}).live_data || {{}};
@@ -4682,6 +4718,13 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }}
 
         async function fetchCandles() {{
+            if (serverFeed && Date.now()-serverReceivedAt <= 2500 &&
+                Date.now()-Number(serverFeed.timestamp)*1000 <= 30000 &&
+                Date.parse(serverFeed.close_time) > Date.now()) {{
+                lastChartPrice = serverFeed.price;
+                lastChartTimestamp = Number(serverFeed.timestamp)*1000;
+                return serverFeed.candles;
+            }}
             const ticker = currentTicker || (serverClose > Date.now() ? initial.ticker : "");
             const match = String(ticker || "").match(/^(KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}})(?:-\\d+)?$/);
             if (!match) return null;
@@ -4802,7 +4845,29 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     return;
                 }}
 
-                const sig = signature(fresh);
+                // Extend only the forming candle with the latest observed
+                // Kalshi tick. Completed candles remain the official history.
+                const minute = Math.floor(lastChartTimestamp / 60000) * 60000;
+                if (Number.isFinite(lastChartPrice) && lastChartPrice > 1000) {{
+                    const observed = rows.find(row => Date.parse(row.time) === minute);
+                    if (Date.parse(lastBar.time) === minute) {{
+                        fresh[fresh.length-1] = {{...lastBar,
+                            high: Math.max(lastBar.high, lastChartPrice, observed?.high ?? lastBar.high),
+                            low: Math.min(lastBar.low, lastChartPrice, observed?.low ?? lastBar.low), close: lastChartPrice}};
+                    }} else if (Date.parse(lastBar.time) < minute) {{
+                        fresh.push({{time: new Date(minute).toISOString(), open: observed?.open ?? lastChartPrice,
+                            high: Math.max(observed?.high ?? lastChartPrice, lastChartPrice),
+                            low: Math.min(observed?.low ?? lastChartPrice, lastChartPrice), close: lastChartPrice}});
+                    }}
+                }}
+
+                status.textContent =
+                    "Kalshi BTC/USD $" + Number(lastChartPrice).toLocaleString(undefined, {{minimumFractionDigits:2,maximumFractionDigits:2}}) + " • " +
+                    (currentTicker ? currentTicker + " • " : "") +
+                    "price at " + new Date(lastChartTimestamp).toLocaleTimeString();
+                const sig = [signature(fresh), currentTicker, currentTarget,
+                    W_RET3, W_RET8, W_RET15, MOMENTUM_SCALE, TARGET_INFLUENCE, MODEL_BIAS,
+                    JSON.stringify(HORIZON_MODELS)].join("|");
                 if (sig === lastCandleSignature) return;
                 lastCandleSignature = sig;
                 rows = fresh;
@@ -4893,7 +4958,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }}
 
         // Candle updates are quick but do not rebuild the iframe.
-        const candleTimer = setInterval(updateCandles, 2000);
+        const candleTimer = setInterval(updateCandles, 1000);
 
         // Kalshi target only changes when a new 15-minute contract becomes active.
         const kalshiTimer = setInterval(updateTarget, 1000);
@@ -5130,25 +5195,46 @@ try:
 except Exception:
     _persistent_paper_entries = []
 
-@st.fragment(run_every=5)
+def publish_market_chart_update(context, live, learning):
+    """Send a small data packet to the mounted chart; never recreate it."""
+    packet = json.dumps(dict(
+        type="btc-live-chart", available=bool(live.get("available")),
+        ticker=context.get("ticker", ""), target=context.get("target"),
+        close_time=context.get("close_time"), price=live.get("price"),
+        timestamp=live.get("timestamp"), candles=live.get("candles", [])[-60:],
+        learning={key: learning[key] for key in (
+            "w_ret3", "w_ret8", "w_ret15", "momentum_scale", "target_influence",
+            "bias", "horizon_models",
+        ) if key in learning},
+    ), allow_nan=False).replace("</", "<\\/")
+    components.html(
+        "<script>const packet=" + packet + ";"
+        "for(const frame of window.parent.document.querySelectorAll('iframe')){"
+        "if(frame!==window.frameElement)frame.contentWindow.postMessage(packet,window.parent.location.origin);"
+        "}</script>", height=0, scrolling=False,
+    )
+
+
+# Mount once. Only the zero-height data sender below reruns; the graph, zoom
+# and forecast-horizon buttons survive every live update.
+persistent_kalshi_market_chart(
+    pd.DataFrame(), _persistent_ctx.get("target", np.nan),
+    _persistent_ctx.get("ticker", ""), dark_mode=dark_mode,
+    learning_state=get_learning_state(),
+    paper_entries=[],  # Legacy entry prices were recorded on a different feed.
+    initial_close=_persistent_ctx.get("close_time"),
+)
+
+
+@st.fragment(run_every=live_run_every)
 def refresh_market_chart():
     try:
         context = stable_kalshi_contract(fetch_kalshi_bitcoin_markets(), np.nan)
         live = fetch_kalshi_chart(context.get("ticker", ""))
     except Exception as exc:
         live = {"available": False, "error": str(exc)}
-    if not live.get("available"):
-        st.warning("Kalshi BTC chart unavailable or stale — retrying. No Binance price is substituted.")
-        return
-    hist = pd.DataFrame(live["candles"])
-    timestamp = datetime.fromtimestamp(live["timestamp"], timezone.utc)
-    st.caption(f"Kalshi BTC/USD ${live['price']:,.2f} • price timestamp {timestamp.strftime('%H:%M:%S UTC')}")
-    persistent_kalshi_market_chart(
-        hist, context.get("target", np.nan), context.get("ticker", ""),
-        dark_mode=dark_mode, learning_state=get_learning_state(),
-        paper_entries=[],  # Legacy entry prices were recorded on a different feed.
-        initial_close=context.get("close_time"),
-    )
+    if live.get("available"):
+        publish_market_chart_update(context, live, get_learning_state())
 
 refresh_market_chart()
 

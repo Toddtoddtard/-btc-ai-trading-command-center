@@ -18,6 +18,22 @@ def load_function(name, namespace):
 
 
 class DashboardFreshnessTests(unittest.TestCase):
+    def test_live_refresh_sends_data_without_recreating_chart(self):
+        frames = []
+        ns = dict(stable_kalshi_contract=lambda *a: {'ticker': 'test', 'target': 83000},
+                  fetch_kalshi_bitcoin_markets=lambda: {},
+                  fetch_kalshi_chart=lambda ticker: {'available': True, 'price': 83104,
+                      'timestamp': 1000, 'candles': []},
+                  get_learning_state=lambda: {}, np=np, pd=pd, datetime=datetime,
+                  timezone=timezone, dark_mode=True,
+                  publish_market_chart_update=lambda context, live, learning: frames.append(live['price']),
+                  persistent_kalshi_market_chart=Mock(),
+                  st=SimpleNamespace(warning=Mock(), caption=Mock()))
+        refresh = load_function('refresh_market_chart', ns)
+        refresh(); refresh()
+        self.assertEqual(frames, [83104, 83104])
+        ns['persistent_kalshi_market_chart'].assert_not_called()
+
     def test_expired_cached_target_is_unavailable_during_feed_outage(self):
         now = datetime(2026, 10, 11, 19, 30, tzinfo=timezone.utc).timestamp()
         session = {'kalshi_contract_snapshot': {'ticker': 'old', 'target': 83000,
