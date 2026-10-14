@@ -30,9 +30,14 @@ and publishing each validated checkpoint. Publication uses a separate Git
 worktree, so runner code remains on its original main revision and unrelated
 state files are preserved. Ordinary pushes and bounded rebase retries retain
 concurrent unrelated branch updates; conflicting ledger writes fail visibly.
-Scheduled requests remain every five minutes with one pending run behind the
-active session. GitHub startup remains best effort; source timestamps still
-determine freshness, and the watchdog handles stopped sessions.
+Before a successful main worker finishes, it calls `worker_watchdog.py` with
+its own run ID to dispatch one successor directly. The active-run check ignores
+only that finishing run and retains any other active or queued learner; workflow
+concurrency serializes ledger writers. Main push runs use an 12-minute session
+to exercise the first handoff promptly; subsequent workers use 55 minutes.
+Five-minute cron requests and the stale-state watchdog remain recovery backups.
+GitHub runner startup is still best effort; source timestamps determine freshness,
+and a queued successor is never reported as proof of a fresh publication.
 
 
 ## Shared-model guarantee

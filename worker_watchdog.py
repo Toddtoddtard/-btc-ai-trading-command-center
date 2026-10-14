@@ -18,11 +18,13 @@ def state_age(state, now):
     return max(0, now - updated.timestamp())
 
 
-def recovery_needed(state, runs, now):
-    """A stale state may request one run, but never duplicate active work."""
-    if any(r.get('head_branch') == 'main' and r.get('status') in ACTIVE for r in runs):
+def recovery_needed(state, runs, now, handoff_run_id=None):
+    """Recover stale work or queue a successor, never duplicate another run."""
+    if any(r.get('head_branch') == 'main' and r.get('status') in ACTIVE
+           and str(r.get('id')) != handoff_run_id for r in runs):
         return False
-    return state_age(state, now) >= 10 * 60
+    age = state_age(state, now)
+    return handoff_run_id is not None or age >= 10 * 60
 
 
 def main():
@@ -47,11 +49,15 @@ def main():
         runs.extend(api('/actions/workflows/learn.yml/runs?branch=main&status=' + status + '&per_page=100').get('workflow_runs', []))
     now = datetime.now(timezone.utc).timestamp()
     verify_only = os.getenv('RECOVERY_VERIFY_ONLY') == 'true'
-    needed = not verify_only and recovery_needed(state, runs, now)
+    handoff_run_id = os.getenv('WORKER_HANDOFF_RUN_ID') or None
+    needed = not verify_only and recovery_needed(state, runs, now, handoff_run_id)
     if needed:
         api('/actions/workflows/learn.yml/dispatches', {'ref': 'main'})
     message = ('Requested a recovery run; completion is not yet verified.' if needed
                else 'No recovery requested: state is fresh or learner is already active.')
+    if handoff_run_id:
+        message = ('Queued the next learner directly; startup and publication remain to be verified.' if needed
+                   else 'Another learner is already active or queued; no duplicate successor requested.')
     if verify_only:
         message = 'Post-run freshness check only; scheduled checks handle retries without recursive dispatch.'
     print(message)
