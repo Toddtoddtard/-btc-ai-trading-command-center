@@ -12,7 +12,7 @@ import plotly
 source = ast.parse(Path('app.py').read_text())
 functions = '\n'.join(ast.unparse(node) for node in source.body
                       if isinstance(node, ast.FunctionDef) and node.name in
-                      ('persistent_kalshi_market_chart', 'publish_market_chart_update'))
+                      ('chart_json', 'persistent_kalshi_market_chart', 'publish_market_chart_update'))
 demo = '''
 import streamlit as st
 import streamlit.components.v1 as components
@@ -34,7 +34,7 @@ def tick():
  candles=[{'time':datetime.fromtimestamp((int(now//60)-i)*60,timezone.utc).isoformat(),
  'open':83100,'high':83120,'low':83090,'close':83100} for i in range(29,-1,-1)]
  publish_market_chart_update(context,{'available':True,'price':price,'timestamp':now-5,'candles':candles},
- {'direction_accuracy':float('nan')})
+ {'w_ret3':float('nan'), 'horizon_models':{'1':{'score':float('inf')}}})
 tick()
 '''
 

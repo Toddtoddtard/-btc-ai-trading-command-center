@@ -78,7 +78,8 @@ assert.equal(parseKalshiCandles(payload,event,now),null);
         output=[]
         namespace={'pd':pd,'json':json,'get_learning_state':lambda:{},
                    'components':SimpleNamespace(html=lambda html,**kwargs:output.append(html))}
-        exec(compile(ast.Module(body=[fn],type_ignores=[]),'chart','exec'),namespace)
+        encoder=next(n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef) and n.name=='chart_json')
+        exec(compile(ast.Module(body=[encoder,fn],type_ignores=[]),'chart','exec'),namespace)
         rows=pd.DataFrame(parse_chart(fixture(),EVENT,NOW)['candles'])
         namespace['persistent_kalshi_market_chart'](rows,83100,EVENT+'-00',initial_close='2026-10-11T12:00:00Z')
         script=re.findall(r'<script>(.*?)</script>',output[0],re.S)[0]

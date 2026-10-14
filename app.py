@@ -4160,6 +4160,12 @@ st.markdown(
 # PERSISTENT LIVE MARKET CHART
 # ============================================================
 
+def chart_json(payload):
+    """Encode missing/non-finite chart numbers as null, including nested models."""
+    normalized = json.loads(json.dumps(payload), parse_constant=lambda _: None)
+    return json.dumps(normalized, allow_nan=False).replace("</", "<\\/")
+
+
 def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None, paper_entries=None, initial_close=None):
     """
     Browser-side Plotly chart.
@@ -4188,7 +4194,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             except Exception:
                 continue
 
-    payload = json.dumps(
+    payload = chart_json(
         {
             "candles": initial_rows,
             "target": (
@@ -4202,7 +4208,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             "learning": learning_state or get_learning_state(),
             "entries": paper_entries or [],
         }
-    ).replace("</", "<\\/")
+    )
 
     bg = "#0d141f" if dark_mode else "#ffffff"
     paper = "#080d14" if dark_mode else "#ffffff"
@@ -5197,7 +5203,7 @@ except Exception:
 
 def publish_market_chart_update(context, live, learning):
     """Send a small data packet to the mounted chart; never recreate it."""
-    packet = json.dumps(dict(
+    packet = chart_json(dict(
         type="btc-live-chart", available=bool(live.get("available")),
         ticker=context.get("ticker", ""), target=context.get("target"),
         close_time=context.get("close_time"), price=live.get("price"),
@@ -5206,7 +5212,7 @@ def publish_market_chart_update(context, live, learning):
             "w_ret3", "w_ret8", "w_ret15", "momentum_scale", "target_influence",
             "bias", "horizon_models",
         ) if key in learning},
-    ), allow_nan=False).replace("</", "<\\/")
+    ))
     components.html(
         "<script>const packet=" + packet + ";"
         "for(const frame of window.parent.document.querySelectorAll('iframe')){"
