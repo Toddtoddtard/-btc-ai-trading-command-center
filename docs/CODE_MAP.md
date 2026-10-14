@@ -15,7 +15,7 @@ Start here for a specific issue. This is a navigation guide, not a current healt
 | Closed-candle catch-up and predicted paths | `candle_learning.py`, `learning_prices.py`, `horizon_models.py`, `ai_core.py` | `test_candle_learning`, `test_learning_prices`, `test_prediction_horizon_v17` |
 | MACD and chart presentation | `macd_engine.py`, `technical_fvg_macd.py`, `dashboard_ui.py`; app render functions | `test_macd_v2`, `test_dashboard_ui`, `test_chart_execution` |
 | Live technical feeds and latency | `live_feeds.py`, `public_futures.py`, `kalshi_reference.py`, `kalshi_microstructure.py` | `test_live_feeds`, `test_futures_latency`, `test_kalshi_reference` |
-| Worker schedule, publication and recovery | `.github/workflows/learn.yml` runs `learner_v31.py`, then enrichment and `background_paper.py`; `worker_session.py`; `worker_watchdog.py` | `test_worker_session`, `test_worker_watchdog`, `test_learning_gaps` |
+| Worker schedule, publication and recovery | `.github/workflows/learn.yml` runs `learner_v31.py`, enrichment and `background_paper.py`; `worker_session.py` publishes; final `worker_watchdog.py` pass queues a successor directly | `test_worker_session`, `test_worker_watchdog`, `test_learning_gaps` |
 | Other market pages | `pages/`, `multi_asset_command_center.py`, `multi_asset_paper.py` | `test_multi_asset_paper`, `test_multi_market_nav_routes` |
 | Login and deployed build label | `access_control.py` | `test_access_control` |
 | Archive replay, label deadlines, training inputs | Shared `historical_backtest.py` archive reader; `council_backtest_v4.py`, `historical_specialist_backtest_v7.py`, `train_horizon_models.py` | `test_historical_deadlines`, `test_historical_cross_month_v16`, `test_council_backtest_v4`, `test_train_horizon_models` |
