@@ -33,7 +33,7 @@ def tick():
  now=time.time();price=83100+int(now)%20
  candles=[{'time':datetime.fromtimestamp((int(now//60)-i)*60,timezone.utc).isoformat(),
  'open':83100,'high':83120,'low':83090,'close':83100} for i in range(29,-1,-1)]
- publish_market_chart_update(context,{'available':True,'price':price,'timestamp':now,'candles':candles},
+ publish_market_chart_update(context,{'available':True,'price':price,'timestamp':now-5,'candles':candles},
  {'direction_accuracy':float('nan')})
 tick()
 '''

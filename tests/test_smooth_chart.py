@@ -39,17 +39,22 @@ global.fetch=()=>{throw Error('server ticks should not need browser network')};
         checks = """
 (async()=>{
  const packet={type:'btc-live-chart',available:true,ticker:'KXBTC15M-26OCT141215-15',
- target:83000,close_time:'2026-10-14T12:15:00Z',timestamp:now/1000,price:83104,
+ target:83000,close_time:'2026-10-14T12:15:00Z',timestamp:now/1000-5,price:83104,
  candles:[{time:'2026-10-14T12:01:00Z',open:83100,high:83102,low:83099,close:83101}]};
- const send=async(data,origin='https://app.test')=>{handlers.message({data,origin,source:sender});
+ const send=async(data,origin='https://app.test')=>{handlers.message({data:structuredClone(data),origin,source:sender});
  await new Promise(resolve=>setImmediate(resolve));};
  await send(packet);assert.equal(chart.data[0].close.at(-1),83104);
  now+=1000;await send({...packet,price:83108,timestamp:now/1000});
  assert.equal(chart.data[0].close.at(-1),83108);assert.equal(mounts,1);
- assert.equal(updates,2);
+ now+=1000;await send({...packet,price:83095,timestamp:now/1000});
+ assert.equal(chart.data[0].high.at(-1),83108);
+ assert.equal(chart.data[0].low.at(-1),83095);
+ now+=1000;await send({...packet,price:83101,timestamp:now/1000});
+ assert.equal(chart.data[0].high.at(-1),83108);
+ assert.equal(chart.data[0].low.at(-1),83095);assert.equal(updates,4);
  await send({...packet,price:99999,timestamp:now/1000},'https://other.test');
  await send({...packet,price:99999,timestamp:now/1000,close_time:'2026-10-14T12:00:00Z'});
- assert.equal(chart.data[0].close.at(-1),83108);assert.equal(updates,2);
+ assert.equal(chart.data[0].close.at(-1),83101);assert.equal(updates,4);
 })().catch(e=>{console.error(e);process.exit(1)});
 """
         result = subprocess.run(['node', '-e', harness + script + checks],

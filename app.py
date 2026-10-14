@@ -4656,6 +4656,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         let lastChartPrice = NaN;
         let lastChartTimestamp = 0;
         let serverFeed = null;
+        let serverReceivedAt = 0;
 
         // Only accept updates from a sibling Streamlit component, never a
         // different site. The chart iframe itself remains mounted.
@@ -4676,6 +4677,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 !Number.isFinite(packet.target) || packet.target <= 1000 ||
                 !Array.isArray(packet.candles) || !packet.candles.length) return;
             serverFeed = packet;
+            serverReceivedAt = now;
             currentTicker = packet.ticker;
             currentTarget = packet.target;
             kalshiWindowKey = Math.floor(now / 900000);
@@ -4716,7 +4718,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         }}
 
         async function fetchCandles() {{
-            if (serverFeed && Date.now()-Number(serverFeed.timestamp)*1000 <= 2500 &&
+            if (serverFeed && Date.now()-serverReceivedAt <= 2500 &&
+                Date.now()-Number(serverFeed.timestamp)*1000 <= 30000 &&
                 Date.parse(serverFeed.close_time) > Date.now()) {{
                 lastChartPrice = serverFeed.price;
                 lastChartTimestamp = Number(serverFeed.timestamp)*1000;
@@ -4846,13 +4849,15 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 // Kalshi tick. Completed candles remain the official history.
                 const minute = Math.floor(lastChartTimestamp / 60000) * 60000;
                 if (Number.isFinite(lastChartPrice) && lastChartPrice > 1000) {{
+                    const observed = rows.find(row => Date.parse(row.time) === minute);
                     if (Date.parse(lastBar.time) === minute) {{
                         fresh[fresh.length-1] = {{...lastBar,
-                            high: Math.max(lastBar.high, lastChartPrice),
-                            low: Math.min(lastBar.low, lastChartPrice), close: lastChartPrice}};
+                            high: Math.max(lastBar.high, lastChartPrice, observed?.high ?? lastBar.high),
+                            low: Math.min(lastBar.low, lastChartPrice, observed?.low ?? lastBar.low), close: lastChartPrice}};
                     }} else if (Date.parse(lastBar.time) < minute) {{
-                        fresh.push({{time: new Date(minute).toISOString(), open: lastChartPrice,
-                            high: lastChartPrice, low: lastChartPrice, close: lastChartPrice}});
+                        fresh.push({{time: new Date(minute).toISOString(), open: observed?.open ?? lastChartPrice,
+                            high: Math.max(observed?.high ?? lastChartPrice, lastChartPrice),
+                            low: Math.min(observed?.low ?? lastChartPrice, lastChartPrice), close: lastChartPrice}});
                     }}
                 }}
 
