@@ -176,7 +176,7 @@ jobs:
           BACKGROUND_PAPER_INTERVAL_SECONDS: "30"
           # A new main revision proves its first handoff quickly. Successors
           # use the full session; no dependence on a second cron event.
-          WORKER_SESSION_MINUTES: ${{ github.event_name == 'push' && '8' || '55' }}
+          WORKER_SESSION_MINUTES: ${{ github.event_name == 'push' && '12' || '55' }}
         run: python -u worker_session.py --minutes "$WORKER_SESSION_MINUTES"
       - name: Queue the next learner before this worker finishes
         if: success() && github.ref == 'refs/heads/main'

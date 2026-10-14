@@ -33,7 +33,7 @@ concurrent unrelated branch updates; conflicting ledger writes fail visibly.
 Before a successful main worker finishes, it calls `worker_watchdog.py` with
 its own run ID to dispatch one successor directly. The active-run check ignores
 only that finishing run and retains any other active or queued learner; workflow
-concurrency serializes ledger writers. Main push runs use an eight-minute session
+concurrency serializes ledger writers. Main push runs use an 12-minute session
 to exercise the first handoff promptly; subsequent workers use 55 minutes.
 Five-minute cron requests and the stale-state watchdog remain recovery backups.
 GitHub runner startup is still best effort; source timestamps determine freshness,

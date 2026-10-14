@@ -9,6 +9,20 @@ from worker_session import run_session, run_cycle, publish_state
 
 
 class WorkerSessionTests(unittest.TestCase):
+    def test_short_push_session_runs_cycles_with_a_real_advancing_clock(self):
+        clock = [0.0]
+        starts = []
+        def now():
+            clock[0] += .01
+            return clock[0]
+        def cycle():
+            starts.append(clock[0])
+            clock[0] += 30
+        def sleep(seconds):
+            clock[0] += seconds
+        run_session(12, cycle=cycle, clock=now, sleep=sleep)
+        self.assertEqual(len(starts), 2)
+
     def test_repeated_cycles_publish_without_another_schedule_event(self):
         clock = [0.0]
         cycles = []
