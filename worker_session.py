@@ -36,7 +36,11 @@ def publish_state():
         try:
             if json.loads((Path(tree) / 'learning_state.json').read_text()) != expected:
                 raise RuntimeError('Authoritative learning state changed during this cycle; refusing to overwrite it')
-            shutil.copyfile(source, Path(tree) / 'learning_state.json')
+            # Whitespace is not learning data. Publish the same complete state
+            # compactly so every phone/dashboard downloads fewer bytes.
+            compact = json.dumps(json.loads(source.read_text()), separators=(',', ':'),
+                                 ensure_ascii=False, allow_nan=False)
+            (Path(tree) / 'learning_state.json').write_text(compact, encoding='utf-8')
             command('git', 'add', 'learning_state.json', cwd=tree)
             if not command('git', 'diff', '--cached', '--name-only', cwd=tree).strip():
                 return
