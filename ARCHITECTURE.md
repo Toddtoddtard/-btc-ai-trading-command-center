@@ -48,6 +48,24 @@ Only the forming candle incorporates the latest observed tick. Closed history
 and learning/paper source timestamps retain their original meaning; a one-second
 display update does not imply a new completed outcome or worker publication.
 
+Only the selected dashboard tab builds its charts, tables and HTML. Native
+state-tracking tabs require Streamlit 1.55 or newer; tab selection lives inside
+the dashboard fragment, preserving the separately mounted market chart. All
+specialist evaluation, decision safeguards and journal/learning work remain
+outside the tab gates. Initial chart setup reads technical history and the
+canonical contract concurrently without waiting for unrelated spot/composite
+reads; those feeds still load for full dashboard analysis.
+
+Chart packets project learned state to exactly the scalar coefficients,
+horizon-enabled flags and latest horizon probabilities consumed by the browser.
+Training rows, model diagnostics and pending labels stay on the server; this
+does not remove them from learning. Missing probabilities remain absent rather
+than becoming a numeric zero in JavaScript. Concurrent fragments share one
+learning-state download under a process lock, retaining existing source-age and
+failure reporting. The worker publishes the complete validated learning JSON
+without formatting whitespace; consumers and concurrent-publication checks
+continue comparing decoded state.
+
 
 ## Shared-model guarantee
 

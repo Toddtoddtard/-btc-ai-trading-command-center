@@ -105,7 +105,7 @@ class WorkerSessionTests(unittest.TestCase):
             git('push', 'origin', 'learning-state', cwd=repo)
             git('checkout', 'main', cwd=repo)
             checkpoint = root / 'checkpoint.json'
-            checkpoint.write_text('{"ledger": "new"}')
+            checkpoint.write_text('{\n  "ledger": "new"\n}')
             previous = root / 'previous.json'
             previous.write_text('{"ledger": "old"}')
             original_cwd = os.getcwd()
@@ -119,5 +119,5 @@ class WorkerSessionTests(unittest.TestCase):
                 os.chdir(original_cwd)
             self.assertEqual(git('branch', '--show-current', cwd=repo).strip(), 'main')
             self.assertEqual((repo / 'worker.py').read_text(), 'runner code')
-            self.assertEqual(git('show', 'learning-state:learning_state.json', cwd=remote), '{"ledger": "new"}')
+            self.assertEqual(git('show', 'learning-state:learning_state.json', cwd=remote), '{"ledger":"new"}')
             self.assertEqual(git('show', 'learning-state:political_event_watch.json', cwd=remote), 'other state')

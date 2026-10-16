@@ -3,6 +3,7 @@ import json
 import time
 from datetime import datetime, timezone
 import re
+from threading import Lock
 from urllib.request import Request, urlopen
 
 import streamlit as st
@@ -52,6 +53,7 @@ BASELINE_STATE = {
 
 _CACHE = globals().get("_CACHE", {"ts": 0.0, "data": None, "source": "baseline"})
 _PUBLIC_API_RETRY_AT = globals().get("_PUBLIC_API_RETRY_AT", float("-inf"))
+_CACHE_LOCK = globals().get('_CACHE_LOCK', Lock())
 
 
 def _secret_token():
@@ -112,6 +114,13 @@ def _fetch_public(cache_key=None):
 
 
 def fetch_shared_learning_state(ttl=20.0):
+    # Sidebar, chart and dashboard fragments share a process cache. Recheck
+    # its TTL under one lock instead of downloading the same large state twice.
+    with _CACHE_LOCK:
+        return _fetch_shared_learning_state(ttl)
+
+
+def _fetch_shared_learning_state(ttl):
     global _PUBLIC_API_RETRY_AT
     now = time.monotonic()
     cached = _CACHE.get("data")

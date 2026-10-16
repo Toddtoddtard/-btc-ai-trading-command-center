@@ -25,7 +25,8 @@ class SmoothChartTests(unittest.TestCase):
                     candles=[dict(time='2026-10-14T12:01:00Z', open=83100,
                                   high=83108, low=83095, close=83104)])
         learning = dict(w_ret3=float('inf'), bias=float('-inf'),
-                        horizon_models={'1': {'score': float('nan'), 'samples': 0}},
+                        horizon_models={'models': {'1': {'enabled': True}},
+                                        'last_prediction': {'1': {'probability_up': float('nan')}}},
                         direction_accuracy=float('nan'))
         ns['publish_market_chart_update'](context, live, learning)
         raw = frames[0].split('const packet=', 1)[1].split(';for(', 1)[0]
@@ -33,21 +34,21 @@ class SmoothChartTests(unittest.TestCase):
         self.assertIsNone(packet['target'])
         self.assertIsNone(packet['learning']['w_ret3'])
         self.assertIsNone(packet['learning']['bias'])
-        self.assertIsNone(packet['learning']['horizon_models']['1']['score'])
-        self.assertEqual(packet['learning']['horizon_models']['1']['samples'], 0)
+        self.assertIsNone(packet['learning']['horizon_models']['last_prediction']['1']['probability_up'])
+        self.assertTrue(packet['learning']['horizon_models']['models']['1']['enabled'])
         self.assertEqual(packet['price'], 83104.0)
         self.assertEqual(packet['candles'], live['candles'])
         self.assertTrue(packet['available'])
         self.assertNotIn('direction_accuracy', packet['learning'])
-        self.assertTrue(str(learning['horizon_models']['1']['score']) == 'nan')
+        self.assertTrue(str(learning['horizon_models']['last_prediction']['1']['probability_up']) == 'nan')
 
     def test_server_ticks_update_one_chart_and_reject_untrusted_or_expired_data(self):
         fn = next(n for n in ast.parse(Path('app.py').read_text()).body
                   if isinstance(n, ast.FunctionDef) and n.name == 'persistent_kalshi_market_chart')
         frames = []
         ns = dict(pd=pd, json=json, get_learning_state=lambda: {
-                      'direction_accuracy': float('nan'),
-                      'horizon_models': {'1': {'score': float('inf')}}},
+                      'bias': float('nan'),
+                      'horizon_models': {'last_prediction': {'1': {'probability_up': float('inf')}}}},
                   components=SimpleNamespace(html=lambda html, **kwargs: frames.append(html)))
         encoder = next(n for n in ast.parse(Path('app.py').read_text()).body
                        if isinstance(n, ast.FunctionDef) and n.name == 'chart_json')
@@ -57,8 +58,8 @@ class SmoothChartTests(unittest.TestCase):
         script = re.findall(r'<script>(.*?)</script>', frames[0], re.S)[0]
         initial = json.loads(re.search(r'const initial = (.*);', script)[1],
                              parse_constant=lambda value: self.fail(value))
-        self.assertIsNone(initial['learning']['direction_accuracy'])
-        self.assertIsNone(initial['learning']['horizon_models']['1']['score'])
+        self.assertIsNone(initial['learning']['bias'])
+        self.assertIsNone(initial['learning']['horizon_models']['last_prediction']['1']['probability_up'])
         harness = """
 const assert=require('assert');
 let now=Date.parse('2026-10-14T12:01:10Z');Date.now=()=>now;

@@ -20,6 +20,22 @@ def parallel_calls(calls):
         return {name: job.result() for name, job in jobs.items()}
 
 
+def load_chart_startup(fetch_klines, fetch_market, enrich_history):
+    """Seed the retained chart without waiting on unrelated spot/reference reads."""
+    def history():
+        try:
+            rows, _ = fetch_klines('1m', 500)
+            return enrich_history(rows)
+        except Exception:
+            return pd.DataFrame()
+    def market():
+        try:
+            return fetch_market()
+        except Exception:
+            return {}
+    return parallel_calls({'history': history, 'kalshi': market})
+
+
 def load_live_feeds(
     fetch_spot_ticker,
     fetch_klines,

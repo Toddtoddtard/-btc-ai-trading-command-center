@@ -44,7 +44,7 @@ from dashboard_ui import (
     fmt_pct,
     render_dashboard_table,
 )
-from live_feeds import load_live_feeds, parallel_calls
+from live_feeds import load_live_feeds, load_chart_startup, parallel_calls
 from kalshi_reference import fetch_kalshi_reference
 from kalshi_chart_data import fetch_chart
 from macd_engine import project_macd_path
@@ -4162,9 +4162,23 @@ st.markdown(
 # ============================================================
 
 def chart_json(payload):
-    """Encode missing/non-finite chart numbers as null, including nested models."""
+    """Send only browser forecast inputs; encode missing numbers as null."""
+    payload = dict(payload)
+    if isinstance(payload.get('learning'), dict):
+        learning = payload['learning']
+        root = learning.get('horizon_models') or {}
+        compact_models = {
+            'models': {h: {'enabled': model.get('enabled', False)}
+                       for h, model in (root.get('models') or {}).items()},
+            'last_prediction': {h: {key: prediction[key] for key in ('probability_up',) if key in prediction}
+                                for h, prediction in (root.get('last_prediction') or {}).items()},
+        }
+        payload['learning'] = {key: learning[key] for key in (
+            'w_ret3', 'w_ret8', 'w_ret15', 'momentum_scale', 'target_influence', 'bias'
+        ) if key in learning}
+        payload['learning']['horizon_models'] = compact_models
     normalized = json.loads(json.dumps(payload), parse_constant=lambda _: None)
-    return json.dumps(normalized, allow_nan=False).replace("</", "<\\/")
+    return json.dumps(normalized, allow_nan=False, separators=(',', ':')).replace("</", "<\\/")
 
 
 def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker, dark_mode=True, learning_state=None, paper_entries=None, initial_close=None):
@@ -5111,49 +5125,12 @@ else:
 # This is intentionally OUTSIDE the auto-refreshing fragment.
 # ============================================================
 
+_chart_startup = load_chart_startup(fetch_klines, fetch_kalshi_bitcoin_markets, enrich_history)
+_persistent_hist = _chart_startup["history"]
 try:
-    _persistent_raw_hist, _ = fetch_klines("1m", 500)
-    _persistent_hist = enrich_history(_persistent_raw_hist)
+    _persistent_ctx = stable_kalshi_contract(_chart_startup["kalshi"], np.nan)
 except Exception:
-    _persistent_hist = pd.DataFrame()
-
-try:
-    _persistent_reference = fetch_kalshi_reference_price()
-except Exception:
-    _persistent_reference = {
-        "available": False,
-        "healthy": False,
-        "price": np.nan,
-        "source": "Kalshi reference unavailable",
-    }
-
-try:
-    _persistent_ticker = fetch_spot_ticker()
-    _persistent_px = safe_float(_persistent_reference.get("price"), np.nan)
-    if pd.isna(_persistent_px) or _persistent_px <= 0:
-        _persistent_px = safe_float(
-            _persistent_ticker.get("price"),
-            safe_float(_persistent_hist["close"].iloc[-1])
-            if not _persistent_hist.empty else np.nan,
-        )
-except Exception:
-    _persistent_px = (
-        safe_float(_persistent_hist["close"].iloc[-1])
-        if not _persistent_hist.empty else np.nan
-    )
-
-try:
-    _persistent_kalshi = fetch_kalshi_bitcoin_markets()
-    _persistent_ctx = stable_kalshi_contract(
-        _persistent_kalshi,
-        _persistent_px,
-    )
-except Exception:
-    _persistent_ctx = {
-        "available": False,
-        "target": np.nan,
-        "ticker": "",
-    }
+    _persistent_ctx = {"available": False, "target": np.nan, "ticker": ""}
 
 st.subheader("Live Kalshi BTC Market")
 st.caption(
@@ -5504,1040 +5481,517 @@ def live_dashboard():
             "Prediction Journal",
             "Learning",
             "Backtest",
-        ]
+        ],
+        key="dashboard_tab",
+        on_change="rerun",
     )
 
-    with tab_market:
-        kctx = stable_kalshi_contract(kalshi, price)
+    if tab_market.open:
+        with tab_market:
+            kctx = stable_kalshi_contract(kalshi, price)
 
-        st.subheader("TradingView-style FVG + MACD Technical Lab")
-        st.caption("Calculated locally from the same live BTC candles used by the bots — no TradingView scraping or paid key required.")
+            st.subheader("TradingView-style FVG + MACD Technical Lab")
+            st.caption("Calculated locally from the same live BTC candles used by the bots — no TradingView scraping or paid key required.")
 
-        _tech = results.get("FVG / MACD AI", {})
-        _tech_cols = st.columns(4)
-        _tech_cols[0].metric("Technical AI", _tech.get("signal", "NEUTRAL"))
-        _tech_cols[1].metric("Confidence", f"{safe_float(_tech.get('confidence'), 0.0)*100:.1f}%")
-        _tech_cols[2].metric("MACD histogram", f"{safe_float(hist['macd_hist'].iloc[-1], 0.0):+.2f}")
-        _fresh_fvg = hist.tail(60)
-        _bull_count = int(_fresh_fvg.get("bull_fvg", pd.Series(dtype=bool)).fillna(False).sum())
-        _bear_count = int(_fresh_fvg.get("bear_fvg", pd.Series(dtype=bool)).fillna(False).sum())
-        _tech_cols[3].metric("Fresh FVGs (60m)", f"{_bull_count} bull / {_bear_count} bear")
-        st.caption(_tech.get("reason", "FVG/MACD specialist warming up"))
+            _tech = results.get("FVG / MACD AI", {})
+            _tech_cols = st.columns(4)
+            _tech_cols[0].metric("Technical AI", _tech.get("signal", "NEUTRAL"))
+            _tech_cols[1].metric("Confidence", f"{safe_float(_tech.get('confidence'), 0.0)*100:.1f}%")
+            _tech_cols[2].metric("MACD histogram", f"{safe_float(hist['macd_hist'].iloc[-1], 0.0):+.2f}")
+            _fresh_fvg = hist.tail(60)
+            _bull_count = int(_fresh_fvg.get("bull_fvg", pd.Series(dtype=bool)).fillna(False).sum())
+            _bear_count = int(_fresh_fvg.get("bear_fvg", pd.Series(dtype=bool)).fillna(False).sum())
+            _tech_cols[3].metric("Fresh FVGs (60m)", f"{_bull_count} bull / {_bear_count} bear")
+            st.caption(_tech.get("reason", "FVG/MACD specialist warming up"))
 
-        _price_tv = hist.tail(180).copy()
-        _price_fig = go.Figure()
-        _price_fig.add_trace(go.Candlestick(
-            x=_price_tv["time"], open=_price_tv["open"], high=_price_tv["high"],
-            low=_price_tv["low"], close=_price_tv["close"], name="BTCUSDT"
-        ))
+            _price_tv = hist.tail(180).copy()
+            _price_fig = go.Figure()
+            _price_fig.add_trace(go.Candlestick(
+                x=_price_tv["time"], open=_price_tv["open"], high=_price_tv["high"],
+                low=_price_tv["low"], close=_price_tv["close"], name="BTCUSDT"
+            ))
 
-        # Highlight the most recent bullish and bearish fair-value-gap zones.
-        _zone_rows = []
-        for _idx, _row in _price_tv.iterrows():
-            if bool(_row.get("bull_fvg", False)):
-                _zone_rows.append((
-                    _row["time"], safe_float(_row.get("bull_fvg_lower")),
-                    safe_float(_row.get("bull_fvg_upper")), "bull"
-                ))
-            if bool(_row.get("bear_fvg", False)):
-                _zone_rows.append((
-                    _row["time"], safe_float(_row.get("bear_fvg_lower")),
-                    safe_float(_row.get("bear_fvg_upper")), "bear"
-                ))
-        for _x0, _low, _high, _kind in _zone_rows[-10:]:
-            if not (pd.notna(_low) and pd.notna(_high)):
-                continue
-            _price_fig.add_shape(
-                type="rect", x0=_x0, x1=_price_tv["time"].iloc[-1], y0=_low, y1=_high,
-                line=dict(width=1, color="#00d6a3" if _kind == "bull" else "#ff4d68"),
-                fillcolor="rgba(0,214,163,0.13)" if _kind == "bull" else "rgba(255,77,104,0.13)",
-                layer="below",
+            # Highlight the most recent bullish and bearish fair-value-gap zones.
+            _zone_rows = []
+            for _idx, _row in _price_tv.iterrows():
+                if bool(_row.get("bull_fvg", False)):
+                    _zone_rows.append((
+                        _row["time"], safe_float(_row.get("bull_fvg_lower")),
+                        safe_float(_row.get("bull_fvg_upper")), "bull"
+                    ))
+                if bool(_row.get("bear_fvg", False)):
+                    _zone_rows.append((
+                        _row["time"], safe_float(_row.get("bear_fvg_lower")),
+                        safe_float(_row.get("bear_fvg_upper")), "bear"
+                    ))
+            for _x0, _low, _high, _kind in _zone_rows[-10:]:
+                if not (pd.notna(_low) and pd.notna(_high)):
+                    continue
+                _price_fig.add_shape(
+                    type="rect", x0=_x0, x1=_price_tv["time"].iloc[-1], y0=_low, y1=_high,
+                    line=dict(width=1, color="#00d6a3" if _kind == "bull" else "#ff4d68"),
+                    fillcolor="rgba(0,214,163,0.13)" if _kind == "bull" else "rgba(255,77,104,0.13)",
+                    layer="below",
+                )
+            _price_fig.update_layout(
+                template="plotly_dark", height=470, margin=dict(l=10, r=10, t=35, b=10),
+                title="BTC 1-minute candles with Fair Value Gaps",
+                xaxis_rangeslider_visible=False,
+                paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
+                legend=dict(orientation="h"),
             )
-        _price_fig.update_layout(
-            template="plotly_dark", height=470, margin=dict(l=10, r=10, t=35, b=10),
-            title="BTC 1-minute candles with Fair Value Gaps",
-            xaxis_rangeslider_visible=False,
-            paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
-            legend=dict(orientation="h"),
-        )
-        st.plotly_chart(_price_fig, use_container_width=True, key="fvg_price_chart")
+            st.plotly_chart(_price_fig, use_container_width=True, key="fvg_price_chart")
 
-        _macd_control_cols = st.columns(2)
-        with _macd_control_cols[0]:
-            _macd_history_minutes = st.select_slider(
-                "MACD history shown",
-                options=[30, 60, 120, 180],
-                value=180,
-                format_func=lambda value: f"{value} minutes",
-                key="macd_history_minutes",
-            )
-        with _macd_control_cols[1]:
-            _macd_projection_minutes = st.select_slider(
-                "MACD prediction horizon",
-                options=[1, 5, 15],
-                value=15,
-                format_func=lambda value: f"{value} minute" if value == 1 else f"{value} minutes",
-                key="macd_projection_minutes",
-            )
+            _macd_control_cols = st.columns(2)
+            with _macd_control_cols[0]:
+                _macd_history_minutes = st.select_slider(
+                    "MACD history shown",
+                    options=[30, 60, 120, 180],
+                    value=180,
+                    format_func=lambda value: f"{value} minutes",
+                    key="macd_history_minutes",
+                )
+            with _macd_control_cols[1]:
+                _macd_projection_minutes = st.select_slider(
+                    "MACD prediction horizon",
+                    options=[1, 5, 15],
+                    value=15,
+                    format_func=lambda value: f"{value} minute" if value == 1 else f"{value} minutes",
+                    key="macd_projection_minutes",
+                )
 
-        _tv = hist.tail(_macd_history_minutes).copy()
-        _macd_fig = go.Figure()
-        _macd_fig.add_trace(go.Scatter(
-            x=_tv["time"], y=_tv["macd"], mode="lines", name="MACD", line=dict(width=2)
-        ))
-        _macd_fig.add_trace(go.Scatter(
-            x=_tv["time"], y=_tv["macd_signal"], mode="lines", name="Signal", line=dict(width=2)
-        ))
-        _macd_fig.add_trace(go.Scatter(
-            x=_tv["time"], y=_tv["macd_fast_hist"], mode="lines", name="Fast momentum",
-            line=dict(width=1.5, dash="dot", color="#ffd166")
-        ))
-        _hist_values = [safe_float(v, 0.0) for v in _tv["macd_hist"]]
-        _hist_colors = []
-        for _i, _value in enumerate(_hist_values):
-            _expanding = _i == 0 or abs(_value) >= abs(_hist_values[_i - 1])
-            if _value >= 0:
-                _hist_colors.append("#00d6a3" if _expanding else "#167d6c")
-            else:
-                _hist_colors.append("#ff4d68" if _expanding else "#8d3545")
-        _macd_fig.add_trace(go.Bar(
-            x=_tv["time"], y=_tv["macd_hist"], name="Histogram", marker_color=_hist_colors, opacity=0.72
-        ))
-
-        # Display-only MACD projection.  It is derived from the exact same
-        # 15-minute price path used by the prediction chart, then MACD is
-        # recalculated over those projected closes.  Nothing here is written
-        # to the learner or passed to the trade engine.
-        _macd_price_projection = forecast_path_core(
-            hist.tail(60).to_dict("records"),
-            kctx.get("target", np.nan),
-            get_learning_state(),
-        )
-        _macd_projection = project_macd_path(
-            hist,
-            (_macd_price_projection or {}).get("forecast", []),
-            _macd_projection_minutes,
-        )
-        if not _macd_projection.empty:
-            _projection_end = pd.Timestamp(_macd_projection["time"].iloc[-1])
-            _projection_end_et = _projection_end.tz_convert(ZoneInfo("America/New_York"))
-            _projection_start = _macd_projection["time"].iloc[0]
-            _macd_fig.add_vrect(
-                x0=_projection_start,
-                x1=_projection_end,
-                fillcolor="rgba(46,168,255,0.08)",
-                line_width=0,
-                annotation_text="Projected",
-                annotation_position="top left",
-            )
+            _tv = hist.tail(_macd_history_minutes).copy()
+            _macd_fig = go.Figure()
             _macd_fig.add_trace(go.Scatter(
-                x=_macd_projection["time"], y=_macd_projection["macd"],
-                mode="lines+markers", name=f"Projected MACD {_macd_projection_minutes}m",
-                line=dict(width=3, dash="dot", color="#2ea8ff"),
-                marker=dict(size=5, color="#2ea8ff"),
-                hovertemplate="%{x|%I:%M %p}<br>Projected MACD %{y:+.3f}<extra></extra>",
+                x=_tv["time"], y=_tv["macd"], mode="lines", name="MACD", line=dict(width=2)
             ))
             _macd_fig.add_trace(go.Scatter(
-                x=_macd_projection["time"], y=_macd_projection["macd_signal"],
-                mode="lines", name="Projected signal",
-                line=dict(width=2, dash="dot", color="#ba68c8"),
-                hovertemplate="%{x|%I:%M %p}<br>Projected signal %{y:+.3f}<extra></extra>",
+                x=_tv["time"], y=_tv["macd_signal"], mode="lines", name="Signal", line=dict(width=2)
             ))
-            _projected_hist = _macd_projection.iloc[1:]
+            _macd_fig.add_trace(go.Scatter(
+                x=_tv["time"], y=_tv["macd_fast_hist"], mode="lines", name="Fast momentum",
+                line=dict(width=1.5, dash="dot", color="#ffd166")
+            ))
+            _hist_values = [safe_float(v, 0.0) for v in _tv["macd_hist"]]
+            _hist_colors = []
+            for _i, _value in enumerate(_hist_values):
+                _expanding = _i == 0 or abs(_value) >= abs(_hist_values[_i - 1])
+                if _value >= 0:
+                    _hist_colors.append("#00d6a3" if _expanding else "#167d6c")
+                else:
+                    _hist_colors.append("#ff4d68" if _expanding else "#8d3545")
             _macd_fig.add_trace(go.Bar(
-                x=_projected_hist["time"], y=_projected_hist["macd_hist"],
-                name="Projected histogram", marker_color="rgba(46,168,255,0.42)",
-                hovertemplate="%{x|%I:%M %p}<br>Projected histogram %{y:+.3f}<extra></extra>",
+                x=_tv["time"], y=_tv["macd_hist"], name="Histogram", marker_color=_hist_colors, opacity=0.72
             ))
-            st.caption(
-                f"Projected through {_projection_end_et.strftime('%-I:%M %p ET')} • "
-                "blue shaded values are estimates from the bot's current price path, not completed candles."
+
+            # Display-only MACD projection.  It is derived from the exact same
+            # 15-minute price path used by the prediction chart, then MACD is
+            # recalculated over those projected closes.  Nothing here is written
+            # to the learner or passed to the trade engine.
+            _macd_price_projection = forecast_path_core(
+                hist.tail(60).to_dict("records"),
+                kctx.get("target", np.nan),
+                get_learning_state(),
             )
-        _macd_fig.add_hline(y=0, line_width=1, line_dash="dot")
-        _macd_fig.update_layout(
-            template="plotly_dark", height=300, margin=dict(l=10, r=10, t=35, b=10),
-            title=f"Adaptive MACD — {_macd_projection_minutes}m projection", paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
-            legend=dict(orientation="h"),
-            hovermode="x unified",
-        )
-        st.plotly_chart(_macd_fig, use_container_width=True, key="fvg_macd_chart")
-
-        st.divider()
-
-        st.subheader("Kalshi BTC 15-minute target tracker")
-
-        if kctx["available"]:
-            # Recompute from the exact active contract close at render time.
-            # The cached Kalshi response can be up to three seconds old, but
-            # the visible countdown must not inherit that cache age.
-            live_close_ts = kalshi_close_timestamp(kctx)
-            rem = (
-                int(min(15 * 60, max(0, live_close_ts - time.time())))
-                if pd.notna(live_close_ts)
-                else (
-                    int(kctx["seconds_remaining"])
-                    if pd.notna(kctx["seconds_remaining"]) else 0
+            _macd_projection = project_macd_path(
+                hist,
+                (_macd_price_projection or {}).get("forecast", []),
+                _macd_projection_minutes,
+            )
+            if not _macd_projection.empty:
+                _projection_end = pd.Timestamp(_macd_projection["time"].iloc[-1])
+                _projection_end_et = _projection_end.tz_convert(ZoneInfo("America/New_York"))
+                _projection_start = _macd_projection["time"].iloc[0]
+                _macd_fig.add_vrect(
+                    x0=_projection_start,
+                    x1=_projection_end,
+                    fillcolor="rgba(46,168,255,0.08)",
+                    line_width=0,
+                    annotation_text="Projected",
+                    annotation_position="top left",
                 )
-            )
-            minutes, seconds = divmod(max(0, rem), 60)
-
-            k1, k2, k3, k4, k5, k6 = st.columns(6)
-            k1.metric("Kalshi target", fmt_money(kctx["target"]))
-            k2.metric("Kalshi BTC now", fmt_money(display_price) if pd.notna(display_price) else "Unavailable")
-            k3.metric("Vs target", f"${display_price - kctx['target']:+,.2f}" if pd.notna(display_price) and pd.notna(kctx.get("target")) else "Unavailable")
-            with k4:
-                countdown_close_ms = (
-                    int(live_close_ts * 1000)
-                    if pd.notna(live_close_ts) else 0
+                _macd_fig.add_trace(go.Scatter(
+                    x=_macd_projection["time"], y=_macd_projection["macd"],
+                    mode="lines+markers", name=f"Projected MACD {_macd_projection_minutes}m",
+                    line=dict(width=3, dash="dot", color="#2ea8ff"),
+                    marker=dict(size=5, color="#2ea8ff"),
+                    hovertemplate="%{x|%I:%M %p}<br>Projected MACD %{y:+.3f}<extra></extra>",
+                ))
+                _macd_fig.add_trace(go.Scatter(
+                    x=_macd_projection["time"], y=_macd_projection["macd_signal"],
+                    mode="lines", name="Projected signal",
+                    line=dict(width=2, dash="dot", color="#ba68c8"),
+                    hovertemplate="%{x|%I:%M %p}<br>Projected signal %{y:+.3f}<extra></extra>",
+                ))
+                _projected_hist = _macd_projection.iloc[1:]
+                _macd_fig.add_trace(go.Bar(
+                    x=_projected_hist["time"], y=_projected_hist["macd_hist"],
+                    name="Projected histogram", marker_color="rgba(46,168,255,0.42)",
+                    hovertemplate="%{x|%I:%M %p}<br>Projected histogram %{y:+.3f}<extra></extra>",
+                ))
+                st.caption(
+                    f"Projected through {_projection_end_et.strftime('%-I:%M %p ET')} • "
+                    "blue shaded values are estimates from the bot's current price path, not completed candles."
                 )
-                countdown_color = "#f5f9ff" if dark_mode else "#1f2937"
-                countdown_label_color = "#9aa9bc" if dark_mode else "#5f6b7a"
-                _live_countdown_html = f"""
-                <div style="font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-                  <div style="font-size:14px;color:{countdown_label_color};margin-bottom:4px;">Time left</div>
-                  <div id="live-contract-countdown" style="font-size:clamp(24px,2.1vw,34px);line-height:1.15;font-weight:600;color:{countdown_color};font-variant-numeric:tabular-nums;">{minutes:02d}:{seconds:02d}</div>
-                </div>
-                <script>
-                (() => {{
-                  const closeMs = {countdown_close_ms};
-                  const value = document.getElementById("live-contract-countdown");
-                  function renderInlineCountdown() {{
-                    const remaining = Math.min(15 * 60, Math.max(0, Math.floor((closeMs - Date.now()) / 1000)));
-                    const minutes = Math.floor(remaining / 60);
-                    const seconds = remaining % 60;
-                    value.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
-                  }}
-                  renderInlineCountdown();
-                  setInterval(renderInlineCountdown, 250);
-                }})();
-                </script>
-                """
-                components.html(_live_countdown_html, height=72, scrolling=False)
-            k5.metric(
-                "UP price",
-                (
-                    "N/A"
-                    if pd.isna(kctx["up_probability"])
-                    else f"{kctx['up_probability']*100:.1f}%"
+            _macd_fig.add_hline(y=0, line_width=1, line_dash="dot")
+            _macd_fig.update_layout(
+                template="plotly_dark", height=300, margin=dict(l=10, r=10, t=35, b=10),
+                title=f"Adaptive MACD — {_macd_projection_minutes}m projection", paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
+                legend=dict(orientation="h"),
+                hovermode="x unified",
+            )
+            st.plotly_chart(_macd_fig, use_container_width=True, key="fvg_macd_chart")
+
+            st.divider()
+
+            st.subheader("Kalshi BTC 15-minute target tracker")
+
+            if kctx["available"]:
+                # Recompute from the exact active contract close at render time.
+                # The cached Kalshi response can be up to three seconds old, but
+                # the visible countdown must not inherit that cache age.
+                live_close_ts = kalshi_close_timestamp(kctx)
+                rem = (
+                    int(min(15 * 60, max(0, live_close_ts - time.time())))
+                    if pd.notna(live_close_ts)
+                    else (
+                        int(kctx["seconds_remaining"])
+                        if pd.notna(kctx["seconds_remaining"]) else 0
+                    )
+                )
+                minutes, seconds = divmod(max(0, rem), 60)
+
+                k1, k2, k3, k4, k5, k6 = st.columns(6)
+                k1.metric("Kalshi target", fmt_money(kctx["target"]))
+                k2.metric("Kalshi BTC now", fmt_money(display_price) if pd.notna(display_price) else "Unavailable")
+                k3.metric("Vs target", f"${display_price - kctx['target']:+,.2f}" if pd.notna(display_price) and pd.notna(kctx.get("target")) else "Unavailable")
+                with k4:
+                    countdown_close_ms = (
+                        int(live_close_ts * 1000)
+                        if pd.notna(live_close_ts) else 0
+                    )
+                    countdown_color = "#f5f9ff" if dark_mode else "#1f2937"
+                    countdown_label_color = "#9aa9bc" if dark_mode else "#5f6b7a"
+                    _live_countdown_html = f"""
+                    <div style="font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+                      <div style="font-size:14px;color:{countdown_label_color};margin-bottom:4px;">Time left</div>
+                      <div id="live-contract-countdown" style="font-size:clamp(24px,2.1vw,34px);line-height:1.15;font-weight:600;color:{countdown_color};font-variant-numeric:tabular-nums;">{minutes:02d}:{seconds:02d}</div>
+                    </div>
+                    <script>
+                    (() => {{
+                      const closeMs = {countdown_close_ms};
+                      const value = document.getElementById("live-contract-countdown");
+                      function renderInlineCountdown() {{
+                        const remaining = Math.min(15 * 60, Math.max(0, Math.floor((closeMs - Date.now()) / 1000)));
+                        const minutes = Math.floor(remaining / 60);
+                        const seconds = remaining % 60;
+                        value.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+                      }}
+                      renderInlineCountdown();
+                      setInterval(renderInlineCountdown, 250);
+                    }})();
+                    </script>
+                    """
+                    components.html(_live_countdown_html, height=72, scrolling=False)
+                k5.metric(
+                    "UP price",
+                    (
+                        "N/A"
+                        if pd.isna(kctx["up_probability"])
+                        else f"{kctx['up_probability']*100:.1f}%"
+                    ),
+                )
+                k6.metric(
+                    "DOWN price",
+                    (
+                        "N/A"
+                        if pd.isna(kctx["up_probability"])
+                        else f"{(1.0-kctx['up_probability'])*100:.1f}%"
+                    ),
+                )
+
+                st.caption(
+                    "The live candlestick chart is pinned above the tabs so it can "
+                    "update continuously without Streamlit rebuilding it."
+                )
+
+                side_text = (
+                    "UP"
+                    if decision["action"] in {"SCALP UP", "LOCK UP"}
+                    else "DOWN"
+                    if decision["action"] in {"SCALP DOWN", "LOCK DOWN"}
+                    else "WAIT"
+                )
+
+                call1, call2, call3, call4 = st.columns(4)
+                with call1:
+                    st.markdown(
+                        f'<div class="direction-card metric-direction-card"><div class="direction-card-label">CALL</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                call2.metric("Side", side_text)
+                call3.metric(
+                    "AI projected end", fmt_money(decision["projected_end"])
+                )
+                call4.metric(
+                    "Confidence", f"{decision['confidence']*100:.1f}%"
+                )
+
+                if decision["action"] == "SCALP UP":
+                    st.success("SCALP UP → paper signal is to BUY UP.")
+                elif decision["action"] == "SCALP DOWN":
+                    st.error("SCALP DOWN → paper signal is to BUY DOWN.")
+                elif decision["action"] in {"LOCK UP", "LOCK DOWN"}:
+                    st.warning(
+                        f"LOCK {decision['locked_side']} → direction stays fixed; "
+                        "the paper position holds through the end of the current 15-minute Kalshi window or settles at expiry."
+                    )
+                else:
+                    st.info("HOLD → no Kalshi side has enough edge yet.")
+
+                st.caption(
+                    f"Live Kalshi market: {kctx['ticker']} • target is fetched from "
+                    "that exact Kalshi ticker and shared by the chart, LOCK/SCALP engine, "
+                    "paper signals, and learner. The candles use this app's Binance 1-minute feed "
+                    "as a real-time proxy; official Kalshi settlement follows "
+                    "Kalshi's stated reference methodology. "
+                    "The target line stays fixed for this contract and changes only "
+                    "when Kalshi rolls to the next 15-minute market."
+                )
+            else:
+                st.warning(
+                    "Live Kalshi KXBTC15M target is temporarily unavailable."
+                )
+                st.plotly_chart(
+                    candle_chart(hist),
+                    use_container_width=True,
+                    key="fallback_market_chart",
+                )
+
+            st.divider()
+            st.subheader("Broader BTC market chart")
+
+            st.plotly_chart(
+                candle_chart(
+                    hist,
+                    kctx["target"] if kctx["available"] else np.nan
                 ),
-            )
-            k6.metric(
-                "DOWN price",
-                (
-                    "N/A"
-                    if pd.isna(kctx["up_probability"])
-                    else f"{(1.0-kctx['up_probability'])*100:.1f}%"
-                ),
-            )
-
-            st.caption(
-                "The live candlestick chart is pinned above the tabs so it can "
-                "update continuously without Streamlit rebuilding it."
+                use_container_width=True,
+                key="btc_market_chart",
+                config={
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                    "responsive": True,
+                },
             )
 
-            side_text = (
-                "UP"
-                if decision["action"] in {"SCALP UP", "LOCK UP"}
-                else "DOWN"
-                if decision["action"] in {"SCALP DOWN", "LOCK DOWN"}
-                else "WAIT"
+            c1, c2, c3, c4 = st.columns(4)
+            last = hist.iloc[-1]
+            c1.metric("RSI 14", f"{safe_float(last['rsi'], 50):.1f}")
+            c2.metric("ATR 14", f"${safe_float(last['atr14'], 0):,.2f}")
+            c3.metric(
+                "Binance 24h Volume",
+                f"${safe_float(ticker.get('quote_volume_24h'), 0):,.0f}",
+                help="Live Binance BTC quote volume over 24 hours; this is not an AI accuracy statistic.",
+            )
+            c4.metric(
+                "Kalshi target",
+                fmt_money(kctx["target"]) if kctx["available"] else "N/A",
             )
 
-            call1, call2, call3, call4 = st.columns(4)
-            with call1:
+    if tab_ai.open:
+        with tab_ai:
+            st.subheader("Master Kalshi 15-minute Prediction AI")
+            _call_entries = shared_paper_chart_entries(
+                _shared_paper,
+                decision.get("kalshi_ticker", ""),
+                limit=11,
+            )
+            d1, d2, d3, d4, d5 = st.columns(5)
+            with d1:
                 st.markdown(
-                    f'<div class="direction-card metric-direction-card"><div class="direction-card-label">CALL</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
+                    f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Call</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
                     unsafe_allow_html=True,
                 )
-            call2.metric("Side", side_text)
-            call3.metric(
-                "AI projected end", fmt_money(decision["projected_end"])
-            )
-            call4.metric(
-                "Confidence", f"{decision['confidence']*100:.1f}%"
-            )
-
-            if decision["action"] == "SCALP UP":
-                st.success("SCALP UP → paper signal is to BUY UP.")
-            elif decision["action"] == "SCALP DOWN":
-                st.error("SCALP DOWN → paper signal is to BUY DOWN.")
-            elif decision["action"] in {"LOCK UP", "LOCK DOWN"}:
-                st.warning(
-                    f"LOCK {decision['locked_side']} → direction stays fixed; "
-                    "the paper position holds through the end of the current 15-minute Kalshi window or settles at expiry."
-                )
-            else:
-                st.info("HOLD → no Kalshi side has enough edge yet.")
-
-            st.caption(
-                f"Live Kalshi market: {kctx['ticker']} • target is fetched from "
-                "that exact Kalshi ticker and shared by the chart, LOCK/SCALP engine, "
-                "paper signals, and learner. The candles use this app's Binance 1-minute feed "
-                "as a real-time proxy; official Kalshi settlement follows "
-                "Kalshi's stated reference methodology. "
-                "The target line stays fixed for this contract and changes only "
-                "when Kalshi rolls to the next 15-minute market."
-            )
-        else:
-            st.warning(
-                "Live Kalshi KXBTC15M target is temporarily unavailable."
-            )
-            st.plotly_chart(
-                candle_chart(hist),
-                use_container_width=True,
-                key="fallback_market_chart",
-            )
-
-        st.divider()
-        st.subheader("Broader BTC market chart")
-
-        st.plotly_chart(
-            candle_chart(
-                hist,
-                kctx["target"] if kctx["available"] else np.nan
-            ),
-            use_container_width=True,
-            key="btc_market_chart",
-            config={
-                "displaylogo": False,
-                "scrollZoom": True,
-                "responsive": True,
-            },
-        )
-
-        c1, c2, c3, c4 = st.columns(4)
-        last = hist.iloc[-1]
-        c1.metric("RSI 14", f"{safe_float(last['rsi'], 50):.1f}")
-        c2.metric("ATR 14", f"${safe_float(last['atr14'], 0):,.2f}")
-        c3.metric(
-            "Binance 24h Volume",
-            f"${safe_float(ticker.get('quote_volume_24h'), 0):,.0f}",
-            help="Live Binance BTC quote volume over 24 hours; this is not an AI accuracy statistic.",
-        )
-        c4.metric(
-            "Kalshi target",
-            fmt_money(kctx["target"]) if kctx["available"] else "N/A",
-        )
-
-    with tab_ai:
-        st.subheader("Master Kalshi 15-minute Prediction AI")
-        _call_entries = shared_paper_chart_entries(
-            _shared_paper,
-            decision.get("kalshi_ticker", ""),
-            limit=11,
-        )
-        d1, d2, d3, d4, d5 = st.columns(5)
-        with d1:
-            st.markdown(
-                f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Call</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
-                unsafe_allow_html=True,
-            )
-            if _call_entries:
-                st.caption(
-                    f"Entered at {_call_entries[-1]['kalshi_entry_pct']:.0f}%"
-                )
-        d2.metric("Master score", f"{decision['score']:+.3f}")
-        d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
-        d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
-        d5.metric("Risk level", decision["risk_level"])
-
-        st.markdown("#### Next three 15-minute market outlooks")
-        _outlooks = decision.get("next_market_outlooks", [])
-        if _outlooks:
-            _outlook_cols = st.columns(3)
-            for _col, _outlook in zip(_outlook_cols, _outlooks):
-                _close_label = pd.to_datetime(
-                    _outlook["expires_at"], unit="s", utc=True
-                ).tz_convert("America/New_York").strftime("%I:%M %p")
-                _arrow = "▲" if _outlook["direction"] == "UP" else "▼"
-                _col.metric(
-                    f"Next +{_outlook['horizon']} • closes {_close_label}",
-                    f"{_arrow} {_outlook['direction']} {_outlook['confidence']*100:.1f}%",
-                    f"projected ${_outlook['projected_close']:,.0f}",
-                )
-            st.caption(
-                "Continuously refreshed research outlooks for the next three full Kalshi windows. "
-                "They are graded after each window closes and cannot place a trade before that market is active."
-            )
-        else:
-            st.caption("Next-market outlooks are waiting for an active Kalshi window and enough candle history.")
-
-        # User-friendly AI Council summary
-        action = str(decision.get("action", "HOLD"))
-        confidence_pct = float(decision.get("confidence", 0.0)) * 100.0
-        consensus_pct = float(decision.get("consensus", 0.0)) * 100.0
-        score = float(decision.get("score", 0.0))
-
-        if action == "LOCK UP":
-            plain_call = "The council expects BTC to finish ABOVE the Kalshi target at expiration."
-            call_icon = "🔒⬆️"
-        elif action == "LOCK DOWN":
-            plain_call = "The council expects BTC to finish BELOW the Kalshi target at expiration."
-            call_icon = "🔒⬇️"
-        elif action == "SCALP UP":
-            plain_call = "The council sees a short-term UP move with enough edge for a paper scalp."
-            call_icon = "⚡⬆️"
-        elif action == "SCALP DOWN":
-            plain_call = "The council sees a short-term DOWN move with enough edge for a paper scalp."
-            call_icon = "⚡⬇️"
-        else:
-            plain_call = "The council does not see a strong enough edge right now. Waiting is the preferred move."
-            call_icon = "⏸️"
-
-        if confidence_pct >= 75:
-            confidence_word = "Strong"
-        elif confidence_pct >= 60:
-            confidence_word = "Moderate"
-        else:
-            confidence_word = "Low"
-
-        if consensus_pct >= 75:
-            agreement_word = "Most specialists agree"
-        elif consensus_pct >= 55:
-            agreement_word = "Council is somewhat split"
-        else:
-            agreement_word = "Council is heavily divided"
-
-        st.markdown("### Council verdict")
-        st.markdown(
-            f'<div class="direction-card verdict-card">{directional_badge_html(action)}</div>',
-            unsafe_allow_html=True,
-        )
-        st.write(plain_call)
-        s1, s2, s3 = st.columns(3)
-        s1.metric("How sure?", f"{confidence_pct:.0f}%", confidence_word)
-        s2.metric("How much agreement?", f"{consensus_pct:.0f}%", agreement_word)
-        direction_label = "UP" if score > 0.05 else "DOWN" if score < -0.05 else "NEUTRAL"
-        s3.metric("Overall lean", direction_label, f"Score {score:+.2f}")
-
-        st.caption(
-            "Confidence = how strong the combined signal is. Consensus = how much the specialist AIs agree. "
-            "A strong call with low consensus means the council still has meaningful disagreement."
-        )
-        if decision["action"] in {"LOCK UP", "LOCK DOWN"}:
-            st.markdown(directional_badge_html(decision["action"]), unsafe_allow_html=True)
-            st.warning(
-                f"LOCKED SIDE: {decision['locked_side']} — direction cannot reverse; "
-                "paper position holds through the end of the 15-minute window or settles at expiry."
-            )
-        st.info(decision["reason"])
-
-        try:
-            _bot_learning_state = fetch_remote_learning_state() or {}
-            _bot_regime = detect_regime(hist)
-            render_bot_intelligence_dashboard(
-                results,
-                _bot_learning_state,
-                _bot_regime,
-                dark_mode=dark_mode,
-            )
-            render_research_dashboard(_bot_learning_state)
-        except Exception as _bot_ui_exc:
-            st.caption(f"Bot Intelligence v4 panel temporarily unavailable: {_bot_ui_exc}")
-
-        st.markdown("### Live specialist signals")
-        rows = []
-        for r in results.values():
-            rows.append({
-                "Specialist": r["name"],
-                "Signal": r["signal"],
-                "Score": round(r["score"], 3),
-                "Confidence %": round(r["confidence"] * 100, 1),
-                "Weight": SPECIALIST_WEIGHTS.get(r["name"], 1.0),
-                "Reason": r["reason"],
-                "Counterargument": r.get("counterargument", ""),
-                "Invalidation": r.get("invalidation", ""),
-            })
-        council_df = pd.DataFrame(rows)
-        if dark_mode:
-            # Streamlit's native dataframe canvas stays light even when our custom
-            # dashboard dark-mode toggle is enabled, so render the council table
-            # as a responsive HTML table in dark mode. Light mode keeps the native table.
-            def _signal_badge(value):
-                label = str(value).upper()
-                if label == "BULLISH":
-                    cls = "signal-bullish"
-                elif label == "BEARISH":
-                    cls = "signal-bearish"
-                else:
-                    cls = "signal-neutral"
-                return f'<span class="signal-badge {cls}">{label}</span>'
-
-            table_html = council_df.to_html(
-                index=False,
-                border=0,
-                classes="ai-council-table",
-                escape=False,
-                formatters={"Signal": _signal_badge},
-            )
-            st.markdown(
-                """
-                <style>
-                .ai-council-wrap {
-                    width: 100%; overflow-x: auto; border: 1px solid #1687ff;
-                    border-radius: 12px; background: #0b1220;
-                }
-                .ai-council-table {
-                    width: 100%; border-collapse: collapse; color: #e8eef8;
-                    background: #0b1220; font-size: 0.93rem; margin: 0;
-                }
-                .ai-council-table thead th {
-                    position: sticky; top: 0; z-index: 1; text-align: left;
-                    color: #b8cff7; background: #111c2e; font-weight: 700;
-                    border-bottom: 1px solid #2b3b52; padding: 10px 12px;
-                    white-space: nowrap;
-                }
-                .ai-council-table tbody td {
-                    color: #e7edf7; background: #0b1220;
-                    border-bottom: 1px solid #1e2b3d; padding: 9px 12px;
-                    vertical-align: middle; white-space: nowrap;
-                }
-                .ai-council-table tbody tr:nth-child(even) td {background: #0f1828;}
-                .ai-council-table tbody tr:hover td {background: #15243a;}
-                .ai-council-table td:last-child {white-space: normal; min-width: 260px;}
-                .signal-badge {
-                    display:inline-block; min-width:92px; text-align:center;
-                    padding:4px 10px; border-radius:7px; font-weight:800;
-                    letter-spacing:.02em; line-height:1.2;
-                }
-                .signal-bullish {
-                    color:#00f0b5; background:rgba(0,240,181,.13);
-                    border:1px solid rgba(0,240,181,.80);
-                    box-shadow:0 0 12px rgba(0,240,181,.10) inset;
-                }
-                .signal-bearish {
-                    color:#ff536b; background:rgba(255,83,107,.13);
-                    border:1px solid rgba(255,83,107,.85);
-                    box-shadow:0 0 12px rgba(255,83,107,.10) inset;
-                }
-                .signal-neutral {
-                    color:#b8c6dc; background:rgba(184,198,220,.09);
-                    border:1px solid rgba(184,198,220,.42);
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f'<div class="ai-council-wrap">{table_html}</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.dataframe(council_df, use_container_width=True, hide_index=True)
-
-    with tab_hourly:
-        st.subheader("Hourly Kalshi BTC Target AI")
-        st.caption(
-            "Separate 60-minute model. It estimates BTC's most likely price "
-            "at the next hourly Kalshi settlement and compares that forecast "
-            "with the nearest active Kalshi hourly strike."
-        )
-
-        h1, h2, h3, h4 = st.columns(4)
-        h1.metric(
-            "1-hour AI target",
-            fmt_money(hourly_ai["target_price"]),
-        )
-        h2.metric(
-            "Expected move",
-            f"${hourly_ai['projected_move']:+,.2f}",
-            f"{hourly_ai['projected_move_pct']*100:+.3f}%",
-        )
-        with h3:
-            st.markdown(
-                f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Direction</div><div class="direction-card-value">{directional_badge_html(hourly_ai["direction"])}</div></div>',
-                unsafe_allow_html=True,
-            )
-        h4.metric(
-            "Confidence",
-            f"{hourly_ai['confidence']*100:.1f}%",
-        )
-
-        h5, h6, h7 = st.columns(3)
-        h5.metric(
-            "Kalshi BTC now",
-            fmt_money(display_price) if pd.notna(display_price) else "Unavailable",
-        )
-        h6.metric(
-            "Nearest Kalshi hourly strike",
-            (
-                fmt_money(hourly_ai["nearest_strike"])
-                if pd.notna(hourly_ai["nearest_strike"])
-                else "N/A"
-            ),
-        )
-
-        if pd.notna(hourly_ai["seconds_remaining"]):
-            hr_min, hr_sec = divmod(
-                max(0, int(hourly_ai["seconds_remaining"])),
-                60,
-            )
-            h7.metric(
-                "Hourly market time left",
-                f"{hr_min:02d}:{hr_sec:02d}",
-            )
-        else:
-            h7.metric("Hourly market time left", "N/A")
-
-        st.plotly_chart(
-            hourly_target_chart(hist, price, hourly_ai),
-            use_container_width=True,
-            key="hourly_kalshi_ai_chart",
-            config={
-                "displaylogo": False,
-                "scrollZoom": True,
-                "responsive": True,
-            },
-        )
-
-        if hourly_ai["direction"] == "UP":
-            st.success(
-                f"Hourly AI expects BTC near ${hourly_ai['target_price']:,.2f} "
-                "at the next hourly settlement."
-            )
-        elif hourly_ai["direction"] == "DOWN":
-            st.error(
-                f"Hourly AI expects BTC near ${hourly_ai['target_price']:,.2f} "
-                "at the next hourly settlement."
-            )
-        else:
-            st.info(
-                f"Hourly AI currently expects a relatively flat finish near "
-                f"${hourly_ai['target_price']:,.2f}."
-            )
-
-        if hourly_ai["kalshi_available"]:
-            st.caption(
-                "Yellow dashed line = nearest active Kalshi hourly strike. "
-                "Blue solid line = this bot's independent 1-hour BTC target forecast."
-            )
-        else:
-            st.warning(
-                "Kalshi hourly strikes are temporarily unavailable. "
-                "The Hourly AI target is still calculated from live BTC market data."
-            )
-
-
-    with tab_flow:
-        st.subheader("AGGR-style aggressor flow")
-        st.caption("This uses Binance aggregate trades directly—the underlying aggressor/order-flow data—rather than scraping the AGGR.trade webpage.")
-        if not agg.empty:
-            buy_n = agg.loc[agg["aggressor"] == "BUY", "notional"].sum()
-            sell_n = agg.loc[agg["aggressor"] == "SELL", "notional"].sum()
-            total_n = buy_n + sell_n
-            imbalance = (buy_n - sell_n) / total_n if total_n else 0.0
-            f1, f2, f3, f4 = st.columns(4)
-            f1.metric("Aggressive buys", f"${buy_n:,.0f}")
-            f2.metric("Aggressive sells", f"${sell_n:,.0f}")
-            f3.metric("Flow imbalance", f"{imbalance*100:+.1f}%")
-            f4.metric("Trades sampled", f"{len(agg):,}")
-            show = agg[["time", "aggressor", "price", "qty", "notional"]].tail(80).sort_values("time", ascending=False)
-            render_dashboard_table(show)
-        else:
-            st.warning("Aggregate trade feed unavailable.")
-
-        st.divider()
-        st.subheader("Futures liquidity / derivatives")
-        q1, q2, q3, q4 = st.columns(4)
-        q1.metric("Funding", f"{safe_float(futures.get('funding_rate'), 0)*100:.4f}%")
-        q2.metric("Open interest", f"{safe_float(futures.get('open_interest'), 0):,.0f} BTC")
-        q3.metric("Book imbalance", f"{safe_float(futures.get('book_imbalance'), 0)*100:+.1f}%")
-        _futures_status = "UNAVAILABLE"
-        if futures.get("ok"):
-            _futures_status = (
-                "LIVE — BYBIT"
-                if "Bybit" in str(futures.get("source", ""))
-                else "LIVE — BINANCE"
-            )
-        q4.metric("Futures status", _futures_status)
-
-        st.divider()
-        st.subheader("Kalshi — live BTC 15-minute market")
-        kctx = stable_kalshi_contract(kalshi, price)
-        if kctx["available"]:
-            rr1, rr2, rr3, rr4 = st.columns(4)
-            rr1.metric("Ticker", kctx["ticker"])
-            rr2.metric("Target", fmt_money(kctx["target"]))
-            rr3.metric("BTC vs target", f"${display_price - kctx['target']:+,.2f}" if pd.notna(display_price) and pd.notna(kctx.get("target")) else "Unavailable")
-            rr4.metric(
-                "UP / DOWN",
-                (
-                    "N/A"
-                    if pd.isna(kctx["up_probability"])
-                    else (
-                        f"{kctx['up_probability']*100:.1f}% / "
-                        f"{(1.0-kctx['up_probability'])*100:.1f}%"
+                if _call_entries:
+                    st.caption(
+                        f"Entered at {_call_entries[-1]['kalshi_entry_pct']:.0f}%"
                     )
-                ),
-            )
-        st.caption(
-            "Read-only Kalshi market data. The app does not place Kalshi orders."
-        )
+            d2.metric("Master score", f"{decision['score']:+.3f}")
+            d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
+            d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
+            d5.metric("Risk level", decision["risk_level"])
 
-        st.subheader("Kalshi market-data details")
-        if kalshi.get("ok"):
-            markets = kalshi.get("markets", [])
-            st.caption(f"Public market-data lookup • {len(markets)} BTC-related open markets found • target-polled every ~3 seconds")
-            if markets:
-                krows = []
-                for m in markets:
-                    krows.append({
-                        "Ticker": m.get("ticker", ""),
-                        "Title": m.get("title", ""),
-                        "Yes bid": m.get("yes_bid_dollars", ""),
-                        "Yes ask": m.get("yes_ask_dollars", ""),
-                        "Last": m.get("last_price_dollars", ""),
-                        "Volume": m.get("volume_fp", ""),
-                        "Close": m.get("close_time", ""),
-                    })
-                render_dashboard_table(pd.DataFrame(krows))
+            st.markdown("#### Next three 15-minute market outlooks")
+            _outlooks = decision.get("next_market_outlooks", [])
+            if _outlooks:
+                _outlook_cols = st.columns(3)
+                for _col, _outlook in zip(_outlook_cols, _outlooks):
+                    _close_label = pd.to_datetime(
+                        _outlook["expires_at"], unit="s", utc=True
+                    ).tz_convert("America/New_York").strftime("%I:%M %p")
+                    _arrow = "▲" if _outlook["direction"] == "UP" else "▼"
+                    _col.metric(
+                        f"Next +{_outlook['horizon']} • closes {_close_label}",
+                        f"{_arrow} {_outlook['direction']} {_outlook['confidence']*100:.1f}%",
+                        f"projected ${_outlook['projected_close']:,.0f}",
+                    )
+                st.caption(
+                    "Continuously refreshed research outlooks for the next three full Kalshi windows. "
+                    "They are graded after each window closes and cannot place a trade before that market is active."
+                )
             else:
-                st.info("Kalshi responded, but no open market in the returned page matched Bitcoin/BTC right now.")
-        else:
-            st.warning("Kalshi public data is currently unavailable. The Event AI automatically falls back to neutral.")
-            if show_raw:
-                st.code(kalshi.get("error", "Unknown Kalshi error"))
+                st.caption("Next-market outlooks are waiting for an active Kalshi window and enough candle history.")
 
-    with tab_paper:
-        st.subheader("Automatic Paper Trading")
-        render_learning_freshness(_shared_learning_state)
+            # User-friendly AI Council summary
+            action = str(decision.get("action", "HOLD"))
+            confidence_pct = float(decision.get("confidence", 0.0)) * 100.0
+            consensus_pct = float(decision.get("consensus", 0.0)) * 100.0
+            score = float(decision.get("score", 0.0))
 
-        _kp = shared_paper_summary(_shared_paper)
-        _post_fix, _scalp_gate = shared_paper_scorecard(_shared_paper)
-        st.caption(
-            "PRIMARY P/L EVIDENCE — every balance, position and trade below "
-            "comes from the persistent GitHub learning-state ledger."
-        )
-        if _kp.get("ledger_reconciled"):
-            st.caption("Ledger reconciliation: PASS — recorded cash matches immutable paper lifecycle events.")
-        else:
-            st.error(
-                "Ledger reconciliation failed: "
-                + "; ".join(_kp.get("ledger_issues") or ["unknown mismatch"])
-            )
-        k1, k2, k3, k4, k5 = st.columns(5)
-        k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")
-        k2.metric("Total P/L", f"${_kp['total_pnl']:+,.2f}")
-        k3.metric("Realized P/L", f"${_kp['realized_pnl']:+,.2f}")
-        k4.metric("Open P/L", f"${_kp['unrealized_pnl']:+,.2f}")
-        _pf = _kp.get("profit_factor")
-        k5.metric(
-            "Contract Profit Factor",
-            "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"),
-        )
-
-        st.markdown("#### Since Loss-Loop Fix — Kalshi Execution Scorecard")
-        st.caption(
-            "This scorecard isolates trades opened after the new safeguards. "
-            "Older losses stay in the lifetime ledger but do not decide whether "
-            "the updated Kalshi strategy passes validation."
-        )
-        pf1, pf2, pf3, pf4, pf5 = st.columns(5)
-        pf1.metric(
-            "Closed trades",
-            f"{_post_fix['samples']}/{_post_fix['validation_sample_target']}",
-        )
-        pf2.metric("Kalshi markets", _post_fix["markets"])
-        pf3.metric("Post-fix P/L", f"${_post_fix['total_pnl']:+,.2f}")
-        _post_pf = _post_fix.get("profit_factor")
-        pf4.metric(
-            "Post-fix profit factor",
-            "Learning" if _post_pf is None else (
-                "∞" if not np.isfinite(_post_pf) else f"{_post_pf:.2f}"
-            ),
-        )
-        pf5.metric(
-            "Max drawdown",
-            f"{_post_fix['max_drawdown_pct'] * 100:.2f}%",
-        )
-        st.info(
-            f"Validation: {_scalp_gate['status']} • "
-            f"SCALP safety gate begins after {_post_fix['gate_sample_target']} "
-            f"closed post-fix SCALPs ({_scalp_gate['performance']['samples']} collected). "
-            "Recovery uses the latest 50 SCALP results. Every specialist remains active. "
-            + _scalp_gate["reason"]
-        )
-
-        _open_contract = _kp.get("open_position")
-        if _open_contract:
-            display_position_side = "UP" if _open_contract["side"] == "YES" else "DOWN"
-            st.info(
-                f"OPEN PAPER {_open_contract['strategy']} {display_position_side} • "
-                f"Amount: ${_open_contract['amount_down']:,.2f} • "
-                f"Kalshi entry: {_open_contract['entry_price'] * 100:.0f}%"
-            )
-
-        # BTCC-inspired clarity, adapted to the existing Kalshi paper engine:
-        # one compact ticket exposes executable price, costs, break-even and
-        # protection before the automatic worker can open anything.
-        _ticket = build_pro_trade_ticket(
-            decision,
-            risk,
-            _kp,
-            has_open_position=bool(_open_contract),
-        )
-
-        def _ticket_pct(value):
-            return "N/A" if value is None else f"{value * 100:.0f}%"
-
-        def _ticket_money(value, signed=False):
-            if value is None:
-                return "N/A"
-            return f"${value:+,.2f}" if signed else f"${value:,.2f}"
-
-        _projected_label = (
-            "Win scenario net" if _ticket["strategy"] == "LOCK" else "Projected net"
-        )
-        _blocker_text = (
-            " • ".join(_ticket["blockers"])
-            if _ticket["blockers"]
-            else "All displayed paper-entry checks are ready"
-        )
-        st.markdown(
-            f"""
-            <div class="pro-ticket">
-              <div class="pro-ticket-head">
-                <div class="pro-ticket-title">Pro Paper Trade Ticket — {_ticket['strategy']} {_ticket['direction']}</div>
-                <div class="pro-ticket-status">{_ticket['status']}</div>
-              </div>
-              <div class="pro-ticket-grid">
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">Entry ask</div><div class="pro-ticket-value">{_ticket_pct(_ticket['entry_price'])}</div></div>
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">Current bid</div><div class="pro-ticket-value">{_ticket_pct(_ticket['current_bid'])}</div></div>
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">Paper amount</div><div class="pro-ticket-value">{_ticket_money(_ticket['total_cost'])}</div></div>
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">Estimated entry fee</div><div class="pro-ticket-value">{_ticket_money(_ticket['entry_fee'])}</div></div>
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">Break-even exit</div><div class="pro-ticket-value">{_ticket_pct(_ticket['break_even_price'])}</div></div>
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">Target / settlement</div><div class="pro-ticket-value">{_ticket_pct(_ticket['take_profit_price'] if _ticket['strategy'] == 'SCALP' else _ticket['projected_exit_price'])}</div></div>
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">{_projected_label}</div><div class="pro-ticket-value">{_ticket_money(_ticket['projected_net_pnl'], signed=True)}</div></div>
-                <div class="pro-ticket-cell"><div class="pro-ticket-label">Maximum entry loss</div><div class="pro-ticket-value">{_ticket_money(_ticket['max_loss'])}</div></div>
-              </div>
-              <div class="pro-ticket-protection"><b>Protection:</b> {_ticket['protection']}<br><b>Status:</b> {_blocker_text}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        auto_state = {
-            "enabled": bool(_shared_paper.get("enabled", True)),
-            "last_message": _shared_paper.get(
-                "last_message", "Persistent paper learner is waiting."
-            ),
-        }
-        _status_side = (
-            "UP" if _open_contract and _open_contract["side"] == "YES"
-            else "DOWN" if _open_contract
-            else "NONE"
-        )
-        status1, status2, status3, status4 = st.columns(4)
-        status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
-        status2.metric("Contract position", _status_side)
-        status3.metric("Kalshi call", decision["action"])
-        status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
-
-        if bool(auto_state["enabled"]):
-            _status_message = (
-                auto_result["message"]
-                if auto_result.get("message")
-                else auto_state.get("last_message", "AUTO PAPER running.")
-            )
-            _decision_action = str(decision.get("action", "HOLD")).upper()
-            if _decision_action in {"SCALP UP", "LOCK UP", "UP"}:
-                st.success(_status_message)
-            elif _decision_action in {"SCALP DOWN", "LOCK DOWN", "DOWN"}:
-                st.error(_status_message)
+            if action == "LOCK UP":
+                plain_call = "The council expects BTC to finish ABOVE the Kalshi target at expiration."
+                call_icon = "🔒⬆️"
+            elif action == "LOCK DOWN":
+                plain_call = "The council expects BTC to finish BELOW the Kalshi target at expiration."
+                call_icon = "🔒⬇️"
+            elif action == "SCALP UP":
+                plain_call = "The council sees a short-term UP move with enough edge for a paper scalp."
+                call_icon = "⚡⬆️"
+            elif action == "SCALP DOWN":
+                plain_call = "The council sees a short-term DOWN move with enough edge for a paper scalp."
+                call_icon = "⚡⬇️"
             else:
-                st.info(_status_message)
-        else:
-            st.info(
-                "AUTO PAPER TRADING is off. Turn it on in the sidebar to let "
-                "approved paper signals execute automatically."
+                plain_call = "The council does not see a strong enough edge right now. Waiting is the preferred move."
+                call_icon = "⏸️"
+
+            if confidence_pct >= 75:
+                confidence_word = "Strong"
+            elif confidence_pct >= 60:
+                confidence_word = "Moderate"
+            else:
+                confidence_word = "Low"
+
+            if consensus_pct >= 75:
+                agreement_word = "Most specialists agree"
+            elif consensus_pct >= 55:
+                agreement_word = "Council is somewhat split"
+            else:
+                agreement_word = "Council is heavily divided"
+
+            st.markdown("### Council verdict")
+            st.markdown(
+                f'<div class="direction-card verdict-card">{directional_badge_html(action)}</div>',
+                unsafe_allow_html=True,
             )
+            st.write(plain_call)
+            s1, s2, s3 = st.columns(3)
+            s1.metric("How sure?", f"{confidence_pct:.0f}%", confidence_word)
+            s2.metric("How much agreement?", f"{consensus_pct:.0f}%", agreement_word)
+            direction_label = "UP" if score > 0.05 else "DOWN" if score < -0.05 else "NEUTRAL"
+            s3.metric("Overall lean", direction_label, f"Score {score:+.2f}")
 
-        st.subheader("Risk Manager")
-        r1, r2, r3, r4 = st.columns(4)
-        r1.metric("Approved", "YES" if risk["approved"] else "NO")
-        r2.metric("Position size", f"{risk['position_pct']*100:.2f}%")
-        r3.metric("Risk score", f"{risk['risk_score']:.2f}")
-        r4.metric("Decision", decision["action"])
-        st.metric(
-            "Next Approved Amount",
-            f"${_ticket['total_cost']:,.2f}" if _ticket["status"] == "READY" else "$0.00",
-        )
-        st.caption(risk["reason"])
-        st.caption(
-            "Balanced-call mode publishes a directional outlook for every healthy 15-minute market. "
-            "Paper execution remains separate and may reject a visible call for price, fees, feed health, or weak evidence. "
-            "LOCK qualification is evaluated continuously and requires at least 68% calibrated confidence, "
-            "strong council agreement, healthy data, "
-            "target confirmation, market alignment, and a LOCK entry at or below 93%. SCALPs remain capped at 75%. "
-            "LOCK keeps its original direction, "
-            "stays open through the exact 15-minute window, and is finalized "
-            "only from that ticker's official Kalshi settlement."
-        )
+            st.caption(
+                "Confidence = how strong the combined signal is. Consensus = how much the specialist AIs agree. "
+                "A strong call with low consensus means the council still has meaningful disagreement."
+            )
+            if decision["action"] in {"LOCK UP", "LOCK DOWN"}:
+                st.markdown(directional_badge_html(decision["action"]), unsafe_allow_html=True)
+                st.warning(
+                    f"LOCKED SIDE: {decision['locked_side']} — direction cannot reverse; "
+                    "paper position holds through the end of the 15-minute window or settles at expiry."
+                )
+            st.info(decision["reason"])
 
-        st.subheader("Automatic Kalshi Paper Trade Log")
-        _contract_history = shared_paper_history(_shared_paper, limit=100)
-        if _contract_history:
-            _history_view = pd.DataFrame([
-                {
-                    "Status": row["status"],
-                    "Direction": row["direction"],
-                    "Strategy": row["strategy"],
-                    "Amount": f"${row['amount']:,.2f}",
-                    "Kalshi Entry": f"{row['kalshi_entry_pct']:.0f}%",
-                    "Current / Exit": (
-                        "N/A" if row["current_or_exit_pct"] is None
-                        else f"{row['current_or_exit_pct']:.0f}%"
-                    ),
-                    "Result": row["result"],
-                    "P/L": (
-                        "PENDING"
-                        if row["pnl"] is None
-                        else f"${row['pnl']:+,.2f}"
-                    ),
-                    "Opened": pd.to_datetime(
-                        row["opened_at"], unit="s", utc=True
-                    ).tz_convert("America/New_York").strftime("%Y-%m-%d %I:%M %p %Z"),
-                    "Closed": (
-                        "OPEN" if row["closed_at"] is None
-                        else pd.to_datetime(
-                            row["closed_at"], unit="s", utc=True
-                        ).tz_convert("America/New_York").strftime("%Y-%m-%d %I:%M %p %Z")
-                    ),
-                }
-                for row in _contract_history
-            ])
-            render_dashboard_table(_history_view)
-        else:
-            st.info("No automatic Kalshi paper trades yet.")
+            try:
+                _bot_learning_state = fetch_remote_learning_state() or {}
+                _bot_regime = detect_regime(hist)
+                render_bot_intelligence_dashboard(
+                    results,
+                    _bot_learning_state,
+                    _bot_regime,
+                    dark_mode=dark_mode,
+                )
+                render_research_dashboard(_bot_learning_state)
+            except Exception as _bot_ui_exc:
+                st.caption(f"Bot Intelligence v4 panel temporarily unavailable: {_bot_ui_exc}")
 
-    with tab_journal:
-        _journal_state = fetch_remote_learning_state()
-        render_learning_freshness(_journal_state)
-        _journal_rows, stats = persistent_journal_view(_journal_state)
-        if not _journal_state:
-            st.warning("Persistent prediction history is unavailable. Local-only counts are not substituted.")
-        j1, j2, j3, j4 = st.columns(4)
-        j1.metric("Predictions", stats["n"])
-        j2.metric("Signal calls resolved", stats["trade_resolved"])
-        j3.metric("Signal-call accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
-        j4.metric("HOLD/WAIT resolved", stats["wait_resolved"])
-        st.caption(
-            "Persistent background history — one row per observed market. Accuracy uses official Kalshi outcomes for saved SCALP/LOCK calls only. HOLD/WAIT and historical FORECAST rows without a saved execution action are excluded. Earlier history is limited to retained records; missed windows are not invented."
-        )
-        st.caption("Background snapshot: " + str((_journal_state or {}).get("updated_at") or "unavailable"))
-        journal_df = pd.DataFrame(_journal_rows[:150])
-        st.caption("Showing the latest 150 rows; totals include all saved journal rows.")
-        with st.expander("Earlier dashboard-local records (separate legacy journal)"):
-            st.dataframe(recent_predictions(150), use_container_width=True, hide_index=True)
-        if not journal_df.empty:
+            st.markdown("### Live specialist signals")
+            rows = []
+            for r in results.values():
+                rows.append({
+                    "Specialist": r["name"],
+                    "Signal": r["signal"],
+                    "Score": round(r["score"], 3),
+                    "Confidence %": round(r["confidence"] * 100, 1),
+                    "Weight": SPECIALIST_WEIGHTS.get(r["name"], 1.0),
+                    "Reason": r["reason"],
+                    "Counterargument": r.get("counterargument", ""),
+                    "Invalidation": r.get("invalidation", ""),
+                })
+            council_df = pd.DataFrame(rows)
             if dark_mode:
-                # Match the AI Council table: dark card, blue outline, and
-                # directional visual cues. This is presentation-only.
-                journal_view = journal_df.copy()
-                _journal_actions = journal_view["action"].astype(str).str.upper().str.strip()
-                _journal_resolved = pd.to_numeric(journal_view["resolved"], errors="coerce").fillna(0).astype(int)
-                # Keep database/analytics correctness numeric. Only the dark-mode
-                # display copy becomes object dtype so pandas can safely render
-                # textual states such as NO TRADE and OPEN.
-                journal_view["correct"] = journal_view["correct"].astype(object)
-                journal_view.loc[_journal_actions.isin(["HOLD", "WAIT"]), "correct"] = "NO TRADE"
-                journal_view.loc[_journal_actions.str.startswith("FORECAST") & (_journal_resolved == 1), "correct"] = "FORECAST ONLY"
-                journal_view.loc[_journal_resolved != 1, "correct"] = "OPEN"
-
-                def _journal_action_badge(value):
-                    label = str(value or "HOLD").upper().strip()
-                    if label in {"SCALP UP", "LOCK UP", "UP", "BULLISH"}:
-                        cls, icon = "journal-up", "▲"
-                    elif label in {"SCALP DOWN", "LOCK DOWN", "DOWN", "BEARISH"}:
-                        cls, icon = "journal-down", "▼"
+                # Streamlit's native dataframe canvas stays light even when our custom
+                # dashboard dark-mode toggle is enabled, so render the council table
+                # as a responsive HTML table in dark mode. Light mode keeps the native table.
+                def _signal_badge(value):
+                    label = str(value).upper()
+                    if label == "BULLISH":
+                        cls = "signal-bullish"
+                    elif label == "BEARISH":
+                        cls = "signal-bearish"
                     else:
-                        cls, icon = "journal-neutral", "•"
-                    return f'<span class="journal-badge {cls}">{icon}&nbsp;&nbsp;{label}</span>'
+                        cls = "signal-neutral"
+                    return f'<span class="signal-badge {cls}">{label}</span>'
 
-                def _journal_result_badge(value):
-                    label = str(value).upper().strip()
-                    if label == "FORECAST ONLY":
-                        return '<span class="journal-result journal-neutral">FORECAST ONLY</span>'
-                    if label == "NO TRADE":
-                        return '<span class="journal-result journal-neutral">NO TRADE</span>'
-                    if label == "OPEN" or pd.isna(value):
-                        return '<span class="journal-result journal-pending">OPEN</span>'
-                    try:
-                        return (
-                            '<span class="journal-result journal-win">✓ CORRECT</span>'
-                            if int(float(value)) == 1
-                            else '<span class="journal-result journal-loss">✕ WRONG</span>'
-                        )
-                    except Exception:
-                        return '<span class="journal-result journal-pending">OPEN</span>'
-
-                def _journal_resolved_badge(value):
-                    try:
-                        resolved = int(float(value)) == 1
-                    except Exception:
-                        resolved = False
-                    cls = "journal-resolved" if resolved else "journal-pending"
-                    text = "RESOLVED" if resolved else "OPEN"
-                    return f'<span class="journal-result {cls}">{text}</span>'
-
-                def _journal_official_badge(value):
-                    label = str(value or "").strip().upper()
-                    if label == "YES":
-                        return '<span class="journal-result journal-up">YES</span>'
-                    if label == "NO":
-                        return '<span class="journal-result journal-down">NO</span>'
-                    return '<span class="journal-result journal-pending">PENDING</span>'
-
-                journal_html = journal_view.to_html(
+                table_html = council_df.to_html(
                     index=False,
                     border=0,
-                    classes="prediction-journal-table",
+                    classes="ai-council-table",
                     escape=False,
-                    formatters={
-                        "action": _journal_action_badge,
-                        "resolved": _journal_resolved_badge,
-                        "correct": _journal_result_badge,
-                        "official_result": _journal_official_badge,
-                    },
+                    formatters={"Signal": _signal_badge},
                 )
                 st.markdown(
                     """
                     <style>
-                    .prediction-journal-wrap {
-                        width:100%; overflow-x:auto; border:1px solid #1687ff;
-                        border-radius:12px; background:#0b1220;
+                    .ai-council-wrap {
+                        width: 100%; overflow-x: auto; border: 1px solid #1687ff;
+                        border-radius: 12px; background: #0b1220;
                     }
-                    .prediction-journal-table {
-                        width:100%; border-collapse:collapse; color:#e8eef8;
-                        background:#0b1220; font-size:.93rem; margin:0;
+                    .ai-council-table {
+                        width: 100%; border-collapse: collapse; color: #e8eef8;
+                        background: #0b1220; font-size: 0.93rem; margin: 0;
                     }
-                    .prediction-journal-table thead th {
-                        position:sticky; top:0; z-index:1; text-align:left;
-                        color:#b8cff7; background:#111c2e; font-weight:700;
-                        border-bottom:1px solid #2b3b52; padding:10px 12px;
-                        white-space:nowrap;
+                    .ai-council-table thead th {
+                        position: sticky; top: 0; z-index: 1; text-align: left;
+                        color: #b8cff7; background: #111c2e; font-weight: 700;
+                        border-bottom: 1px solid #2b3b52; padding: 10px 12px;
+                        white-space: nowrap;
                     }
-                    .prediction-journal-table tbody td {
-                        color:#e7edf7; background:#0b1220;
-                        border-bottom:1px solid #1e2b3d; padding:9px 12px;
-                        vertical-align:middle; white-space:nowrap;
+                    .ai-council-table tbody td {
+                        color: #e7edf7; background: #0b1220;
+                        border-bottom: 1px solid #1e2b3d; padding: 9px 12px;
+                        vertical-align: middle; white-space: nowrap;
                     }
-                    .prediction-journal-table tbody tr:nth-child(even) td {background:#0f1828;}
-                    .prediction-journal-table tbody tr:hover td {background:#15243a;}
-                    .journal-badge, .journal-result {
+                    .ai-council-table tbody tr:nth-child(even) td {background: #0f1828;}
+                    .ai-council-table tbody tr:hover td {background: #15243a;}
+                    .ai-council-table td:last-child {white-space: normal; min-width: 260px;}
+                    .signal-badge {
                         display:inline-block; min-width:92px; text-align:center;
                         padding:4px 10px; border-radius:7px; font-weight:800;
-                        letter-spacing:.02em; line-height:1.2; box-sizing:border-box;
+                        letter-spacing:.02em; line-height:1.2;
                     }
-                    .journal-up, .journal-win, .journal-resolved {
+                    .signal-bullish {
                         color:#00f0b5; background:rgba(0,240,181,.13);
                         border:1px solid rgba(0,240,181,.80);
+                        box-shadow:0 0 12px rgba(0,240,181,.10) inset;
                     }
-                    .journal-down, .journal-loss {
+                    .signal-bearish {
                         color:#ff536b; background:rgba(255,83,107,.13);
                         border:1px solid rgba(255,83,107,.85);
+                        box-shadow:0 0 12px rgba(255,83,107,.10) inset;
                     }
-                    .journal-neutral, .journal-pending {
+                    .signal-neutral {
                         color:#b8c6dc; background:rgba(184,198,220,.09);
                         border:1px solid rgba(184,198,220,.42);
                     }
@@ -6546,250 +6000,783 @@ def live_dashboard():
                     unsafe_allow_html=True,
                 )
                 st.markdown(
-                    f'<div class="prediction-journal-wrap">{journal_html}</div>',
+                    f'<div class="ai-council-wrap">{table_html}</div>',
                     unsafe_allow_html=True,
                 )
             else:
-                st.dataframe(journal_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No predictions recorded yet.")
+                st.dataframe(council_df, use_container_width=True, hide_index=True)
 
-    with tab_learning:
-        st.subheader("15-Minute Prediction Learning")
-        learn = get_learning_state()
-
-        l1, l2, l3, l4 = st.columns(4)
-        l1.metric("Scored 15m windows", int(learn["samples"]))
-        l2.metric(
-            "Direction accuracy",
-            "N/A"
-            if pd.isna(learn["direction_accuracy"])
-            else f"{learn['direction_accuracy']*100:.1f}%"
-        )
-        l3.metric("Avg final error", f"${learn['avg_abs_error']:,.2f}")
-        l4.metric("Avg path error", f"${learn['avg_path_error']:,.2f}")
-
-        _quick100 = rolling_master_accuracy(100)
-        _quick500 = rolling_master_accuracy(500)
-        _quick1000 = rolling_master_accuracy(1000)
-
-        q1, q2, q3 = st.columns(3)
-
-        q1.metric(
-            "Last 100 accuracy",
-            "N/A"
-            if pd.isna(_quick100["accuracy"])
-            else f"{_quick100['accuracy']*100:.1f}%"
-        )
-
-        q2.metric(
-            "Last 500 accuracy",
-            "N/A"
-            if pd.isna(_quick500["accuracy"])
-            else f"{_quick500['accuracy']*100:.1f}%"
-        )
-
-        q3.metric(
-            "Last 1,000 accuracy",
-            "N/A"
-            if pd.isna(_quick1000["accuracy"])
-            else f"{_quick1000['accuracy']*100:.1f}%"
-        )
-
-        st.caption(
-            "The summary and rolling cards use the same resolved 15-minute "
-            "forecast history. HOLD/WAIT trade outcomes remain excluded from "
-            "the separate trading win/loss rate."
-        )
-
-        w1, w2, w3, w4 = st.columns(4)
-        w1.metric("3m weight", f"{learn['w_ret3']*100:.1f}%")
-        w2.metric("8m weight", f"{learn['w_ret8']*100:.1f}%")
-        w3.metric("15m weight", f"{learn['w_ret15']*100:.1f}%")
-        w4.metric("Move scale", f"{learn['momentum_scale']:.2f}×")
-
-        st.divider()
-        st.subheader("Specialist AI Learning")
-
-        st.caption(
-            "Every specialist is graded after each completed 15-minute window. "
-            "The Master AI automatically increases the influence of specialists "
-            "with stronger recent accuracy, edge, and confidence calibration, "
-            "and reduces the influence of weaker ones."
-        )
-
-        st.divider()
-        st.subheader("Rolling Master Accuracy")
-
-        rolling_master_df = rolling_master_accuracy_table()
-
-        for col in [
-            "Direction Accuracy %",
-            "Avg Final Error $",
-            "Avg Path Error $",
-        ]:
-            rolling_master_df[col] = pd.to_numeric(
-                rolling_master_df[col],
-                errors="coerce",
-            ).round(2)
-
-        render_dashboard_table(rolling_master_df)
-
-        _m100 = rolling_master_accuracy(100)
-        _m1000 = rolling_master_accuracy(1000)
-
-        _m100_acc = (
-            np.nan
-            if pd.isna(_m100["accuracy"])
-            else _m100["accuracy"] * 100.0
-        )
-
-        _m1000_acc = (
-            np.nan
-            if pd.isna(_m1000["accuracy"])
-            else _m1000["accuracy"] * 100.0
-        )
-
-        st.caption(
-            "Master learning trend: "
-            + learning_trend_label(
-                _m100_acc,
-                _m1000_acc,
+    if tab_hourly.open:
+        with tab_hourly:
+            st.subheader("Hourly Kalshi BTC Target AI")
+            st.caption(
+                "Separate 60-minute model. It estimates BTC's most likely price "
+                "at the next hourly Kalshi settlement and compares that forecast "
+                "with the nearest active Kalshi hourly strike."
             )
-            + " — compares the most recent 100 completed windows "
-              "with the broader 1,000-window baseline."
-        )
 
-        specialist_multi = add_specialist_learning_trends(
-            specialist_multiwindow_accuracy()
-        )
+            h1, h2, h3, h4 = st.columns(4)
+            h1.metric(
+                "1-hour AI target",
+                fmt_money(hourly_ai["target_price"]),
+            )
+            h2.metric(
+                "Expected move",
+                f"${hourly_ai['projected_move']:+,.2f}",
+                f"{hourly_ai['projected_move_pct']*100:+.3f}%",
+            )
+            with h3:
+                st.markdown(
+                    f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Direction</div><div class="direction-card-value">{directional_badge_html(hourly_ai["direction"])}</div></div>',
+                    unsafe_allow_html=True,
+                )
+            h4.metric(
+                "Confidence",
+                f"{hourly_ai['confidence']*100:.1f}%",
+            )
 
-        if not specialist_multi.empty:
-            for col in [
-                "Acc 100 %",
-                "Acc 500 %",
-                "Acc 1000 %",
-                "Edge 100",
-                "Edge 500",
-                "Edge 1000",
-            ]:
-                if col in specialist_multi.columns:
-                    specialist_multi[col] = pd.to_numeric(
-                        specialist_multi[col],
-                        errors="coerce",
-                    ).round(2)
+            h5, h6, h7 = st.columns(3)
+            h5.metric(
+                "Kalshi BTC now",
+                fmt_money(display_price) if pd.notna(display_price) else "Unavailable",
+            )
+            h6.metric(
+                "Nearest Kalshi hourly strike",
+                (
+                    fmt_money(hourly_ai["nearest_strike"])
+                    if pd.notna(hourly_ai["nearest_strike"])
+                    else "N/A"
+                ),
+            )
 
-            st.subheader("Specialist Rolling Accuracy")
+            if pd.notna(hourly_ai["seconds_remaining"]):
+                hr_min, hr_sec = divmod(
+                    max(0, int(hourly_ai["seconds_remaining"])),
+                    60,
+                )
+                h7.metric(
+                    "Hourly market time left",
+                    f"{hr_min:02d}:{hr_sec:02d}",
+                )
+            else:
+                h7.metric("Hourly market time left", "N/A")
+
+            st.plotly_chart(
+                hourly_target_chart(hist, price, hourly_ai),
+                use_container_width=True,
+                key="hourly_kalshi_ai_chart",
+                config={
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                    "responsive": True,
+                },
+            )
+
+            if hourly_ai["direction"] == "UP":
+                st.success(
+                    f"Hourly AI expects BTC near ${hourly_ai['target_price']:,.2f} "
+                    "at the next hourly settlement."
+                )
+            elif hourly_ai["direction"] == "DOWN":
+                st.error(
+                    f"Hourly AI expects BTC near ${hourly_ai['target_price']:,.2f} "
+                    "at the next hourly settlement."
+                )
+            else:
+                st.info(
+                    f"Hourly AI currently expects a relatively flat finish near "
+                    f"${hourly_ai['target_price']:,.2f}."
+                )
+
+            if hourly_ai["kalshi_available"]:
+                st.caption(
+                    "Yellow dashed line = nearest active Kalshi hourly strike. "
+                    "Blue solid line = this bot's independent 1-hour BTC target forecast."
+                )
+            else:
+                st.warning(
+                    "Kalshi hourly strikes are temporarily unavailable. "
+                    "The Hourly AI target is still calculated from live BTC market data."
+                )
+
+
+    if tab_flow.open:
+        with tab_flow:
+            st.subheader("AGGR-style aggressor flow")
+            st.caption("This uses Binance aggregate trades directly—the underlying aggressor/order-flow data—rather than scraping the AGGR.trade webpage.")
+            if not agg.empty:
+                buy_n = agg.loc[agg["aggressor"] == "BUY", "notional"].sum()
+                sell_n = agg.loc[agg["aggressor"] == "SELL", "notional"].sum()
+                total_n = buy_n + sell_n
+                imbalance = (buy_n - sell_n) / total_n if total_n else 0.0
+                f1, f2, f3, f4 = st.columns(4)
+                f1.metric("Aggressive buys", f"${buy_n:,.0f}")
+                f2.metric("Aggressive sells", f"${sell_n:,.0f}")
+                f3.metric("Flow imbalance", f"{imbalance*100:+.1f}%")
+                f4.metric("Trades sampled", f"{len(agg):,}")
+                show = agg[["time", "aggressor", "price", "qty", "notional"]].tail(80).sort_values("time", ascending=False)
+                render_dashboard_table(show)
+            else:
+                st.warning("Aggregate trade feed unavailable.")
+
+            st.divider()
+            st.subheader("Futures liquidity / derivatives")
+            q1, q2, q3, q4 = st.columns(4)
+            q1.metric("Funding", f"{safe_float(futures.get('funding_rate'), 0)*100:.4f}%")
+            q2.metric("Open interest", f"{safe_float(futures.get('open_interest'), 0):,.0f} BTC")
+            q3.metric("Book imbalance", f"{safe_float(futures.get('book_imbalance'), 0)*100:+.1f}%")
+            _futures_status = "UNAVAILABLE"
+            if futures.get("ok"):
+                _futures_status = (
+                    "LIVE — BYBIT"
+                    if "Bybit" in str(futures.get("source", ""))
+                    else "LIVE — BINANCE"
+                )
+            q4.metric("Futures status", _futures_status)
+
+            st.divider()
+            st.subheader("Kalshi — live BTC 15-minute market")
+            kctx = stable_kalshi_contract(kalshi, price)
+            if kctx["available"]:
+                rr1, rr2, rr3, rr4 = st.columns(4)
+                rr1.metric("Ticker", kctx["ticker"])
+                rr2.metric("Target", fmt_money(kctx["target"]))
+                rr3.metric("BTC vs target", f"${display_price - kctx['target']:+,.2f}" if pd.notna(display_price) and pd.notna(kctx.get("target")) else "Unavailable")
+                rr4.metric(
+                    "UP / DOWN",
+                    (
+                        "N/A"
+                        if pd.isna(kctx["up_probability"])
+                        else (
+                            f"{kctx['up_probability']*100:.1f}% / "
+                            f"{(1.0-kctx['up_probability'])*100:.1f}%"
+                        )
+                    ),
+                )
+            st.caption(
+                "Read-only Kalshi market data. The app does not place Kalshi orders."
+            )
+
+            st.subheader("Kalshi market-data details")
+            if kalshi.get("ok"):
+                markets = kalshi.get("markets", [])
+                st.caption(f"Public market-data lookup • {len(markets)} BTC-related open markets found • target-polled every ~3 seconds")
+                if markets:
+                    krows = []
+                    for m in markets:
+                        krows.append({
+                            "Ticker": m.get("ticker", ""),
+                            "Title": m.get("title", ""),
+                            "Yes bid": m.get("yes_bid_dollars", ""),
+                            "Yes ask": m.get("yes_ask_dollars", ""),
+                            "Last": m.get("last_price_dollars", ""),
+                            "Volume": m.get("volume_fp", ""),
+                            "Close": m.get("close_time", ""),
+                        })
+                    render_dashboard_table(pd.DataFrame(krows))
+                else:
+                    st.info("Kalshi responded, but no open market in the returned page matched Bitcoin/BTC right now.")
+            else:
+                st.warning("Kalshi public data is currently unavailable. The Event AI automatically falls back to neutral.")
+                if show_raw:
+                    st.code(kalshi.get("error", "Unknown Kalshi error"))
+
+    if tab_paper.open:
+        with tab_paper:
+            st.subheader("Automatic Paper Trading")
+            render_learning_freshness(_shared_learning_state)
+
+            _kp = shared_paper_summary(_shared_paper)
+            _post_fix, _scalp_gate = shared_paper_scorecard(_shared_paper)
+            st.caption(
+                "PRIMARY P/L EVIDENCE — every balance, position and trade below "
+                "comes from the persistent GitHub learning-state ledger."
+            )
+            if _kp.get("ledger_reconciled"):
+                st.caption("Ledger reconciliation: PASS — recorded cash matches immutable paper lifecycle events.")
+            else:
+                st.error(
+                    "Ledger reconciliation failed: "
+                    + "; ".join(_kp.get("ledger_issues") or ["unknown mismatch"])
+                )
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.metric("Contract Equity", f"${_kp['equity']:,.2f}", f"{_kp['return_pct']:+.2f}%")
+            k2.metric("Total P/L", f"${_kp['total_pnl']:+,.2f}")
+            k3.metric("Realized P/L", f"${_kp['realized_pnl']:+,.2f}")
+            k4.metric("Open P/L", f"${_kp['unrealized_pnl']:+,.2f}")
+            _pf = _kp.get("profit_factor")
+            k5.metric(
+                "Contract Profit Factor",
+                "Learning" if _pf is None else ("∞" if not np.isfinite(_pf) else f"{_pf:.2f}"),
+            )
+
+            st.markdown("#### Since Loss-Loop Fix — Kalshi Execution Scorecard")
+            st.caption(
+                "This scorecard isolates trades opened after the new safeguards. "
+                "Older losses stay in the lifetime ledger but do not decide whether "
+                "the updated Kalshi strategy passes validation."
+            )
+            pf1, pf2, pf3, pf4, pf5 = st.columns(5)
+            pf1.metric(
+                "Closed trades",
+                f"{_post_fix['samples']}/{_post_fix['validation_sample_target']}",
+            )
+            pf2.metric("Kalshi markets", _post_fix["markets"])
+            pf3.metric("Post-fix P/L", f"${_post_fix['total_pnl']:+,.2f}")
+            _post_pf = _post_fix.get("profit_factor")
+            pf4.metric(
+                "Post-fix profit factor",
+                "Learning" if _post_pf is None else (
+                    "∞" if not np.isfinite(_post_pf) else f"{_post_pf:.2f}"
+                ),
+            )
+            pf5.metric(
+                "Max drawdown",
+                f"{_post_fix['max_drawdown_pct'] * 100:.2f}%",
+            )
+            st.info(
+                f"Validation: {_scalp_gate['status']} • "
+                f"SCALP safety gate begins after {_post_fix['gate_sample_target']} "
+                f"closed post-fix SCALPs ({_scalp_gate['performance']['samples']} collected). "
+                "Recovery uses the latest 50 SCALP results. Every specialist remains active. "
+                + _scalp_gate["reason"]
+            )
+
+            _open_contract = _kp.get("open_position")
+            if _open_contract:
+                display_position_side = "UP" if _open_contract["side"] == "YES" else "DOWN"
+                st.info(
+                    f"OPEN PAPER {_open_contract['strategy']} {display_position_side} • "
+                    f"Amount: ${_open_contract['amount_down']:,.2f} • "
+                    f"Kalshi entry: {_open_contract['entry_price'] * 100:.0f}%"
+                )
+
+            # BTCC-inspired clarity, adapted to the existing Kalshi paper engine:
+            # one compact ticket exposes executable price, costs, break-even and
+            # protection before the automatic worker can open anything.
+            _ticket = build_pro_trade_ticket(
+                decision,
+                risk,
+                _kp,
+                has_open_position=bool(_open_contract),
+            )
+
+            def _ticket_pct(value):
+                return "N/A" if value is None else f"{value * 100:.0f}%"
+
+            def _ticket_money(value, signed=False):
+                if value is None:
+                    return "N/A"
+                return f"${value:+,.2f}" if signed else f"${value:,.2f}"
+
+            _projected_label = (
+                "Win scenario net" if _ticket["strategy"] == "LOCK" else "Projected net"
+            )
+            _blocker_text = (
+                " • ".join(_ticket["blockers"])
+                if _ticket["blockers"]
+                else "All displayed paper-entry checks are ready"
+            )
+            st.markdown(
+                f"""
+                <div class="pro-ticket">
+                  <div class="pro-ticket-head">
+                    <div class="pro-ticket-title">Pro Paper Trade Ticket — {_ticket['strategy']} {_ticket['direction']}</div>
+                    <div class="pro-ticket-status">{_ticket['status']}</div>
+                  </div>
+                  <div class="pro-ticket-grid">
+                    <div class="pro-ticket-cell"><div class="pro-ticket-label">Entry ask</div><div class="pro-ticket-value">{_ticket_pct(_ticket['entry_price'])}</div></div>
+                    <div class="pro-ticket-cell"><div class="pro-ticket-label">Current bid</div><div class="pro-ticket-value">{_ticket_pct(_ticket['current_bid'])}</div></div>
+                    <div class="pro-ticket-cell"><div class="pro-ticket-label">Paper amount</div><div class="pro-ticket-value">{_ticket_money(_ticket['total_cost'])}</div></div>
+                    <div class="pro-ticket-cell"><div class="pro-ticket-label">Estimated entry fee</div><div class="pro-ticket-value">{_ticket_money(_ticket['entry_fee'])}</div></div>
+                    <div class="pro-ticket-cell"><div class="pro-ticket-label">Break-even exit</div><div class="pro-ticket-value">{_ticket_pct(_ticket['break_even_price'])}</div></div>
+                    <div class="pro-ticket-cell"><div class="pro-ticket-label">Target / settlement</div><div class="pro-ticket-value">{_ticket_pct(_ticket['take_profit_price'] if _ticket['strategy'] == 'SCALP' else _ticket['projected_exit_price'])}</div></div>
+                    <div class="pro-ticket-cell"><div class="pro-ticket-label">{_projected_label}</div><div class="pro-ticket-value">{_ticket_money(_ticket['projected_net_pnl'], signed=True)}</div></div>
+                    <div class="pro-ticket-cell"><div class="pro-ticket-label">Maximum entry loss</div><div class="pro-ticket-value">{_ticket_money(_ticket['max_loss'])}</div></div>
+                  </div>
+                  <div class="pro-ticket-protection"><b>Protection:</b> {_ticket['protection']}<br><b>Status:</b> {_blocker_text}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            auto_state = {
+                "enabled": bool(_shared_paper.get("enabled", True)),
+                "last_message": _shared_paper.get(
+                    "last_message", "Persistent paper learner is waiting."
+                ),
+            }
+            _status_side = (
+                "UP" if _open_contract and _open_contract["side"] == "YES"
+                else "DOWN" if _open_contract
+                else "NONE"
+            )
+            status1, status2, status3, status4 = st.columns(4)
+            status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
+            status2.metric("Contract position", _status_side)
+            status3.metric("Kalshi call", decision["action"])
+            status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
+
+            if bool(auto_state["enabled"]):
+                _status_message = (
+                    auto_result["message"]
+                    if auto_result.get("message")
+                    else auto_state.get("last_message", "AUTO PAPER running.")
+                )
+                _decision_action = str(decision.get("action", "HOLD")).upper()
+                if _decision_action in {"SCALP UP", "LOCK UP", "UP"}:
+                    st.success(_status_message)
+                elif _decision_action in {"SCALP DOWN", "LOCK DOWN", "DOWN"}:
+                    st.error(_status_message)
+                else:
+                    st.info(_status_message)
+            else:
+                st.info(
+                    "AUTO PAPER TRADING is off. Turn it on in the sidebar to let "
+                    "approved paper signals execute automatically."
+                )
+
+            st.subheader("Risk Manager")
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Approved", "YES" if risk["approved"] else "NO")
+            r2.metric("Position size", f"{risk['position_pct']*100:.2f}%")
+            r3.metric("Risk score", f"{risk['risk_score']:.2f}")
+            r4.metric("Decision", decision["action"])
+            st.metric(
+                "Next Approved Amount",
+                f"${_ticket['total_cost']:,.2f}" if _ticket["status"] == "READY" else "$0.00",
+            )
+            st.caption(risk["reason"])
+            st.caption(
+                "Balanced-call mode publishes a directional outlook for every healthy 15-minute market. "
+                "Paper execution remains separate and may reject a visible call for price, fees, feed health, or weak evidence. "
+                "LOCK qualification is evaluated continuously and requires at least 68% calibrated confidence, "
+                "strong council agreement, healthy data, "
+                "target confirmation, market alignment, and a LOCK entry at or below 93%. SCALPs remain capped at 75%. "
+                "LOCK keeps its original direction, "
+                "stays open through the exact 15-minute window, and is finalized "
+                "only from that ticker's official Kalshi settlement."
+            )
+
+            st.subheader("Automatic Kalshi Paper Trade Log")
+            _contract_history = shared_paper_history(_shared_paper, limit=100)
+            if _contract_history:
+                _history_view = pd.DataFrame([
+                    {
+                        "Status": row["status"],
+                        "Direction": row["direction"],
+                        "Strategy": row["strategy"],
+                        "Amount": f"${row['amount']:,.2f}",
+                        "Kalshi Entry": f"{row['kalshi_entry_pct']:.0f}%",
+                        "Current / Exit": (
+                            "N/A" if row["current_or_exit_pct"] is None
+                            else f"{row['current_or_exit_pct']:.0f}%"
+                        ),
+                        "Result": row["result"],
+                        "P/L": (
+                            "PENDING"
+                            if row["pnl"] is None
+                            else f"${row['pnl']:+,.2f}"
+                        ),
+                        "Opened": pd.to_datetime(
+                            row["opened_at"], unit="s", utc=True
+                        ).tz_convert("America/New_York").strftime("%Y-%m-%d %I:%M %p %Z"),
+                        "Closed": (
+                            "OPEN" if row["closed_at"] is None
+                            else pd.to_datetime(
+                                row["closed_at"], unit="s", utc=True
+                            ).tz_convert("America/New_York").strftime("%Y-%m-%d %I:%M %p %Z")
+                        ),
+                    }
+                    for row in _contract_history
+                ])
+                render_dashboard_table(_history_view)
+            else:
+                st.info("No automatic Kalshi paper trades yet.")
+
+    if tab_journal.open:
+        with tab_journal:
+            _journal_state = fetch_remote_learning_state()
+            render_learning_freshness(_journal_state)
+            _journal_rows, stats = persistent_journal_view(_journal_state)
+            if not _journal_state:
+                st.warning("Persistent prediction history is unavailable. Local-only counts are not substituted.")
+            j1, j2, j3, j4 = st.columns(4)
+            j1.metric("Predictions", stats["n"])
+            j2.metric("Signal calls resolved", stats["trade_resolved"])
+            j3.metric("Signal-call accuracy", "N/A" if pd.isna(stats["accuracy"]) else f"{stats['accuracy']*100:.1f}%")
+            j4.metric("HOLD/WAIT resolved", stats["wait_resolved"])
+            st.caption(
+                "Persistent background history — one row per observed market. Accuracy uses official Kalshi outcomes for saved SCALP/LOCK calls only. HOLD/WAIT and historical FORECAST rows without a saved execution action are excluded. Earlier history is limited to retained records; missed windows are not invented."
+            )
+            st.caption("Background snapshot: " + str((_journal_state or {}).get("updated_at") or "unavailable"))
+            journal_df = pd.DataFrame(_journal_rows[:150])
+            st.caption("Showing the latest 150 rows; totals include all saved journal rows.")
+            with st.expander("Earlier dashboard-local records (separate legacy journal)"):
+                st.dataframe(recent_predictions(150), use_container_width=True, hide_index=True)
+            if not journal_df.empty:
+                if dark_mode:
+                    # Match the AI Council table: dark card, blue outline, and
+                    # directional visual cues. This is presentation-only.
+                    journal_view = journal_df.copy()
+                    _journal_actions = journal_view["action"].astype(str).str.upper().str.strip()
+                    _journal_resolved = pd.to_numeric(journal_view["resolved"], errors="coerce").fillna(0).astype(int)
+                    # Keep database/analytics correctness numeric. Only the dark-mode
+                    # display copy becomes object dtype so pandas can safely render
+                    # textual states such as NO TRADE and OPEN.
+                    journal_view["correct"] = journal_view["correct"].astype(object)
+                    journal_view.loc[_journal_actions.isin(["HOLD", "WAIT"]), "correct"] = "NO TRADE"
+                    journal_view.loc[_journal_actions.str.startswith("FORECAST") & (_journal_resolved == 1), "correct"] = "FORECAST ONLY"
+                    journal_view.loc[_journal_resolved != 1, "correct"] = "OPEN"
+
+                    def _journal_action_badge(value):
+                        label = str(value or "HOLD").upper().strip()
+                        if label in {"SCALP UP", "LOCK UP", "UP", "BULLISH"}:
+                            cls, icon = "journal-up", "▲"
+                        elif label in {"SCALP DOWN", "LOCK DOWN", "DOWN", "BEARISH"}:
+                            cls, icon = "journal-down", "▼"
+                        else:
+                            cls, icon = "journal-neutral", "•"
+                        return f'<span class="journal-badge {cls}">{icon}&nbsp;&nbsp;{label}</span>'
+
+                    def _journal_result_badge(value):
+                        label = str(value).upper().strip()
+                        if label == "FORECAST ONLY":
+                            return '<span class="journal-result journal-neutral">FORECAST ONLY</span>'
+                        if label == "NO TRADE":
+                            return '<span class="journal-result journal-neutral">NO TRADE</span>'
+                        if label == "OPEN" or pd.isna(value):
+                            return '<span class="journal-result journal-pending">OPEN</span>'
+                        try:
+                            return (
+                                '<span class="journal-result journal-win">✓ CORRECT</span>'
+                                if int(float(value)) == 1
+                                else '<span class="journal-result journal-loss">✕ WRONG</span>'
+                            )
+                        except Exception:
+                            return '<span class="journal-result journal-pending">OPEN</span>'
+
+                    def _journal_resolved_badge(value):
+                        try:
+                            resolved = int(float(value)) == 1
+                        except Exception:
+                            resolved = False
+                        cls = "journal-resolved" if resolved else "journal-pending"
+                        text = "RESOLVED" if resolved else "OPEN"
+                        return f'<span class="journal-result {cls}">{text}</span>'
+
+                    def _journal_official_badge(value):
+                        label = str(value or "").strip().upper()
+                        if label == "YES":
+                            return '<span class="journal-result journal-up">YES</span>'
+                        if label == "NO":
+                            return '<span class="journal-result journal-down">NO</span>'
+                        return '<span class="journal-result journal-pending">PENDING</span>'
+
+                    journal_html = journal_view.to_html(
+                        index=False,
+                        border=0,
+                        classes="prediction-journal-table",
+                        escape=False,
+                        formatters={
+                            "action": _journal_action_badge,
+                            "resolved": _journal_resolved_badge,
+                            "correct": _journal_result_badge,
+                            "official_result": _journal_official_badge,
+                        },
+                    )
+                    st.markdown(
+                        """
+                        <style>
+                        .prediction-journal-wrap {
+                            width:100%; overflow-x:auto; border:1px solid #1687ff;
+                            border-radius:12px; background:#0b1220;
+                        }
+                        .prediction-journal-table {
+                            width:100%; border-collapse:collapse; color:#e8eef8;
+                            background:#0b1220; font-size:.93rem; margin:0;
+                        }
+                        .prediction-journal-table thead th {
+                            position:sticky; top:0; z-index:1; text-align:left;
+                            color:#b8cff7; background:#111c2e; font-weight:700;
+                            border-bottom:1px solid #2b3b52; padding:10px 12px;
+                            white-space:nowrap;
+                        }
+                        .prediction-journal-table tbody td {
+                            color:#e7edf7; background:#0b1220;
+                            border-bottom:1px solid #1e2b3d; padding:9px 12px;
+                            vertical-align:middle; white-space:nowrap;
+                        }
+                        .prediction-journal-table tbody tr:nth-child(even) td {background:#0f1828;}
+                        .prediction-journal-table tbody tr:hover td {background:#15243a;}
+                        .journal-badge, .journal-result {
+                            display:inline-block; min-width:92px; text-align:center;
+                            padding:4px 10px; border-radius:7px; font-weight:800;
+                            letter-spacing:.02em; line-height:1.2; box-sizing:border-box;
+                        }
+                        .journal-up, .journal-win, .journal-resolved {
+                            color:#00f0b5; background:rgba(0,240,181,.13);
+                            border:1px solid rgba(0,240,181,.80);
+                        }
+                        .journal-down, .journal-loss {
+                            color:#ff536b; background:rgba(255,83,107,.13);
+                            border:1px solid rgba(255,83,107,.85);
+                        }
+                        .journal-neutral, .journal-pending {
+                            color:#b8c6dc; background:rgba(184,198,220,.09);
+                            border:1px solid rgba(184,198,220,.42);
+                        }
+                        </style>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<div class="prediction-journal-wrap">{journal_html}</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.dataframe(journal_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No predictions recorded yet.")
+
+    if tab_learning.open:
+        with tab_learning:
+            st.subheader("15-Minute Prediction Learning")
+            learn = get_learning_state()
+
+            l1, l2, l3, l4 = st.columns(4)
+            l1.metric("Scored 15m windows", int(learn["samples"]))
+            l2.metric(
+                "Direction accuracy",
+                "N/A"
+                if pd.isna(learn["direction_accuracy"])
+                else f"{learn['direction_accuracy']*100:.1f}%"
+            )
+            l3.metric("Avg final error", f"${learn['avg_abs_error']:,.2f}")
+            l4.metric("Avg path error", f"${learn['avg_path_error']:,.2f}")
+
+            _quick100 = rolling_master_accuracy(100)
+            _quick500 = rolling_master_accuracy(500)
+            _quick1000 = rolling_master_accuracy(1000)
+
+            q1, q2, q3 = st.columns(3)
+
+            q1.metric(
+                "Last 100 accuracy",
+                "N/A"
+                if pd.isna(_quick100["accuracy"])
+                else f"{_quick100['accuracy']*100:.1f}%"
+            )
+
+            q2.metric(
+                "Last 500 accuracy",
+                "N/A"
+                if pd.isna(_quick500["accuracy"])
+                else f"{_quick500['accuracy']*100:.1f}%"
+            )
+
+            q3.metric(
+                "Last 1,000 accuracy",
+                "N/A"
+                if pd.isna(_quick1000["accuracy"])
+                else f"{_quick1000['accuracy']*100:.1f}%"
+            )
 
             st.caption(
-                "This view makes it easy to see which bots are improving, "
-                "which are stable, and which are losing effectiveness as "
-                "market conditions change."
+                "The summary and rolling cards use the same resolved 15-minute "
+                "forecast history. HOLD/WAIT trade outcomes remain excluded from "
+                "the separate trading win/loss rate."
             )
 
-            render_dashboard_table(specialist_multi)
+            w1, w2, w3, w4 = st.columns(4)
+            w1.metric("3m weight", f"{learn['w_ret3']*100:.1f}%")
+            w2.metric("8m weight", f"{learn['w_ret8']*100:.1f}%")
+            w3.metric("15m weight", f"{learn['w_ret15']*100:.1f}%")
+            w4.metric("Move scale", f"{learn['momentum_scale']:.2f}×")
 
-        specialist_df = specialist_learning_dataframe()
+            st.divider()
+            st.subheader("Specialist AI Learning")
 
-        if specialist_df.empty:
-            st.info("Specialist learning will populate after completed windows.")
-        else:
-            specialist_df["Learned weight"] = pd.to_numeric(
-                specialist_df["Learned weight"],
-                errors="coerce",
-            ).round(3)
-
-            specialist_df["Accuracy %"] = pd.to_numeric(
-                specialist_df["Accuracy %"],
-                errors="coerce",
-            ).round(1)
-
-            specialist_df["Recent accuracy %"] = pd.to_numeric(
-                specialist_df["Recent accuracy %"],
-                errors="coerce",
-            ).round(1)
-
-            specialist_df["Recent edge"] = pd.to_numeric(
-                specialist_df["Recent edge"],
-                errors="coerce",
-            ).round(4)
-
-            specialist_df["Calibration"] = pd.to_numeric(
-                specialist_df["Calibration"],
-                errors="coerce",
-            ).round(3)
-
-            render_dashboard_table(specialist_df)
-
-        learning_df = recent_learning_windows(50)
-        if learning_df.empty:
-            st.info(
-                "No completed learning windows yet. The active Kalshi "
-                "15-minute contract is being recorded now."
+            st.caption(
+                "Every specialist is graded after each completed 15-minute window. "
+                "The Master AI automatically increases the influence of specialists "
+                "with stronger recent accuracy, edge, and confidence calibration, "
+                "and reduces the influence of weaker ones."
             )
-        else:
+
+            st.divider()
+            st.subheader("Rolling Master Accuracy")
+
+            rolling_master_df = rolling_master_accuracy_table()
+
             for col in [
-                "start_price", "predicted_end", "actual_end",
-                "abs_error", "path_error"
+                "Direction Accuracy %",
+                "Avg Final Error $",
+                "Avg Path Error $",
             ]:
-                if col in learning_df.columns:
-                    learning_df[col] = pd.to_numeric(
-                        learning_df[col],
-                        errors="coerce"
-                    ).round(2)
+                rolling_master_df[col] = pd.to_numeric(
+                    rolling_master_df[col],
+                    errors="coerce",
+                ).round(2)
 
-            render_dashboard_table(learning_df)
+            render_dashboard_table(rolling_master_df)
+
+            _m100 = rolling_master_accuracy(100)
+            _m1000 = rolling_master_accuracy(1000)
+
+            _m100_acc = (
+                np.nan
+                if pd.isna(_m100["accuracy"])
+                else _m100["accuracy"] * 100.0
+            )
+
+            _m1000_acc = (
+                np.nan
+                if pd.isna(_m1000["accuracy"])
+                else _m1000["accuracy"] * 100.0
+            )
+
+            st.caption(
+                "Master learning trend: "
+                + learning_trend_label(
+                    _m100_acc,
+                    _m1000_acc,
+                )
+                + " — compares the most recent 100 completed windows "
+                  "with the broader 1,000-window baseline."
+            )
+
+            specialist_multi = add_specialist_learning_trends(
+                specialist_multiwindow_accuracy()
+            )
+
+            if not specialist_multi.empty:
+                for col in [
+                    "Acc 100 %",
+                    "Acc 500 %",
+                    "Acc 1000 %",
+                    "Edge 100",
+                    "Edge 500",
+                    "Edge 1000",
+                ]:
+                    if col in specialist_multi.columns:
+                        specialist_multi[col] = pd.to_numeric(
+                            specialist_multi[col],
+                            errors="coerce",
+                        ).round(2)
+
+                st.subheader("Specialist Rolling Accuracy")
+
+                st.caption(
+                    "This view makes it easy to see which bots are improving, "
+                    "which are stable, and which are losing effectiveness as "
+                    "market conditions change."
+                )
+
+                render_dashboard_table(specialist_multi)
+
+            specialist_df = specialist_learning_dataframe()
+
+            if specialist_df.empty:
+                st.info("Specialist learning will populate after completed windows.")
+            else:
+                specialist_df["Learned weight"] = pd.to_numeric(
+                    specialist_df["Learned weight"],
+                    errors="coerce",
+                ).round(3)
+
+                specialist_df["Accuracy %"] = pd.to_numeric(
+                    specialist_df["Accuracy %"],
+                    errors="coerce",
+                ).round(1)
+
+                specialist_df["Recent accuracy %"] = pd.to_numeric(
+                    specialist_df["Recent accuracy %"],
+                    errors="coerce",
+                ).round(1)
+
+                specialist_df["Recent edge"] = pd.to_numeric(
+                    specialist_df["Recent edge"],
+                    errors="coerce",
+                ).round(4)
+
+                specialist_df["Calibration"] = pd.to_numeric(
+                    specialist_df["Calibration"],
+                    errors="coerce",
+                ).round(3)
+
+                render_dashboard_table(specialist_df)
+
+            learning_df = recent_learning_windows(50)
+            if learning_df.empty:
+                st.info(
+                    "No completed learning windows yet. The active Kalshi "
+                    "15-minute contract is being recorded now."
+                )
+            else:
+                for col in [
+                    "start_price", "predicted_end", "actual_end",
+                    "abs_error", "path_error"
+                ]:
+                    if col in learning_df.columns:
+                        learning_df[col] = pd.to_numeric(
+                            learning_df[col],
+                            errors="coerce"
+                        ).round(2)
+
+                render_dashboard_table(learning_df)
 
 
-    with tab_backtest:
-        st.subheader("Kalshi Execution Validation")
-        render_learning_freshness(_shared_learning_state)
-        st.caption(
-            "Profitability is judged from the authoritative Kalshi paper ledger: "
-            "actual executable entries/exits, recorded fees, one global position "
-            "at a time, and official Kalshi settlement. No overlapping BTC spot "
-            "signals are presented as simulated Kalshi profit."
-        )
-        # Streamlit's local SQLite file is ephemeral and previously made this
-        # card show only one trade. Use the same persistent GitHub ledger as
-        # the Automatic Paper Trading tab so counts and P/L cannot disagree.
-        validation, validation_gate = shared_paper_scorecard(_shared_paper)
-        lifetime_validation = shared_paper_summary(_shared_paper)
-        # Keep the validation scorecard readable on the owner's iPhone. Five
-        # equal columns compress the labels and values until they overlap, so
-        # present the primary outcome metrics first and costs/risk below them.
-        v1, v2, v3 = st.columns(3)
-        v1.metric("Valid closed trades", validation["samples"])
-        v2.metric(
-            "Win rate",
-            "Learning" if validation["win_rate"] is None
-            else f"{validation['win_rate'] * 100:.1f}%",
-        )
-        v3.metric(
-            "Average P/L",
-            "Learning" if validation["expectancy"] is None
-            else f"${validation['expectancy']:+.2f}",
-        )
-        v4, v5 = st.columns(2)
-        v4.metric("Recorded fees", f"${validation['fees']:,.2f}")
-        v5.metric(
-            "Max drawdown",
-            f"{validation['max_drawdown_pct'] * 100:.2f}%",
-        )
-        st.info(
-            f"{validation_gate['status']} • "
-            f"{validation['samples']}/{validation['validation_sample_target']} "
-            "valid post-fix Kalshi trades collected from the persistent ledger. "
-            + validation_gate["reason"]
-        )
-        st.caption(
-            f"Persistent paper equity: ${lifetime_validation['equity']:,.2f}. "
-            f"Ledger reconciliation: {'PASS' if lifetime_validation.get('ledger_reconciled') else 'FAIL'}. "
-            "VOID/ARCHIVED legacy rows are excluded from validation. "
-            "Balanced-call mode is active. Directional calls are frequent, while only risk-approved "
-            "SCALP or LOCK setups may enter the paper ledger. All specialists continue running, and "
-            "blocked calls remain visible for learning and audit."
-        )
+    if tab_backtest.open:
+        with tab_backtest:
+            st.subheader("Kalshi Execution Validation")
+            render_learning_freshness(_shared_learning_state)
+            st.caption(
+                "Profitability is judged from the authoritative Kalshi paper ledger: "
+                "actual executable entries/exits, recorded fees, one global position "
+                "at a time, and official Kalshi settlement. No overlapping BTC spot "
+                "signals are presented as simulated Kalshi profit."
+            )
+            # Streamlit's local SQLite file is ephemeral and previously made this
+            # card show only one trade. Use the same persistent GitHub ledger as
+            # the Automatic Paper Trading tab so counts and P/L cannot disagree.
+            validation, validation_gate = shared_paper_scorecard(_shared_paper)
+            lifetime_validation = shared_paper_summary(_shared_paper)
+            # Keep the validation scorecard readable on the owner's iPhone. Five
+            # equal columns compress the labels and values until they overlap, so
+            # present the primary outcome metrics first and costs/risk below them.
+            v1, v2, v3 = st.columns(3)
+            v1.metric("Valid closed trades", validation["samples"])
+            v2.metric(
+                "Win rate",
+                "Learning" if validation["win_rate"] is None
+                else f"{validation['win_rate'] * 100:.1f}%",
+            )
+            v3.metric(
+                "Average P/L",
+                "Learning" if validation["expectancy"] is None
+                else f"${validation['expectancy']:+.2f}",
+            )
+            v4, v5 = st.columns(2)
+            v4.metric("Recorded fees", f"${validation['fees']:,.2f}")
+            v5.metric(
+                "Max drawdown",
+                f"{validation['max_drawdown_pct'] * 100:.2f}%",
+            )
+            st.info(
+                f"{validation_gate['status']} • "
+                f"{validation['samples']}/{validation['validation_sample_target']} "
+                "valid post-fix Kalshi trades collected from the persistent ledger. "
+                + validation_gate["reason"]
+            )
+            st.caption(
+                f"Persistent paper equity: ${lifetime_validation['equity']:,.2f}. "
+                f"Ledger reconciliation: {'PASS' if lifetime_validation.get('ledger_reconciled') else 'FAIL'}. "
+                "VOID/ARCHIVED legacy rows are excluded from validation. "
+                "Balanced-call mode is active. Directional calls are frequent, while only risk-approved "
+                "SCALP or LOCK setups may enter the paper ledger. All specialists continue running, and "
+                "blocked calls remain visible for learning and audit."
+            )
 
     # ============================================================
     # DIAGNOSTICS / STATUS

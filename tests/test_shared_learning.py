@@ -4,6 +4,9 @@ import json
 import sys
 import types
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+import time
 from unittest.mock import patch
 
 sys.modules.setdefault("streamlit", types.SimpleNamespace(secrets={}))
@@ -22,6 +25,22 @@ class _Response:
 
 
 class SharedLearningTests(unittest.TestCase):
+    def test_simultaneous_fragments_share_one_learning_download(self):
+        barrier = Barrier(3, timeout=2)
+        payload = {'updated_at': '2026-10-16T13:00:00Z', 'forecast': {'samples': 1}}
+        def download(*args):
+            time.sleep(.03)
+            return payload
+        def read():
+            barrier.wait()
+            return shared_learning.fetch_shared_learning_state(ttl=20)
+        with patch.object(shared_learning, '_secret_token', return_value='test'), \
+             patch.object(shared_learning, '_fetch_private', side_effect=download) as fetch:
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                values = list(pool.map(lambda _: read(), range(3)))
+        self.assertEqual(fetch.call_count, 1)
+        self.assertTrue(all(value['forecast']['samples'] == 1 for value in values))
+
     def setUp(self):
         network = patch.object(shared_learning, "urlopen", side_effect=AssertionError("Unmocked network request"))
         network.start()
