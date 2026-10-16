@@ -10,6 +10,39 @@ def _pct(value):
     return "—" if value is None else f"{float(value) * 100:.1f}%"
 
 
+def render_settlement_evidence(score, latest):
+    with st.expander('Settlement accuracy by timing and data coverage'):
+        st.caption('Each timing row counts each contract once. Captures must be before the checkpoint, '
+                   'within 150 seconds of it; later calls cannot improve an earlier score. '
+                   'These are forecast results, including WAIT, rather than trading win rates.')
+        rows = []
+        for label, metrics in score.get('by_horizon', {}).items():
+            rows.append({'Checkpoint': label, 'Markets': metrics['samples'],
+                         'Accuracy': _pct(metrics.get('accuracy')), 'Brier': metrics.get('brier'),
+                         'Kalshi Brier': metrics.get('market_brier'),
+                         'Coin-flip Brier': metrics.get('coin_flip_brier'),
+                         'Log loss': metrics.get('log_loss'),
+                         'Mean seconds remaining': metrics.get('mean_seconds_remaining')})
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        coverage = score.get('coverage') or {}
+        st.caption(f"Retained observed markets: {coverage.get('settled_markets', 0)} settled • "
+                   f"{coverage.get('forecast_markets', 0)} with a forecast • "
+                   f"{coverage.get('unavailable_observations', 0)} unavailable captures • "
+                   f"{coverage.get('pending_observations', 0)} awaiting settlement. "
+                   'Worker outages can leave windows unobserved; coverage does not prove continuous uptime.')
+        if coverage.get('unavailable_reasons'):
+            st.dataframe(pd.DataFrame([{'Unavailable reason': k, 'Captures': v}
+                                      for k, v in coverage['unavailable_reasons'].items()]),
+                         use_container_width=True, hide_index=True)
+        validation = (latest or {}).get('correction_validation') or {}
+        st.caption(f"Learned correction: {'ENABLED' if validation.get('active') else 'WITHHELD'} • "
+                   f"{validation.get('samples', 0)} chronological validation markets. "
+                   + validation.get('reason', 'Collecting validation evidence.'))
+        if score.get('calibration_bins'):
+            st.caption('Calibration: compare predicted YES probability with observed YES frequency.')
+            st.dataframe(pd.DataFrame(score['calibration_bins']), use_container_width=True, hide_index=True)
+
+
 def render_research_dashboard(learning_state):
     lab = (learning_state or {}).get("research_lab", {}) or {}
     st.markdown("### Shadow Research Lab")
@@ -60,8 +93,8 @@ def render_research_dashboard(learning_state):
         "One earliest forecast per ticker; repeated page refreshes and later phases do not inflate this sample."
     )
     w1, w2, w3, w4, w5 = st.columns(5)
-    w1.metric("Markets", int(window_score.get("independent_markets") or 0))
-    w2.metric("Accuracy", _pct(window_score.get("directional_accuracy")))
+    w1.metric("Contract markets", int(window_score.get("contract_samples") or 0))
+    w2.metric("Contract accuracy", _pct(window_score.get("contract_accuracy")))
     w3.metric(
         "Contract Brier",
         "—" if window_score.get("contract_brier") is None
@@ -69,8 +102,8 @@ def render_research_dashboard(learning_state):
     )
     w4.metric(
         "Kalshi Brier",
-        "—" if window_score.get("market_brier") is None
-        else f"{float(window_score['market_brier']):.3f}",
+        "—" if window_score.get("contract_market_brier") is None
+        else f"{float(window_score['contract_market_brier']):.3f}",
     )
     contract_edge = window_score.get("contract_edge_vs_market")
     w5.metric(

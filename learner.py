@@ -288,6 +288,7 @@ def market():
     if not choices:
         return None
     expires, ticker, item, target = sorted(choices, key=lambda row: (row[0], row[1]))[0]
+    quote_requested_at = time.time()
     exact = exact_market(ticker)
     if exact:
         if str(exact.get("ticker") or ticker) != ticker:
@@ -329,6 +330,7 @@ def market():
         "ticker": ticker, "expires_at": expires, "target": float(target), "prob": prob,
         "yes_bid": yes_bid, "yes_ask": yes_ask, "no_bid": no_bid, "no_ask": no_ask,
         "orderbook": book, "strike_type": item.get("strike_type"),
+        "quotes_observed_at": quote_requested_at,
     }
 
 

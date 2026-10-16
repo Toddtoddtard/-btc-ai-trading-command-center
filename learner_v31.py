@@ -20,8 +20,9 @@ import learner_v3 as v3
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration
-from kalshi_chart_data import fetch_chart
+from kalshi_chart_data import fetch_chart, event_ticker
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
+from settlement_predictor import record_observation, resolve_observations
 from council_accounting import reconcile_master_learning
 from forward_outlook import build_next_market_outlooks
 from horizon_models import (
@@ -581,6 +582,16 @@ def current_shadow_call(state, df, market_info):
     )
     if not forecast:
         return None
+    # Specialist requests can outlast the quote freshness budget. Capture the
+    # same contract again after those reads, before freezing any probabilities.
+    if event_ticker(market_info.get('ticker')):
+        fresh_market = legacy.market()
+        if (fresh_market and fresh_market.get('ticker') == market_info.get('ticker')
+                and fresh_market.get('expires_at') == expires_at):
+            market_info.update(fresh_market)
+            market_info['settlement_reference'] = fetch_chart(market_info['ticker'])
+        else:
+            market_info['settlement_reference'] = {}
     opened_at = time.time()
     if opened_at >= expires_at:
         return None
@@ -793,7 +804,13 @@ def main():
     horizon_graded = resolve_horizon_predictions(state, df)
     graded = strict_grade(state, df)
     forward_outlooks_graded = grade_forward_outlooks(state, df)
-    research_resolved = resolve_shadows(state, legacy.official_result)
+    official_cache = {}
+    def result_reader(ticker):
+        if ticker not in official_cache:
+            official_cache[ticker] = legacy.official_result(ticker)
+        return official_cache[ticker]
+    research_resolved = resolve_shadows(state, result_reader)
+    resolve_observations(state, result_reader)
     official_resolved = legacy.resolve_official_results(state)
     reconcile_specialists(state)
     reconcile_master_learning(state)
@@ -801,13 +818,11 @@ def main():
         state.get("research_lab", {}).get("history", []), as_of=time.time()
     )
     registered = register_with_snapshot(state, df, market_info)
-    if market_info:
-        market_info["settlement_reference"] = fetch_chart(market_info.get("ticker"))
     live_call = current_shadow_call(state, df, market_info)
-    state["settlement_predictor"] = {
-        "latest": (live_call or {}).get("settlement_prediction"),
-        "scorecard": settlement_scorecard(state),
-    }
+    record_observation(state, live_call, market_info)
+    settlement_lab = state.setdefault("settlement_predictor", {})
+    settlement_lab.update(latest=(live_call or {}).get("settlement_prediction"),
+                          scorecard=settlement_scorecard(state))
     lock_gate_recorded = record_lock_gate_evaluation(state, live_call, market_info)
     lock_gate_resolved = resolve_lock_gate_history(state)
     summarize_lock_gate_history(state)
@@ -842,7 +857,7 @@ def main():
         shadow_call = dict(shadow_call)
         shadow_call["named_signals"] = detect_signals(df, now=shadow_call.get("opened_at"))
     record_prediction(state, shadow_call, market_info)
-    journal_resolved = resolve_journal(state, legacy.official_result)
+    journal_resolved = resolve_journal(state, result_reader)
     research_registered = register_shadow(state, shadow_call, market_info)
     v3.update_rolling(state)
     state["validation"] = v3.walk_forward_validate(df, state)

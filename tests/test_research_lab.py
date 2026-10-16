@@ -17,6 +17,16 @@ from research_lab import (
 
 
 class ResearchLabTests(unittest.TestCase):
+    def test_contract_edge_compares_only_the_same_markets(self):
+        history = [dict(ticker='A', opened_at=1, result='yes',
+                        market_yes_probability=.9, model_yes_probability=.5,
+                        contract_probability_up=.8),
+                   dict(ticker='B', opened_at=2, result='no',
+                        market_yes_probability=.9, model_yes_probability=.5)]
+        score = independent_window_scorecard(history)
+        self.assertAlmostEqual(score['contract_edge_vs_market'], .01-.04)
+        self.assertEqual(score['contract_samples'], 1)
+
     @staticmethod
     def calibration_history(count=180):
         return [{

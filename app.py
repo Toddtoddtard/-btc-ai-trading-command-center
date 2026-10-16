@@ -55,7 +55,7 @@ from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
-from research_dashboard import render_research_dashboard
+from research_dashboard import render_research_dashboard, render_settlement_evidence
 from background_paper import (
     latest_shared_call_entry,
     shared_paper_chart_entries,
@@ -906,10 +906,11 @@ def fetch_exact_kalshi_market(ticker):
         return None
     for base in KALSHI_BASES:
         try:
+            requested_at = time.time()
             payload, _ = http_json(base + "/markets/" + str(ticker), timeout=3.0)
             market = payload.get("market") if isinstance(payload, dict) else None
             if isinstance(market, dict):
-                return market
+                return dict(market, quotes_observed_at=requested_at)
         except Exception:
             continue
     return None
@@ -5366,6 +5367,7 @@ def live_dashboard():
         dict(ticker=_display_context.get("ticker"), expires_at=_settlement_expiry,
              target=_display_context.get("target"), prob=_display_context.get("up_probability"),
              strike_type=_settlement_market.get("strike_type"),
+             quotes_observed_at=_settlement_market.get("quotes_observed_at"),
              orderbook=_display_context.get("orderbook") or {}),
         _display_feed, _shared_learning_state, council_score=decision.get("base_score", 0.),
     )
@@ -5467,7 +5469,7 @@ def live_dashboard():
             + datetime.fromtimestamp(_settlement_prediction['expires_at'], timezone.utc).strftime("%H:%M:%S UTC")
             + " • YES means the rounded final-minute reference average is at least the target."
         )
-        st.caption("Shadow estimate, not yet proven accurate. Official settled outcomes train a bounded correction; this forecast does not authorize paper entries.")
+        st.caption("Shadow estimate, not yet proven accurate. Learned corrections require chronological validation against both the base model and Kalshi; this forecast does not authorize paper entries.")
     else:
         st.info("Settlement prediction unavailable: " + _settlement_prediction.get("reason", "fresh contract data required"))
     _settlement_score = settlement_scorecard(_shared_learning_state)
@@ -5479,6 +5481,7 @@ def live_dashboard():
         )
     else:
         st.caption("No prospective official settlement results yet; historical Bitcoin candle accuracy is not this predictor's accuracy.")
+    render_settlement_evidence(_settlement_score, _settlement_prediction)
     render_learning_freshness(_shared_learning_state)
 
     st.caption(

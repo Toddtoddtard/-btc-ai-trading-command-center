@@ -127,3 +127,12 @@ Live verification found raw.githubusercontent.com still returning the prior snap
 ## Efficient maintenance navigation (2026-10-12)
 
 Added concise repository instructions in `AGENTS.md`, task-to-module/test routing in `docs/CODE_MAP.md`, and `tools/code_map.py` for bounded, on-demand source definition/import navigation. Corrected stale architecture and runtime ownership guidance. This is a local standard-library tool, not an installation of Ponytail, OmniRoute or Graphify; no external provider, API cost or runtime trading changes. Token savings are not measured. Validate navigation with a few representative commands; retain existing CI gates.
+
+## Settlement evidence and paper fill reliability (2026-10-16)
+
+- Added independent worker settlement captures, including WAIT and unavailable forecasts, frozen specialist votes and source timestamps. Official outcomes resolve only after expiry; new pending/history state survives subsequent cycles. Legacy history remains intact.
+- Learned settlement corrections now require chronological, paired improvement over both the reference-average base and Kalshi. Saved-state diagnostics do not establish post-change performance; new official settlements must supply that evidence.
+- Added separately scored 10/5/1-minute checkpoints (nearest capture before each checkpoint within 150 seconds), log loss, calibration, coin-flip and paired market benchmarks, plus unavailable-capture coverage. Coverage cannot certify windows the worker never observed. Fixed contract research comparisons that previously mixed different sample subsets.
+- Refreshed same-contract quotes/reference after slow specialist requests. Freshness checks retain source timestamps. New persistent paper fills use observed top-of-book sizes and fees; insufficient fresh exit depth keeps the position open. Historical quote-only ledger outcomes are preserved, not certified as depth-validated results.
+- Verification: 405 offline tests passed, including full Streamlit private-access startup; evidence panel rendered with saved-state data; live public Kalshi market/reference prediction and order-book depth reads succeeded. Independent code review's quote-age orchestration finding was fixed and covered by a 40-second-delay regression. No paid feed, API key, strategy-threshold change, balance reset or live orders.
+- Live deployment/version verification and newly settled performance must be checked separately from these local checks. GitHub/Streamlit scheduling and real execution latency/queue priority remain limitations.
