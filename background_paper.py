@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+from kalshi_microstructure import orderbook_features
 
 from kalshi_paper_engine import (
     LOCK_MIN_CONFIDENCE,
@@ -212,7 +213,23 @@ def _market(ticker, timeout=2.5):
             url = base + "/markets/" + quote(str(ticker), safe="")
             req = Request(url, headers={"Accept": "application/json", "User-Agent": "BTC-AI-Background-Paper/1.0"})
             with urlopen(req, timeout=timeout) as response:
-                return json.load(response).get("market", {})
+                market = json.load(response).get("market", {})
+            market.update(execution_book=orderbook_features({}), quotes_observed_at=time.time())
+            if str(market.get('status') or '').lower() in {'open', 'active'}:
+                observed = time.time()
+                try:
+                    req = Request(url + '/orderbook', headers={"User-Agent": "BTC-AI-Background-Paper/1.0", "Cache-Control": "no-cache"})
+                    with urlopen(req, timeout=timeout) as response:
+                        book = orderbook_features(json.load(response))
+                except Exception:
+                    book = orderbook_features({})
+                market.update(execution_book=book, quotes_observed_at=observed)
+                if book.get('available'):
+                    for name in ('yes_bid', 'yes_ask', 'no_bid', 'no_ask'):
+                        value = book.get(name)
+                        market[name+'_dollars'] = value
+                        market[name] = None if value is None else value*100
+            return market
         except Exception as exc:
             last_error = exc
     raise RuntimeError(str(last_error) if last_error else "Kalshi endpoints failed")
@@ -234,6 +251,17 @@ def _quotes(market, side):
     if no_bid is None and yes_ask is not None:
         no_bid = 1.0 - yes_ask
     return (yes_bid, yes_ask) if side == "YES" else (no_bid, no_ask)
+
+
+def _fill_size(market, side, action, now):
+    """Unknown legacy fixture depth is distinct from failed live depth reads."""
+    if 'execution_book' not in market:
+        return None
+    book = market.get('execution_book') or {}
+    observed = _f(market.get('quotes_observed_at'))
+    if not book.get('available') or observed is None or not 0 <= now-observed <= 30:
+        return 0
+    return max(0, int(_f(book.get(side.lower()+'_'+action+'_size'), 0)))
 
 
 def _resolved_master_action(pending):
@@ -985,6 +1013,13 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                     signal_side is not None
                     and signal_side != position["side"]
                 )
+                exit_requested = ((gain >= entry_price * SCALP_MIN_GROSS_RETURN and not sees_more_upside)
+                                  or confirmed_reversal or gain <= -SCALP_STOP_LOSS_POINTS)
+                exit_size = _fill_size(market, position['side'], 'bid',
+                                       time.time() if live_clock and 'execution_book' in market else now)
+                if exit_requested and exit_size is not None and exit_size < contracts:
+                    paper['last_message'] = 'Holding PAPER position: fresh bid depth cannot fill the full exit.'
+                    return paper
                 if (
                     gain >= entry_price * SCALP_MIN_GROSS_RETURN
                     and not sees_more_upside
@@ -1128,6 +1163,14 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     position_cap = gate["position_cap"] if strategy == "SCALP" else UNPROVEN_POSITION_CAP
     budget = max(0.0, paper["cash"]) * position_cap
     contracts = int(budget // max(ask, 0.01))
+    fill_size = _fill_size(market, side, 'ask',
+                           time.time() if live_clock and 'execution_book' in market else now)
+    if fill_size is not None:
+        contracts = min(contracts, fill_size)
+        if contracts < 1:
+            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
+                                  'Skipped PAPER entry: fresh ask depth unavailable.', 'BLOCKED', now)
+            return paper
     while contracts and contracts * ask + kalshi_taker_fee(contracts, ask) > budget:
         contracts -= 1
     if contracts < 1:
@@ -1152,10 +1195,15 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if expires <= now:
         paper["last_message"] = "Skipped PAPER entry: market expired before fill."
         return paper
+    if _fill_size(market, side, 'ask', now) == 0:
+        paper['last_message'] = 'Skipped PAPER entry: quote expired before fill.'
+        return paper
     fee = kalshi_taker_fee(contracts, ask)
     amount = contracts * ask + fee
     expires = _f(pending.get("expires_at"))
     position = {"ticker": ticker, "side": side, "direction": "UP" if side == "YES" else "DOWN", "strategy": strategy, "status": "OPEN", "opened_at": now, "expires_at": expires, "entry_price": ask, "spot_entry_price": _f(pending.get("start_price")), "contracts": contracts, "entry_fee": fee, "amount": amount, "last_mark": bid}
+    position['fill_basis'] = 'OBSERVED_TOP_OF_BOOK' if fill_size is not None else 'LEGACY_QUOTE_ONLY'
+    position['quotes_observed_at'] = market.get('quotes_observed_at')
     position["risk_mode"] = "PAPER RECOVERY" if strategy == "SCALP" and gate["recovery"] else "STANDARD"
     paper["cash"] -= amount
     paper["open_position"] = position

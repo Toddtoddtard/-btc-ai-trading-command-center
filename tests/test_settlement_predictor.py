@@ -109,7 +109,8 @@ class SettlementPredictorTests(unittest.TestCase):
         state = json.loads(json.dumps({'research_lab': {'history': rows}}))
         trained = model.predict(market(), feed(now), state, now=now)
         self.assertEqual(trained['training_samples'], 100)
-        self.assertGreater(trained['probability_yes'], prior['probability_yes'])
+        self.assertFalse(trained['correction_validation']['active'])
+        self.assertEqual(trained['probability_yes'], prior['probability_yes'])
         rows[-1]['result_observed_at'] = now+1
         blocked = model.predict(market(), feed(now), {'research_lab': {'history': rows}}, now=now)
         self.assertEqual(blocked['training_samples'], 99)

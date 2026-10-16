@@ -423,6 +423,8 @@ def independent_window_scorecard(history, bins=5):
             "model_brier": None, "guarded_brier": None, "market_brier": None,
             "contract_brier": None, "model_edge_vs_market": None,
             "contract_edge_vs_market": None, "log_loss": None,
+            "contract_samples": 0, "contract_market_brier": None,
+            "contract_accuracy": None,
             "calibration_bins": [],
         }
 
@@ -440,6 +442,8 @@ def independent_window_scorecard(history, bins=5):
         (row["contract"] - row["outcome"]) ** 2 if row["contract"] is not None else None
         for row in rows
     )
+    contract_rows = [row for row in rows if row['contract'] is not None]
+    contract_market_brier = average((row['market']-row['outcome'])**2 for row in contract_rows)
     log_loss = average(
         -(row["outcome"] * math.log(max(row["raw_model"], 1e-12))
           + (1.0 - row["outcome"]) * math.log(max(1.0 - row["raw_model"], 1e-12)))
@@ -467,11 +471,15 @@ def independent_window_scorecard(history, bins=5):
         ),
         "model_brier": model_brier,
         "contract_brier": contract_brier,
+        "contract_samples": len(contract_rows),
+        "contract_market_brier": contract_market_brier,
+        "contract_accuracy": average(float((row['contract'] >= .5) == bool(row['outcome']))
+                                     for row in contract_rows),
         "guarded_brier": guarded_brier,
         "market_brier": market_brier,
         "model_edge_vs_market": market_brier - model_brier,
         "contract_edge_vs_market": (
-            market_brier - contract_brier if contract_brier is not None else None
+            contract_market_brier - contract_brier if contract_brier is not None else None
         ),
         "log_loss": log_loss,
         "calibration_bins": calibration_bins,

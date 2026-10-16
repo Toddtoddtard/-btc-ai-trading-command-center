@@ -22,6 +22,8 @@ on:
       - 'settlement_predictor.py'
       - 'kalshi_chart_data.py'
       - 'tests/test_settlement_predictor.py'
+      - 'tests/test_settlement_evidence.py'
+      - 'tests/test_paper_liquidity.py'
       - 'council_accounting.py'
       - 'outcome_timing.py'
       - 'contribution_evidence.py'
@@ -91,7 +93,7 @@ jobs:
       - name: Verify candle catch-up and leakage protection
         run: python -m unittest tests.test_worker_session tests.test_worker_watchdog tests.test_candle_learning tests.test_signal_education -v
       - name: Verify shared council and official scoring
-        run: python -m unittest tests.test_settlement_predictor tests.test_council_parity tests.test_council_evidence tests.test_official_calibration tests.test_state_preservation tests.test_persistent_journal -v
+        run: python -m unittest tests.test_settlement_predictor tests.test_settlement_evidence tests.test_paper_liquidity tests.test_council_parity tests.test_council_evidence tests.test_official_calibration tests.test_state_preservation tests.test_persistent_journal -v
       - name: Run audit v6 regression tests
         run: python -m unittest tests.test_horizon_models tests.test_multi_timeframe tests.test_train_horizon_models tests.test_audit_v6 tests.test_market_research tests.test_background_paper tests.test_multi_asset_paper tests.test_external_teacher_lab tests.test_research_lab tests.test_lock_focus tests.test_forward_outlook tests.test_shared_learning -v
       - name: Load previous private learning state and historical priors
