@@ -144,3 +144,28 @@ Added concise repository instructions in `AGENTS.md`, task-to-module/test routin
 - Simultaneous fragment requests share one learning download. Publication keeps the full validated learning object and removes JSON formatting whitespace; the sample shrank from 18,754,322 to 13,160,714 bytes without deleting records. Existing source timestamps and failure warnings are preserved.
 - A local AppTest harness with fixed 500-candle inputs and outbound sockets disabled measured warm full-render times of 709/699/840 ms before and 594/470/447 ms after (medians 709 vs 470 ms). Default rendered elements fell from 461 to 167. All eight selected tabs rendered without exceptions. These are local fixed-input render measurements, not guaranteed phone or external-feed latency.
 - Streamlit minimum is 1.55 for native tab tracking. Build label: r102-faster-dashboard. Free hosting, feed timeouts and full learning downloads still impose limits; no claim of maximum possible optimization.
+
+## Rolling 15-minute curve and Eastern display (2026-10-17)
+
+- Replaced the chart's endpoint easing, fixed sine/cosine wave, minimum forced
+  direction and target attraction with same-source minute-specific forecasts.
+  The 15-minute selection now spans the rolling next fifteen minutes across a
+  contract boundary; the target line still expires independently.
+- Added `forecast_curve.py`: closed-candle direct ridge curves, chronological
+  validation against flat/legacy baselines, conservative fallback, empirical error
+  ranges, durable official history and prospective non-overlapping frozen paths.
+  The worker reuses its existing refreshed official feed; no added network call.
+- The chart model does not modify trade decisions, settlement predictions,
+  next-market outlooks or their scores. Prospective curve evidence starts at zero;
+  old model accuracy is not evidence for this replacement. Missing source history
+  and free-host scheduling gaps still limit warm-up and coverage.
+- Eastern Time presentation across main/other-market charts, timers, tables and
+  journals uses America/New_York with EST/EDT; storage and expiry math remain UTC.
+- Verification: 423 offline tests passed, plus a local phone-sized browser check
+  with external connections blocked: six live updates, one retained chart node,
+  retained zoom/horizon, server forecasts and Eastern tick labels. Live official
+  Kalshi data produced a valid fifteen-point baseline with 59 closed candles.
+  Local median curve-fit cost was 8.32 ms; repeated tick processing 5.79 ms.
+  These are local measurements, not guaranteed phone or feed latency.
+- Build label: r103-forecast-curve-eastern. Deployment parity remains a separate
+  check. Synthetic turning-series tests prove mechanics, not BTC accuracy.

@@ -16,6 +16,7 @@ from ai_core import enrich_history_core, forecast_path_core, run_specialists_cor
 from multi_asset_paper import decision_from_specialists
 from multi_market_nav import MARKETS, render_market_nav
 from shared_learning import fetch_shared_learning_state
+from display_time import eastern_plotly, eastern_time
 
 
 ASSET_CONFIG = {
@@ -444,7 +445,7 @@ def _chart(hist, cfg, forecast=None, target=np.nan):
         uirevision=f"asset-{cfg['display_symbol']}",
         transition_duration=0,
     )
-    return fig
+    return eastern_plotly(fig)
 
 
 def _paper_panel(market_key, price, decision, shared_state):
@@ -485,7 +486,7 @@ def _paper_panel(market_key, price, decision, shared_state):
         f"Council now: {decision['action']} • confidence {decision['confidence']:.0%} • "
         f"consensus {decision['consensus']:.0%} • completed {trades} • "
         f"win rate {'Learning' if win_rate is None else f'{win_rate:.1%}'} • "
-        f"last worker update {multi.get('updated_at') or 'pending first scheduled run'}"
+        f"last worker update {eastern_time(multi.get('updated_at'), fallback='pending first scheduled run')}"
     )
 
     history = list(state.get("history") or [])[-20:]
@@ -498,7 +499,7 @@ def _paper_panel(market_key, price, decision, shared_state):
                 "Exit": trade.get("exit"),
                 "Net P&L": trade.get("net_pnl"),
                 "Exit reason": trade.get("exit_reason"),
-                "Closed": trade.get("closed_at"),
+                "Closed (ET)": eastern_time(trade.get("closed_at")),
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 

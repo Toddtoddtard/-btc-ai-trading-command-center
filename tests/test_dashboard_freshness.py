@@ -28,7 +28,7 @@ class DashboardFreshnessTests(unittest.TestCase):
                   timezone=timezone, dark_mode=True,
                   publish_market_chart_update=lambda context, live, learning: frames.append(live['price']),
                   persistent_kalshi_market_chart=Mock(),
-                  st=SimpleNamespace(warning=Mock(), caption=Mock()))
+                  time=__import__("time"), st=SimpleNamespace(session_state={}, warning=Mock(), caption=Mock()))
         refresh = load_function('refresh_market_chart', ns)
         refresh(); refresh()
         self.assertEqual(frames, [83104, 83104])

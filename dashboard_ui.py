@@ -6,6 +6,8 @@ formatting here makes ``app.py`` easier to audit without changing decisions.
 
 import pandas as pd
 
+from display_time import eastern_table
+
 
 def fmt_money(value):
     return "N/A" if pd.isna(value) else f"${value:,.2f}"
@@ -55,6 +57,7 @@ def render_dashboard_table(dataframe, formatters=None):
     """Render a table using the dashboard theme without altering its values."""
     import streamlit as st
 
+    dataframe = eastern_table(dataframe)
     if not st.session_state.get("dashboard_dark_mode", True):
         st.dataframe(dataframe, use_container_width=True, hide_index=True)
         return

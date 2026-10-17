@@ -127,3 +127,30 @@ Archived BTC direction results are distinct from official Kalshi settlements.
 The application remains paper trading only. There are no live exchange order endpoints, no private exchange credentials, and no real-money execution path in this architecture.
 
 The background paper engine appends idempotent lifecycle events and reconciles cash against positions and settlements. A mismatch is surfaced in both the Paper Trading and Kalshi Execution Validation tabs rather than being hidden by a derived UI total.
+
+## Rolling chart curve and display time (2026-10-17)
+
+`forecast_curve.py` builds a separate research forecast of official Kalshi chart
+prices at each of the next fifteen minute closes. It uses only valid, contiguous,
+completed candles from that source. A regularized direct regression fits each
+minute separately; chronological validation refits at each origin using only
+labels already complete then. Eight non-overlapping validation paths, aggregate
+and recent error improvements over both no-change and the legacy momentum
+center are required before the learned curve is displayed. Otherwise the chart
+uses a conservative baseline. Validation selection is retrospective; prospective
+frozen path scores are recorded separately and do not certify a trading edge.
+
+`learner_v31.py` reuses its refreshed `settlement_reference` candles to retain up
+to 360 official bars and frozen 15-minute paths in `chart_forecast`. The dashboard
+seeds its session from this durable history and recomputes after a new candle
+closes. `publish_market_chart_update` sends only the compact fifteen-point curve;
+the browser never invents oscillations, attracts prices toward a strike, or cuts
+the rolling price path off at the current contract expiry. Stale and wrong-source
+curves are hidden. Ranges are empirical price-error envelopes, not future candle
+high/low predictions or calibrated probability intervals. Missing observed labels
+remain unscored. The curve is independent of the existing execution signal,
+settlement model and future-market outlooks; their historical counters are unchanged.
+
+`display_time.py` owns Eastern presentation (`America/New_York`, automatic EST/EDT).
+Stored timestamps, feed coordinates, expiry checks and API parameters remain UTC.
+Python tables/figures and the persistent browser chart format labels/hover in ET.

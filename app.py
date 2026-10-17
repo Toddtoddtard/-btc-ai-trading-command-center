@@ -38,6 +38,7 @@ from ai_core import (
     run_specialists_core,
     safe_float,
 )
+from display_time import eastern_plotly, eastern_table, eastern_time
 from dashboard_ui import (
     directional_badge_html,
     fmt_money,
@@ -2230,6 +2231,7 @@ def get_learning_state():
                 if state["btc_move_samples"] else np.nan
             )
             state["horizon_models"] = remote.get("horizon_models", {})
+            state["chart_forecast"] = remote.get("chart_forecast", {})
             return state
 
     conn = learning_db()
@@ -3561,7 +3563,7 @@ def apply_plotly_theme(fig):
                 zerolinecolor="rgba(0,0,0,0.14)",
             ),
         )
-    return fig
+    return eastern_plotly(fig)
 
 
 def candle_chart(hist, kalshi_target=np.nan):
@@ -3817,6 +3819,7 @@ _kalshi_timer_html = r"""
   <div class="timer-main"><div class="clock"></div><div id="countdown" class="countdown">--:--</div></div>
   <div class="track"><div id="fill" class="fill"></div></div>
   <div class="meta"><span id="elapsed">--:-- elapsed</span><span>15:00 total</span></div>
+  <div id="close-time" class="status">Close time (ET): loading…</div>
   <div id="status" class="status">Finding current KXBTC15M market…</div>
 </div>
 <script>
@@ -3828,9 +3831,12 @@ _kalshi_timer_html = r"""
   const fill=document.getElementById('fill');
   const elapsedEl=document.getElementById('elapsed');
   const status=document.getElementById('status');
+  const closeTime=document.getElementById('close-time');
+  const easternClose=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
   const fmt=(sec)=>{sec=Math.max(0,Math.floor(sec));const m=Math.floor(sec/60),s=sec%60;return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');};
   function render(){
     if(!closeMs){cd.textContent='--:--';fill.style.width='0%';elapsedEl.textContent='--:-- elapsed';return;}
+    closeTime.textContent='Closes '+easternClose.format(new Date(closeMs));
     const remain=Math.min(TOTAL,Math.max(0,(closeMs-Date.now())/1000));
     const elapsed=Math.max(0,Math.min(TOTAL,TOTAL-remain));
     cd.textContent=fmt(remain);
@@ -3858,7 +3864,7 @@ _kalshi_timer_html = r"""
 """
 _kalshi_timer_html = _kalshi_timer_html.replace("__CLOSE_MS__", str(_timer_close_ms)).replace("__TICKER__", _timer_ticker.replace("\\", "").replace("'", ""))
 with st.sidebar:
-    components.html(_kalshi_timer_html, height=205, scrolling=False)
+    components.html(_kalshi_timer_html, height=225, scrolling=False)
 
 st.sidebar.header("Command Center")
 
@@ -4303,11 +4309,40 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         let TARGET_INFLUENCE = Number(learning.target_influence ?? 0.18);
         let MODEL_BIAS = Number(learning.bias ?? 0.0);
         let HORIZON_MODELS = learning.horizon_models || {{}};
+        let SERVER_CURVE = initial.forecast_curve || null;
 
         const paperBg = "{paper}";
         const plotBg = "{bg}";
         const fontColor = "{fg}";
         const gridColor = "{grid}";
+
+        const easternClock = new Intl.DateTimeFormat("en-US", {{
+            timeZone:"America/New_York", hour:"numeric", minute:"2-digit",
+            second:"2-digit", timeZoneName:"short"
+        }});
+        const easternTick = new Intl.DateTimeFormat("en-US", {{
+            timeZone:"America/New_York", hour:"numeric", minute:"2-digit",
+            timeZoneName:"short"
+        }});
+        function easternTime(value) {{
+            return easternClock.format(new Date(value));
+        }}
+        function easternAxis(data, visibleRange) {{
+            const dates = (data || []).map(r => Date.parse(r.time)).filter(Number.isFinite);
+            if (!dates.length) return {{}};
+            const parseAxisTime = value => typeof value === "number" ? value :
+                Date.parse(/[zZ]|[+-]\\d{{2}}:?\\d{{2}}$/.test(value) ? value : value + "Z");
+            const start = visibleRange ? parseAxisTime(visibleRange[0]) : Math.min(...dates);
+            const end = visibleRange ? parseAxisTime(visibleRange[1]) : Math.max(...dates) + 15 * 60000;
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return {{}};
+            const step = Math.max(60000, Math.ceil((end - start) / 7 / 60000) * 60000);
+            const tickvals = [];
+            for (let tick = Math.ceil(start / step) * step; tick <= end; tick += step) {{
+                tickvals.push(new Date(tick).toISOString());
+            }}
+            return {{tickmode:"array", tickvals,
+                ticktext:tickvals.map(value => easternTick.format(new Date(value)))}};
+        }}
 
         function candleTrace(rows) {{
             return {{
@@ -4327,126 +4362,37 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     fillcolor:"#fa5252"
                 }},
                 whiskerwidth: 0.35,
-                hoverinfo: "x+open+high+low+close"
+                text: rows.map(r => easternTime(r.time)),
+                hoverinfo: "text+y"
             }};
         }}
 
         function predictedCandles(rows, horizonMinutes = 15) {{
-            if (!rows || rows.length < 12) return [];
-
-            const closes = rows.map(r => Number(r.close)).filter(Number.isFinite);
-            if (closes.length < 12) return [];
-
-            const n = closes.length;
-            const last = closes[n - 1];
-
-            const ret3 = n >= 4 ? (last / closes[n - 4] - 1) : 0;
-            const ret8 = n >= 9 ? (last / closes[n - 9] - 1) : 0;
-            const ret15 = n >= 16 ? (last / closes[n - 16] - 1) : ret8;
-
-            const recent = rows.slice(-20);
-            const avgRange = recent.reduce((sum, r) => {{
-                const hi = Number(r.high);
-                const lo = Number(r.low);
-                return sum + (
-                    Number.isFinite(hi) && Number.isFinite(lo)
-                    ? Math.max(0, hi - lo)
-                    : 0
-                );
-            }}, 0) / Math.max(1, recent.length);
-
-            let directional =
-                W_RET3 * ret3 +
-                W_RET8 * ret8 +
-                W_RET15 * ret15 +
-                MODEL_BIAS;
-
-            directional = Math.max(-0.012, Math.min(0.012, directional));
-
-            let projectedMove = last * directional * MOMENTUM_SCALE;
-
-            const horizonModels = typeof HORIZON_MODELS !== "undefined" ? HORIZON_MODELS : {{}};
-            const model = (horizonModels.models || {{}})[String(horizonMinutes)] || {{}};
-            const prediction = (horizonModels.last_prediction || {{}})[String(horizonMinutes)] || {{}};
-            const probability = Number(prediction.probability_up);
-            if (model.enabled === true && Number.isFinite(probability)) {{
-                const modelMove = (probability - 0.5) * 2 * avgRange * Math.sqrt(Number(horizonMinutes));
-                projectedMove = 0.75 * projectedMove + 0.25 * modelMove;
-            }}
-
-            if (Number.isFinite(currentTarget)) {{
-                const gap = currentTarget - last;
-                const maxInfluence = Math.max(
-                    avgRange * 2.0,
-                    last * 0.0015
-                );
-                const targetInfluence = Math.max(
-                    -maxInfluence,
-                    Math.min(maxInfluence, gap * TARGET_INFLUENCE)
-                );
-                projectedMove += targetInfluence;
-            }}
-
-            const minVisible = Math.max(
-                avgRange * 0.35,
-                last * 0.00015
-            );
-
-            if (Math.abs(projectedMove) < minVisible) {{
-                projectedMove =
-                    Math.sign(projectedMove || directional || 1) * minVisible;
-            }}
-
-            const forecast = [];
-            let prevClose = last;
-            const lastTime = new Date(
-                rows[rows.length - 1].time
-            ).getTime();
-
-            for (let i = 1; i <= 15; i++) {{
-                const progress = i / 15;
-                const eased = progress * progress * (3 - 2 * progress);
-                const center = last + projectedMove * eased;
-
-                const wave =
-                    Math.sin(i * 1.35) * avgRange * 0.16 +
-                    Math.cos(i * 0.72) * avgRange * 0.08;
-
-                const close = center + wave;
-                const open = prevClose;
-
-                const body = Math.abs(close - open);
-                const wickBase = Math.max(
-                    avgRange * (0.18 + 0.08 * progress),
-                    body * 0.35
-                );
-
-                const high = Math.max(open, close) + wickBase;
-                const low = Math.min(open, close) - wickBase;
-
-                forecast.push({{
-                    time: new Date(
-                        lastTime + i * 60000
-                    ).toISOString(),
-                    open,
-                    high,
-                    low,
-                    close
-                }});
-
-                prevClose = close;
-            }}
-
-            // This chart describes the active Kalshi window, not the next
-            // contract. Never carry its forecast past the current close or
-            // display an old path as future data after a browser-feed outage.
+            const curve = typeof SERVER_CURVE !== "undefined" ? SERVER_CURVE : null;
             const now = Date.now();
-            const marketClose = (Math.floor(now / 900000) + 1) * 900000;
-            if (now - lastTime > 120000 || lastTime > now + 60000) return [];
-            return forecast.filter(r => {{
-                const at = Date.parse(r.time);
-                return at > now && at <= marketClose && at <= lastTime + Number(horizonMinutes) * 60000;
-            }});
+            if (!rows || !rows.length || !curve ||
+                curve.source !== "Kalshi BTC/USD chart feed" ||
+                !Number.isFinite(curve.as_of) || now-curve.as_of*1000 > 120000 ||
+                curve.as_of*1000 > now+5000 || !Array.isArray(curve.points)) return [];
+            const lastTime = Date.parse(rows[rows.length-1].time);
+            if (!Number.isFinite(lastTime) || now-lastTime > 120000 || lastTime>now+60000) return [];
+            const horizon = [1,5,15].includes(Number(horizonMinutes)) ? Number(horizonMinutes) : 15;
+            let previous = Number(curve.anchor);
+            if (!Number.isFinite(previous) || previous<=0) return [];
+            const forecast = [];
+            for (const p of curve.points.slice(0,horizon)) {{
+                if (![p.timestamp,p.close,p.lower,p.upper].every(Number.isFinite) ||
+                    p.close<=0 || p.lower<=0 || p.lower>p.close || p.upper<p.close) return [];
+                // These ranges show forecast error, not invented future candle wicks.
+                const point = {{time:new Date(p.timestamp*1000).toISOString(),open:previous,
+                    high:Math.max(previous,p.upper),low:Math.min(previous,p.lower),close:p.close,
+                    lower:p.lower,upper:p.upper}};
+                previous=p.close;
+                if (p.timestamp*1000>now) forecast.push(point);
+            }}
+            // Full rolling price forecast; the current contract target has its
+            // own expiry and must never bend or truncate a future price path.
+            return forecast;
         }}
 
         function predictionTrace(rows, horizonMinutes = 15) {{
@@ -4460,7 +4406,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 high: forecast.map(r => r.high),
                 low: forecast.map(r => r.low),
                 close: forecast.map(r => r.close),
-                name: "Projected candles (estimate)",
+                name: "Projected price ranges (estimate)",
                 showlegend: false,
                 increasing: {{
                     line: {{
@@ -4477,7 +4423,9 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     fillcolor:"rgba(186,104,200,0.25)"
                 }},
                 whiskerwidth: 0.28,
-                hoverinfo: "x+open+high+low+close",
+                text: forecast.map(r => (typeof easternTime === "function" ? easternTime(r.time) : r.time) +
+                    " • estimated error range; future candle high/low unknown"),
+                hoverinfo: "text+y",
                 opacity: 0.78
             }};
         }}
@@ -4495,7 +4443,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 line: {{width: 3, dash: "dot", color: "#2ea8ff"}},
                 marker: {{size: 5, color: "#2ea8ff"}},
                 name: "Forecast (≤" + horizon + "m)",
-                hovertemplate: "Estimated Kalshi chart price: $%{{y:,.2f}}<extra></extra>"
+                text: clipped.map(r => typeof easternTime === "function" ? easternTime(r.time) : r.time),
+                hovertemplate: "%{{text}}<br>Estimated Kalshi chart price: $%{{y:,.2f}}<extra></extra>"
             }};
         }}
 
@@ -4517,7 +4466,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     line: {{color: paperBg, width: 1}}
                 }},
                 text: entries.map(e =>
-                    e.strategy + " " + e.direction + " • Kalshi entry " +
+                    easternTime(Number(e.opened_at) * 1000) + " • " + e.strategy + " " + e.direction + " • Kalshi entry " +
                     Number(e.kalshi_entry_pct).toFixed(0) + "%"
                 ),
                 name: "Bot entries",
@@ -4571,7 +4520,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             xaxis: {{
                 rangeslider: {{visible:false}},
                 tickformat:"%H:%M",
-                title: {{text:"Time (UTC)", standoff:4}},
+                title: {{text:"Time (ET)", standoff:4}},
+                ...easternAxis(initial.candles),
                 showgrid:false,
                 zeroline:false,
                 fixedrange:false
@@ -4584,7 +4534,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 tickformat:",.0f",
                 fixedrange:false
             }},
-            hovermode:"x unified",
+            hovermode:"closest",
             dragmode:"pan",
             showlegend:true,
             legend:{{
@@ -4637,6 +4587,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 ],
                 {{
                     ...layout,
+                    xaxis: {{...layout.xaxis, ...easternAxis(rows)}},
                     shapes: targetShape(),
                     annotations: targetAnnotation()
                 }},
@@ -4660,6 +4611,16 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             layout,
             config
         );
+
+        // Refresh labels on zoom/pan; chart coordinates and feed timestamps stay UTC.
+        if (typeof chart.on === "function") {{
+            chart.on("plotly_relayout", event => {{
+                if (event["xaxis.range[0]"] !== undefined && event["xaxis.range[1]"] !== undefined) {{
+                    const axis = easternAxis(rows, [event["xaxis.range[0]"], event["xaxis.range[1]"]]);
+                    Plotly.relayout(chart, {{"xaxis.tickvals":axis.tickvals, "xaxis.ticktext":axis.ticktext}});
+                }}
+            }});
+        }}
 
         function signature(data) {{
             if (!data || !data.length) return "";
@@ -4710,6 +4671,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             TARGET_INFLUENCE = Number(learned.target_influence ?? TARGET_INFLUENCE);
             MODEL_BIAS = Number(learned.bias ?? MODEL_BIAS);
             HORIZON_MODELS = learned.horizon_models || HORIZON_MODELS;
+            SERVER_CURVE = packet.forecast_curve || null;
             updateCandles();
         }});
 
@@ -4885,7 +4847,10 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 status.textContent =
                     "Kalshi BTC/USD $" + Number(lastChartPrice).toLocaleString(undefined, {{minimumFractionDigits:2,maximumFractionDigits:2}}) + " • " +
                     (currentTicker ? currentTicker + " • " : "") +
-                    "price at " + new Date(lastChartTimestamp).toLocaleTimeString();
+                    "price at " + easternTime(lastChartTimestamp) +
+                    " • " + (SERVER_CURVE?.method === "validated_curve" ? "Learned 15-minute curve" :
+                    SERVER_CURVE?.method === "momentum_baseline" ? "Momentum estimate" :
+                    SERVER_CURVE?.method === "flat_baseline" ? "Flat estimate — directional edge unproven" : "Forecast warming up");
                 const sig = [signature(fresh), currentTicker, currentTarget,
                     W_RET3, W_RET8, W_RET15, MOMENTUM_SCALE, TARGET_INFLUENCE, MODEL_BIAS,
                     JSON.stringify(HORIZON_MODELS)].join("|");
@@ -4905,6 +4870,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     ],
                     {{
                         ...layout,
+                        xaxis: {{...layout.xaxis, ...easternAxis(rows)}},
                         shapes: targetShape(),
                         annotations: targetAnnotation()
                     }},
@@ -4914,7 +4880,10 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 status.textContent =
                     "Kalshi BTC/USD $" + Number(lastChartPrice).toLocaleString(undefined, {{minimumFractionDigits:2,maximumFractionDigits:2}}) + " • " +
                     (currentTicker ? currentTicker + " • " : "") +
-                    "price at " + new Date(lastChartTimestamp).toLocaleTimeString();
+                    "price at " + easternTime(lastChartTimestamp) +
+                    " • " + (SERVER_CURVE?.method === "validated_curve" ? "Learned 15-minute curve" :
+                    SERVER_CURVE?.method === "momentum_baseline" ? "Momentum estimate" :
+                    SERVER_CURVE?.method === "flat_baseline" ? "Flat estimate — directional edge unproven" : "Forecast warming up");
             }} finally {{
                 busy = false;
             }}
@@ -5135,7 +5104,7 @@ except Exception:
 st.subheader("Live Kalshi BTC Market")
 st.caption(
     "Kalshi BTC/USD chart data with the current Kalshi contract target. "
-    "Forecasts stop at this contract’s close. Times are UTC. "
+    "The forecast covers the rolling next 15 minutes. Times are Eastern (EST/EDT). "
     "Chart prices are fetched directly from Kalshi; unavailable data is never replaced with Binance."
 )
 st.caption("The forecast overlay is an estimate. Historical BTC-path accuracy below was measured on Binance data, not this Kalshi chart feed.")
@@ -5186,6 +5155,7 @@ def publish_market_chart_update(context, live, learning):
         ticker=context.get("ticker", ""), target=context.get("target"),
         close_time=context.get("close_time"), price=live.get("price"),
         timestamp=live.get("timestamp"), candles=live.get("candles", [])[-60:],
+        forecast_curve=live.get("forecast_curve"),
         learning={key: learning[key] for key in (
             "w_ret3", "w_ret8", "w_ret15", "momentum_scale", "target_influence",
             "bias", "horizon_models",
@@ -5218,7 +5188,19 @@ def refresh_market_chart():
     except Exception as exc:
         live = {"available": False, "error": str(exc)}
     if live.get("available"):
-        publish_market_chart_update(context, live, get_learning_state())
+        from forecast_curve import update_curve
+        learning = get_learning_state()
+        curve_root = st.session_state.setdefault("official_chart_curve", {})
+        # Seed durable same-source history from the worker after app restarts.
+        saved = learning.get("chart_forecast") or {}
+        live["forecast_curve"] = update_curve(
+            curve_root, list(saved.get("history", []))+live.get("candles", []),
+            now=time.time(), config=learning,
+        )
+        publish_market_chart_update(context, live, learning)
+        metrics = (saved.get("live_metrics") or {})
+        st.caption("Rolling 15-minute price estimate • ranges show forecast uncertainty, not predicted candle extremes. "
+                   + (f"{int(metrics.get('samples', 0))} completed live path checks."))
 
 refresh_market_chart()
 
@@ -5370,7 +5352,7 @@ def live_dashboard():
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Kalshi BTC/USD", fmt_money(display_price) if pd.notna(display_price) else "Unavailable")
     m1.caption(
-        "Kalshi chart • " + datetime.fromtimestamp(_display_feed["timestamp"], timezone.utc).strftime("%H:%M:%S UTC")
+        "Kalshi chart • " + eastern_time(_display_feed["timestamp"], clock_only=True)
         if _display_feed.get("available") else "Waiting for fresh Kalshi data"
     )
     m2.metric(
@@ -5443,7 +5425,7 @@ def live_dashboard():
         )
         st.caption(
             f"{_settlement_prediction['ticker']} • closes "
-            + datetime.fromtimestamp(_settlement_prediction['expires_at'], timezone.utc).strftime("%H:%M:%S UTC")
+            + eastern_time(_settlement_prediction['expires_at'], clock_only=True)
             + " • YES means the rounded final-minute reference average is at least the target."
         )
         st.caption("Shadow estimate, not yet proven accurate. Learned corrections require chronological validation against both the base model and Kalshi; this forecast does not authorize paper entries.")
@@ -5540,7 +5522,7 @@ def live_dashboard():
                 paper_bgcolor="#080d14", plot_bgcolor="#0d141f",
                 legend=dict(orientation="h"),
             )
-            st.plotly_chart(_price_fig, use_container_width=True, key="fvg_price_chart")
+            st.plotly_chart(eastern_plotly(_price_fig), use_container_width=True, key="fvg_price_chart")
 
             _macd_control_cols = st.columns(2)
             with _macd_control_cols[0]:
@@ -5584,10 +5566,9 @@ def live_dashboard():
                 x=_tv["time"], y=_tv["macd_hist"], name="Histogram", marker_color=_hist_colors, opacity=0.72
             ))
 
-            # Display-only MACD projection.  It is derived from the exact same
-            # 15-minute price path used by the prediction chart, then MACD is
-            # recalculated over those projected closes.  Nothing here is written
-            # to the learner or passed to the trade engine.
+            # Display-only Binance technical MACD projection. This uses the
+            # legacy technical path, independently of the official Kalshi chart
+            # curve. Nothing here is written to learning or trade execution.
             _macd_price_projection = forecast_path_core(
                 hist.tail(60).to_dict("records"),
                 kctx.get("target", np.nan),
@@ -5631,7 +5612,7 @@ def live_dashboard():
                 ))
                 st.caption(
                     f"Projected through {_projection_end_et.strftime('%-I:%M %p ET')} • "
-                    "blue shaded values are estimates from the bot's current price path, not completed candles."
+                    "blue shaded values are estimates from the separate Binance technical price estimate, not completed candles."
                 )
             _macd_fig.add_hline(y=0, line_width=1, line_dash="dot")
             _macd_fig.update_layout(
@@ -5640,7 +5621,7 @@ def live_dashboard():
                 legend=dict(orientation="h"),
                 hovermode="x unified",
             )
-            st.plotly_chart(_macd_fig, use_container_width=True, key="fvg_macd_chart")
+            st.plotly_chart(eastern_plotly(_macd_fig), use_container_width=True, key="fvg_macd_chart")
 
             st.divider()
 
@@ -6171,7 +6152,7 @@ def live_dashboard():
                             "Yes ask": m.get("yes_ask_dollars", ""),
                             "Last": m.get("last_price_dollars", ""),
                             "Volume": m.get("volume_fp", ""),
-                            "Close": m.get("close_time", ""),
+                            "Close": eastern_time(m.get("close_time")),
                         })
                     render_dashboard_table(pd.DataFrame(krows))
                 else:
@@ -6409,8 +6390,8 @@ def live_dashboard():
             st.caption(
                 "Persistent background history — one row per observed market. Accuracy uses official Kalshi outcomes for saved SCALP/LOCK calls only. HOLD/WAIT and historical FORECAST rows without a saved execution action are excluded. Earlier history is limited to retained records; missed windows are not invented."
             )
-            st.caption("Background snapshot: " + str((_journal_state or {}).get("updated_at") or "unavailable"))
-            journal_df = pd.DataFrame(_journal_rows[:150])
+            st.caption("Background snapshot: " + eastern_time((_journal_state or {}).get("updated_at"), fallback="unavailable"))
+            journal_df = eastern_table(pd.DataFrame(_journal_rows[:150]))
             st.caption("Showing the latest 150 rows; totals include all saved journal rows.")
             with st.expander("Earlier dashboard-local records (separate legacy journal)"):
                 st.dataframe(recent_predictions(150), use_container_width=True, hide_index=True)

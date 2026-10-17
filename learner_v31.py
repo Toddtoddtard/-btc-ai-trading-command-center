@@ -820,6 +820,13 @@ def main():
     registered = register_with_snapshot(state, df, market_info)
     live_call = current_shadow_call(state, df, market_info)
     record_observation(state, live_call, market_info)
+    # Reuse the already refreshed official feed; no extra network request or
+    # exchange-price substitution. The persisted curve remains chart research.
+    reference = (market_info or {}).get("settlement_reference") or {}
+    if reference.get("available"):
+        from forecast_curve import update_curve
+        update_curve(state.setdefault("chart_forecast", {}), reference.get("candles", []),
+                     now=time.time(), config=state.get("forecast", {}))
     settlement_lab = state.setdefault("settlement_predictor", {})
     settlement_lab.update(latest=(live_call or {}).get("settlement_prediction"),
                           scorecard=settlement_scorecard(state))

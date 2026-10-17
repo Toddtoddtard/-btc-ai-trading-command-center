@@ -5,6 +5,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from display_time import eastern_time
+
 
 def _pct(value):
     return "—" if value is None else f"{float(value) * 100:.1f}%"
@@ -221,11 +223,11 @@ def render_research_dashboard(learning_state):
     for row in list(lab.get("history") or [])[-12:][::-1]:
         recent.append({
             "Ticker": row.get("ticker"), "Phase": row.get("phase"), "Call": row.get("action"),
-            "Direction": row.get("direction"), "Opened UTC": row.get("opened_at_utc"),
-            "Expires UTC": row.get("expires_at_utc"), "Official result": row.get("result"),
+            "Direction": row.get("direction"), "Opened ET": eastern_time(row.get("opened_at_utc")),
+            "Expires ET": eastern_time(row.get("expires_at_utc")), "Official result": row.get("result"),
             "Paper P/L": float(row.get("paper_pnl") or 0.0),
         })
-    with st.expander("Recent settled shadow journal (UTC)", expanded=False):
+    with st.expander("Recent settled shadow journal (ET)", expanded=False):
         if recent:
             st.dataframe(pd.DataFrame(recent), use_container_width=True, hide_index=True)
         else:
