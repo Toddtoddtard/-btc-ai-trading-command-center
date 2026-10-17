@@ -45,6 +45,7 @@ const assert=require('assert');
 Date.now=()=>Date.parse('2026-10-14T12:01:10Z');
 let W_RET3=.46,W_RET8=.34,W_RET15=.2,MOMENTUM_SCALE=2.2,TARGET_INFLUENCE=.18,MODEL_BIAS=.001,currentTarget=83000;
 let HORIZON_MODELS={};
+const SERVER_CURVE={source:'Kalshi BTC/USD chart feed',as_of:Date.now()/1000,anchor:83000,points:Array.from({length:15},(_,i)=>({timestamp:Date.now()/1000+(i+1)*60,close:83000+i,lower:82999+i,upper:83001+i}))};
 const rows=Array.from({length:30},(_,i)=>({time:new Date(Date.now()-(29-i)*60000).toISOString(),open:83000+i,high:83010+i,low:82990+i,close:83002+i}));
 ''' + function + '\nconst original='+json.dumps(original)+';\nconst compact='+payload+''';
 for(const h of [1,5,15]){
