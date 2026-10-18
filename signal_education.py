@@ -5,7 +5,7 @@ Definitions and sources: docs/SIGNAL_EDUCATION.md.
 import math
 import time
 import pandas as pd
-from candle_learning import closed_frame
+from candle_learning import closed_frame, liquidity_sweep_flags
 from kalshi_paper_engine import kalshi_taker_fee
 
 
@@ -44,6 +44,15 @@ def detect_signals(rows, now=None):
         add('Volume breakout up', 'YES', 'Close above prior 20-bar high with at least 1.5x volume', float(prior.high.max()))
     if volume_ratio >= 1.5 and a.close < prior.low.min():
         add('Volume breakout down', 'NO', 'Close below prior 20-bar low with at least 1.5x volume', float(prior.low.min()))
+    sweep_high, sweep_low = liquidity_sweep_flags(f)
+    if sweep_low and not sweep_high:
+        add('Bullish liquidity sweep', 'YES',
+            f'Low {a.low:g} breached prior 20-bar low {prior.low.min():g}; close {a.close:g} reclaimed it',
+            float(a.low))
+    elif sweep_high and not sweep_low:
+        add('Bearish liquidity sweep', 'NO',
+            f'High {a.high:g} breached prior 20-bar high {prior.high.max():g}; close {a.close:g} rejected it',
+            float(a.high))
     return signals
 
 

@@ -34,6 +34,20 @@ def closed_frame(rows, now=None):
     return f.drop_duplicates('time').sort_values('time').reset_index(drop=True)
 
 
+def liquidity_sweep_flags(frame):
+    """High/low excursions reclaimed at close, using 20 prior completed bars.
+
+    Callers supply a validated closed prefix. Both flags can be true: that
+    outside bar has no unambiguous directional sweep signal.
+    """
+    if len(frame) < 21:
+        return False, False
+    last, prior = frame.iloc[-1], frame.iloc[:-1].tail(20)
+    high, low = prior.high.max(), prior.low.min()
+    return (bool(last.high > high and last.close < high),
+            bool(last.low < low and last.close > low))
+
+
 def features(frame):
     """Only the supplied completed prefix is visible; no future context joins."""
     f = frame.tail(76)
@@ -52,10 +66,10 @@ def features(frame):
               else -1 if a.close < a.open and b.close > b.open and a.open >= b.close and a.close <= b.open else 0)
     tb = pd.to_numeric(pd.Series([a.get('tb', np.nan)]), errors='coerce').iloc[0]
     available = bool(np.isfinite(tb) and a.volume > 0 and 0 <= tb <= a.volume)
+    sweep_high, sweep_low = liquidity_sweep_flags(f)
     values = [body, upper, lower, 2*(a.close-a.low)/span-1, float(abs(body)<.1), engulf,
               float(a.high<=b.high and a.low>=b.low),
-              float(a.high>prior.high.max() and a.close<prior.high.max()),
-              float(a.low<prior.low.min() and a.close>prior.low.min()), volume,
+              float(sweep_high), float(sweep_low), volume,
               math.tanh((a.high-a.low)/atr-1),
               math.tanh((a.close/f.close.iloc[-4]-1)/.002), trend,
               math.tanh((a.close/f.close.iloc[-61]-1)/.01),

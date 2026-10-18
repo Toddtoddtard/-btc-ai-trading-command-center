@@ -70,6 +70,13 @@ def _specialist_state(state, name):
     return (state.get("specialists", {}) or {}).get(name, {}) or {}
 
 
+def specialist_model_matches(state, name, item):
+    """Changed pattern definitions cannot inherit older model evidence."""
+    version = _safe_float((state or {}).get("pattern_structure_version"), 1)
+    return (name != "Pattern AI" or version < 3
+            or _safe_float(item.get("model_version"), 1) == version)
+
+
 def _contribution_multiplier(state, name):
     """Softly reward useful bots and suppress proven harmful ones.
 
@@ -85,7 +92,7 @@ def _contribution_multiplier(state, name):
         return 1.0
     ranking = intel.get("ranking", []) if isinstance(intel.get("ranking", []), list) else []
     row = next((r for r in ranking if isinstance(r, dict) and r.get("name") == name), None)
-    if not row:
+    if not row or not specialist_model_matches(state, name, row):
         return 1.0
     if not row.get("evidence_passed") or int(row.get("evidence_streak", 0)) < 3:
         return 1.0
@@ -232,7 +239,8 @@ def analyze_bot_contributions(state, min_samples=12):
         prior = [(s, o) for s, o in records[:index]
                  if outcome_available_at(o, s.get("expires_at")) <= opened]
         replay_state = {"prediction_snapshots": [s for s, _ in prior],
-                        "master_history": [o for _, o in prior], "specialists": {}}
+                        "master_history": [o for _, o in prior], "specialists": {},
+                        "pattern_structure_version": state.get("pattern_structure_version", 1)}
         reconcile_specialists(replay_state)
         reconcile_master_learning(replay_state)
         regime = str((snap.get("snapshot") or {}).get("regime") or "UNKNOWN")
@@ -240,7 +248,7 @@ def analyze_bot_contributions(state, min_samples=12):
         full_dir = decision(adjusted, knowledge, replay_state, regime)
         evaluated += 1
         for name, call in specialists.items():
-            if name in EXCLUDED_FROM_COUNCIL:
+            if name in EXCLUDED_FROM_COUNCIL or not specialist_model_matches(state, name, call):
                 continue
             st = stats[name]
             st["samples"] += 1
@@ -272,7 +280,7 @@ def analyze_bot_contributions(state, min_samples=12):
 
     previous = state.get("bot_intelligence_v4", {}) or {}
     old = {r["name"]: r for r in previous.get("ranking", [])
-           if previous.get("evidence_version") == 2}
+           if previous.get("evidence_version") == 2 and specialist_model_matches(state, r["name"], r)}
     ranking = []
     for name, st in stats.items():
         active, paired = st["active_samples"], st["paired_calls"]
@@ -301,6 +309,8 @@ def analyze_bot_contributions(state, min_samples=12):
                "unique_saves": saves, "harmful_flips": harms,
                "avg_abs_score": st["score_abs_sum"]/active if active else 0.,
                "contribution_score": effect, "candidate_verdict": candidate, **evidence}
+        if name == "Pattern AI":
+            row["model_version"] = state.get("pattern_structure_version", 1)
         row.update(stable_update(row, old.get(name), st["last_active_evidence"]))
         row["verdict"] = candidate if row["evidence_streak"] >= 3 else "LEARNING"
         ranking.append(row)

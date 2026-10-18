@@ -18,6 +18,22 @@ source-proven probabilities. A 15-minute trend tag and window phase allow
 context comparisons. An invalidation price is recorded as descriptive evidence;
 it is not an order or an exit instruction.
 
+Added October 18, 2026: bullish/bearish liquidity sweeps share the candle
+learner's existing definition. The last completed candle must trade strictly
+beyond the preceding 20 candles' low/high, then close strictly back above/below
+that boundary. Merely touching the boundary or closing beyond it is not a
+rejected sweep. A bar breaching and reclaiming both sides is ambiguous and
+does not emit a directional named sweep. Evidence includes the breached level,
+the completed close, and the excursion extreme as descriptive invalidation.
+These are chart hypotheses, not proof of hidden stop orders or manipulation.
+
+Pattern AI now recognizes the same setups and learns its aggregate reliability
+from official outcomes. Its model version changes to 3, so older Pattern scores
+cannot be presented as performance of the changed model. The separate candle
+learner retains its unchanged 22-feature schema and learned weights. The named
+scorecard measures whether a bullish sweep predicts YES or a bearish sweep NO
+at the actual contract strike, rather than crediting any temporary bounce.
+
 Upward price pressure does not necessarily imply settlement above Kalshi's
 strike. This experiment explicitly tests that mapping and may find it poor.
 No percentage confidence is invented from a pattern name. Fee-adjusted results
