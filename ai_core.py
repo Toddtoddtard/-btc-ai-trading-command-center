@@ -5,6 +5,7 @@ import pandas as pd
 from horizon_models import predict_horizons
 from macd_engine import add_macd_features, score_macd
 from research_lab import enrich_rationales
+from candle_learning import closed_frame, liquidity_sweep_flags
 
 from political_event_watch import political_specialist_result
 from market_research import cross_market_research_result
@@ -27,7 +28,7 @@ SPECIALIST_NAMES = [
     "Cross-Market Research AI",
     "Combination AI",
 ]
-PATTERN_STRUCTURE_VERSION = 2
+PATTERN_STRUCTURE_VERSION = 3
 
 
 def clamp(x, lo=-1.0, hi=1.0):
@@ -114,7 +115,10 @@ def candle_structure_signal(hist):
     Learned specialist weighting still decides how much influence the result
     earns after outcomes are known.
     """
-    if hist is None or len(hist) < 9:
+    if hist is None:
+        return 0.0, "Insufficient completed candles for structure analysis"
+    hist = closed_frame(hist)
+    if len(hist) < 9:
         return 0.0, "Insufficient completed candles for structure analysis"
 
     frame = hist.tail(40)
@@ -171,6 +175,14 @@ def candle_structure_signal(hist):
         pieces.append((0.62 * volume_boost, "range breakout"))
     elif px < prior_low - 0.05 * atr:
         pieces.append((-0.62 * volume_boost, "range breakdown"))
+
+    sweep_high, sweep_low = liquidity_sweep_flags(frame)
+    # A close back inside distinguishes rejection from a continuing breakout.
+    # Two-sided excursions do not identify a unique reversal direction.
+    if sweep_low and not sweep_high:
+        pieces.append((0.50, "bullish liquidity sweep"))
+    elif sweep_high and not sweep_low:
+        pieces.append((-0.50, "bearish liquidity sweep"))
 
     # Flag continuation: a clear impulse followed by a smaller opposing drift.
     closes = frame["close"].astype(float).to_numpy()
@@ -243,6 +255,7 @@ def run_specialists_core(
 
     pattern_score, pattern_reason = candle_structure_signal(hist)
     out["Pattern AI"] = _specialist("Pattern AI", pattern_score, pattern_reason)
+    out["Pattern AI"]["model_version"] = PATTERN_STRUCTURE_VERSION
 
     support = safe_float(hist["low"].tail(60).min(), px)
     resistance = safe_float(hist["high"].tail(60).max(), px)

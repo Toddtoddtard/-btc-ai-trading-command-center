@@ -72,7 +72,7 @@ def ensure_v31(state):
             "prior_samples": int(old_pattern.get("samples", 0) or 0),
             "prior_hits": int(old_pattern.get("direction_hits", 0) or 0),
             "prior_history_rows": len(old_rows),
-            "reason": "FEATURE_DEFINITION_CHANGED_TO_MULTI_CANDLE_STRUCTURE",
+            "reason": "FEATURE_DEFINITION_CHANGED_TO_LIQUIDITY_SWEEPS",
         })
         state["model_migration_history"] = state["model_migration_history"][-20:]
         state.setdefault("specialist_history", {})["Pattern AI"] = []

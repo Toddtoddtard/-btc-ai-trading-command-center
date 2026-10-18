@@ -2,7 +2,7 @@
 import copy
 import math
 from datetime import datetime, timezone
-from council_v4 import specialist_active, _direction
+from council_v4 import specialist_active, specialist_model_matches, _direction
 
 BASIS = 'official_kalshi_directional_calls_v1'
 MASTER_BASIS = 'official_kalshi_council_confidence_v1'
@@ -107,7 +107,7 @@ def reconcile_specialists(state):
         ewma, brier = .5, .25
         for record, outcome in records:
             snapshot = record['snapshot']; call = snapshot['specialists'].get(name)
-            if not isinstance(call, dict):
+            if not isinstance(call, dict) or not specialist_model_matches(state, name, call):
                 continue
             active = specialist_active(name, call)
             direction = _direction(call.get('score')) if active else 0

@@ -77,6 +77,17 @@ Kalshi depth is read from the unauthenticated public order-book endpoint. `kalsh
 
 ## Specialist council
 
+Pattern AI version 3 shares the candle learner's 20-bar high/low sweep definition:
+an excursion beyond the prior range followed by a completed close back inside
+the breached boundary. A low-only sweep adds bullish evidence; a high-only sweep
+adds bearish evidence. A bar sweeping both sides supplies no directional sweep
+vote. The 0.50 raw pattern contribution is an experimental heuristic, not a
+calibrated probability. Named sweep observations also enter the existing official
+Kalshi settlement signal scorecard, including WAIT observations. Candle-model
+features and saved weights keep their existing definitions and ordering. Older
+Pattern votes remain archived but cannot train version 3 reliability or its
+contribution multiplier; other specialists and paper ledgers are retained.
+
 The shared specialist council contains Trend, Momentum, Volume, Pattern, Support/Resistance, Volatility, Market Regime, Whale, Liquidity, Derivatives, Kalshi Context, Historical Pattern, and Combination AI.
 
 `Kalshi Context AI` is intentionally named this way because its inputs are Kalshi market probability and BTC distance from the active target; it is not a news/event feed.
