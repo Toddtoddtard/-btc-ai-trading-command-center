@@ -147,8 +147,12 @@ completed candles from that source. A regularized direct regression fits each
 minute separately; chronological validation refits at each origin using only
 labels already complete then. Eight non-overlapping validation paths, aggregate
 and recent error improvements over both no-change and the legacy momentum
-center are required before the learned curve is displayed. Otherwise the chart
-uses a conservative baseline. Validation selection is retrospective; prospective
+center are required before the internal method is marked validated. Otherwise
+the fitted path is displayed as a model forecast, with experimental status kept
+in metadata, or a momentum baseline is shown if it beats flat.
+No fitted model means warming up, with no price path. The flat benchmark never
+replaces a fitted path with an artificial horizontal line. The error envelope
+uses errors from the displayed method. Validation selection is retrospective; prospective
 frozen path scores are recorded separately and do not certify a trading edge.
 
 `learner_v31.py` reuses its refreshed `settlement_reference` candles to retain up

@@ -19,6 +19,34 @@ def cutoff(rows):
 
 
 class ForecastCurveTests(unittest.TestCase):
+    def test_unvalidated_model_path_is_not_replaced_with_a_flat_line(self):
+        rows=candles(90)
+        result=build_curve(rows,now=cutoff(rows))
+        self.assertEqual(result['method'],'experimental_curve')
+        self.assertFalse(result['affects_execution'])
+        self.assertLess(result['validation']['samples'],8)
+        self.assertEqual(len(result['points']),15)
+        self.assertGreater(np.ptp([p['close'] for p in result['points']]),1)
+
+    def test_insufficient_training_does_not_masquerade_as_a_price_forecast(self):
+        rows=candles(40)
+        result=build_curve(rows,now=cutoff(rows))
+        self.assertEqual(result['method'],'unavailable')
+        self.assertEqual(result['points'],[])
+
+    def test_failed_baseline_comparison_keeps_research_path_and_candidate_error(self):
+        rows=candles()
+        values=83000+np.random.default_rng(2).normal(0,10,len(rows)).cumsum()
+        for r,v in zip(rows,values):
+            r.update(open=v-1,high=v+4,low=v-4,close=v)
+        result=build_curve(rows,now=cutoff(rows))
+        self.assertEqual(result['method'],'experimental_curve')
+        self.assertEqual(result['validation']['samples'],8)
+        self.assertGreater(result['validation']['candidate_mae'],result['validation']['flat_mae'])
+        self.assertGreater(np.ptp([p['close'] for p in result['points']]),1)
+        self.assertTrue(all(p['lower']<=p['close']<=p['upper'] for p in result['points']))
+        self.assertFalse(result['affects_execution'])
+
     def test_future_and_forming_candles_cannot_change_a_forecast(self):
         rows=candles(); now=cutoff(rows[:260])
         a=build_curve(rows[:260], now=now)

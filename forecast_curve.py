@@ -87,7 +87,7 @@ def build_curve(rows, now=None, config=None):
     now = time.time() if now is None else float(now)
     config = config or {}
     rows = closed_rows(rows,now)
-    result = dict(version=1,source=SOURCE,affects_execution=False,closed_candles=len(rows),
+    result = dict(version=2,source=SOURCE,affects_execution=False,closed_candles=len(rows),
                   method='unavailable',points=[],as_of=0.,validation={'samples':0})
     if len(rows)<LOOKBACK:
         return result
@@ -114,18 +114,21 @@ def build_curve(rows, now=None, config=None):
         if observations:
             metrics[method+'_mae']=float(np.mean([o[method] for o in observations]))
     candidate=_fit_predict(x,y,len(x)-1)
+    if candidate is None:
+        result['validation']=metrics
+        return result
     qualified=(len(observations)>=MIN_VALIDATION and candidate is not None and
                metrics['candidate_mae']<.98*min(metrics['flat_mae'],metrics['legacy_mae']) and
                np.mean([o['candidate'] for o in observations[-4:]])<
                min(np.mean([o['flat'] for o in observations[-4:]]),np.mean([o['legacy'] for o in observations[-4:]])))
-    method='validated_curve' if qualified else 'flat_baseline'
-    offsets=candidate if qualified else np.zeros(15)
-    # Without evidence there is no invented directional lean. A baseline that
-    # beats flat on held-out paths is an allowed fallback, not a learned curve.
+    method='validated_curve' if qualified else 'experimental_curve'
+    offsets=candidate
+    # Show the fitted research path without inventing movement or claiming an
+    # edge. Flat remains the validation benchmark, not a replacement prediction.
     if not qualified and len(observations)>=MIN_VALIDATION and metrics['legacy_mae']<metrics['flat_mae']*.98:
         method='momentum_baseline'
         offsets=_legacy(c,len(c)-1,scale[-1],config)
-    baseline_errors=[o['candidate' if qualified else ('legacy' if method=='momentum_baseline' else 'flat')]
+    baseline_errors=[o['legacy' if method=='momentum_baseline' else 'candidate']
                      for o in observations]
     if baseline_errors:
         width=np.quantile(np.asarray(baseline_errors),.8,axis=0)*scale[-1]

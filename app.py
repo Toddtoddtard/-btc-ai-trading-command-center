@@ -4849,6 +4849,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     (currentTicker ? currentTicker + " • " : "") +
                     "price at " + easternTime(lastChartTimestamp) +
                     " • " + (SERVER_CURVE?.method === "validated_curve" ? "Learned 15-minute curve" :
+                    SERVER_CURVE?.method === "experimental_curve" ? "Model forecast — next 15 minutes" :
                     SERVER_CURVE?.method === "momentum_baseline" ? "Momentum estimate" :
                     SERVER_CURVE?.method === "flat_baseline" ? "Flat estimate — directional edge unproven" : "Forecast warming up");
                 const sig = [signature(fresh), currentTicker, currentTarget,
@@ -4882,6 +4883,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     (currentTicker ? currentTicker + " • " : "") +
                     "price at " + easternTime(lastChartTimestamp) +
                     " • " + (SERVER_CURVE?.method === "validated_curve" ? "Learned 15-minute curve" :
+                    SERVER_CURVE?.method === "experimental_curve" ? "Model forecast — next 15 minutes" :
                     SERVER_CURVE?.method === "momentum_baseline" ? "Momentum estimate" :
                     SERVER_CURVE?.method === "flat_baseline" ? "Flat estimate — directional edge unproven" : "Forecast warming up");
             }} finally {{
