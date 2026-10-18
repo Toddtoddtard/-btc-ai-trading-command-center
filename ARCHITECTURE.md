@@ -169,3 +169,35 @@ settlement model and future-market outlooks; their historical counters are uncha
 `display_time.py` owns Eastern presentation (`America/New_York`, automatic EST/EDT).
 Stored timestamps, feed coordinates, expiry checks and API parameters remain UTC.
 Python tables/figures and the persistent browser chart format labels/hover in ET.
+
+## Hourly specialist forecasts and independent learning (2026-10-18)
+
+`hourly_forecast.py` replaces the hourly dashboard's static blend. Each active
+specialist projects a BTC target using its signed signal, the existing hourly
+move scale and the actual fraction of the hour remaining. The combined target
+is the confidence-weighted mean of these targets. Technical signals are reused;
+`ai_core.kalshi_context_result` rebuilds Kalshi Context against the selected
+hourly contract instead of borrowing the 15-minute strike. Neutral and inactive
+bots remain visible but abstain. Combination AI is retained as a diagnostic
+summary without a second council vote. Signal confidence is not measured accuracy.
+
+The scheduled `learner_v31.py` runs `update` each cycle, independently of paper
+entry approval. It captures the first observed supported strike nearest BTC for
+each hourly event, saves each specialist target and YES/NO/HOLD forecast before
+expiry, and retains unresolved captures across restarts. Only that contract's
+official post-expiry YES/NO result resolves it. Multiple strikes and repeated
+refreshes cannot multiply the independent sample count. Greater/less contracts
+are supported; unsupported settlement rules do not supply labels. Captures store
+compact audit fields and the last 1,000 resolved events; older hourly evidence
+is not fabricated from 15-minute records or exchange-price proxies.
+
+Hourly influence uses only previously observed hourly labels for the specialist's
+current model version. After 20 directional outcomes, a shrunk hit rate and
+frozen leave-one-out contribution adjust its base weight within 0.5–1.5 times
+base. Abstentions are excluded from accuracy and training. The scorecard also
+retains paired market-midpoint and no-price-change directional comparisons.
+The dashboard reads this persistent state and exposes every bot's current target,
+call, influence, sample count and measured hourly accuracy. A failed hourly data
+refresh is recorded without discarding pending labels or changing the existing
+15-minute learning, execution policy or paper ledger. No hourly orders are added,
+and neither functional tests nor weight adaptation establish an accuracy gain.

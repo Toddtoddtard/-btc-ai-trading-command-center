@@ -820,6 +820,19 @@ def main():
     registered = register_with_snapshot(state, df, market_info)
     live_call = current_shadow_call(state, df, market_info)
     record_observation(state, live_call, market_info)
+    # Independent hourly labels and weights; reuse technical specialists, with
+    # Kalshi Context rebuilt against the hourly strike inside hourly_forecast.
+    try:
+        from hourly_forecast import update as update_hourly_forecast
+        hourly_results = (live_call or {}).get("specialists")
+        if not hourly_results:
+            hourly_results = legacy.run_specialists_core(
+                df, legacy.aggregate_trades(), legacy.futures_snapshot(), {"available": False})
+        update_hourly_forecast(state.setdefault("hourly_forecast", {}), df, hourly_results,
+                               legacy.kalshi_get, result_reader)
+    except Exception as exc:
+        state.setdefault("hourly_forecast", {})["error"] = str(exc)[:300]
+
     # Reuse the already refreshed official feed; no extra network request or
     # exchange-price substitution. The persisted curve remains chart research.
     reference = (market_info or {}).get("settlement_reference") or {}

@@ -199,6 +199,28 @@ def candle_structure_signal(hist):
     return score, reason
 
 
+def kalshi_context_result(kctx, settlement_px):
+    if kctx and kctx.get("available"):
+        probability = safe_float(kctx.get("up_probability"))
+        market_score = clamp((probability - 0.5) * 2.0) if pd.notna(probability) else 0.0
+        target = safe_float(kctx.get("target"))
+        distance = settlement_px - target if pd.notna(target) else np.nan
+        distance_pct = distance / target if pd.notna(distance) and target else np.nan
+        target_distance_score = (
+            clamp((settlement_px - target) / max(settlement_px * 0.0025, 1.0))
+            if pd.notna(target) else 0.0
+        )
+        context_score = clamp(0.55 * market_score + 0.45 * target_distance_score)
+        context_reason = (
+            f"Kalshi target ${target:,.2f}; reference BTC {distance:+,.2f} ({distance_pct*100:+.3f}%) vs target; "
+            + (f"UP market ~{probability*100:.1f}%" if pd.notna(probability) else "UP market price unavailable")
+        )
+    else:
+        context_score = 0.0
+        context_reason = "Live KXBTC15M target unavailable"
+    return _specialist("Kalshi Context AI", context_score, context_reason)
+
+
 def run_specialists_core(
     hist, agg, futures, kctx, research_snapshot=None, settlement_price=None
 ):
@@ -320,25 +342,7 @@ def run_specialists_core(
     deriv_score = clamp(book * 1.6 - np.sign(funding) * min(abs(funding) / 0.0005, 1.0) * 0.25)
     out["Derivatives AI"] = _specialist("Derivatives AI", deriv_score, f"Funding {funding*100:.4f}%; OI {safe_float((futures or {}).get('open_interest'), 0):,.0f} BTC")
 
-    if kctx and kctx.get("available"):
-        probability = safe_float(kctx.get("up_probability"))
-        market_score = clamp((probability - 0.5) * 2.0) if pd.notna(probability) else 0.0
-        target = safe_float(kctx.get("target"))
-        distance = settlement_px - target if pd.notna(target) else np.nan
-        distance_pct = distance / target if pd.notna(distance) and target else np.nan
-        target_distance_score = (
-            clamp((settlement_px - target) / max(settlement_px * 0.0025, 1.0))
-            if pd.notna(target) else 0.0
-        )
-        context_score = clamp(0.55 * market_score + 0.45 * target_distance_score)
-        context_reason = (
-            f"Kalshi target ${target:,.2f}; reference BTC {distance:+,.2f} ({distance_pct*100:+.3f}%) vs target; "
-            + (f"UP market ~{probability*100:.1f}%" if pd.notna(probability) else "UP market price unavailable")
-        )
-    else:
-        context_score = 0.0
-        context_reason = "Live KXBTC15M target unavailable"
-    out["Kalshi Context AI"] = _specialist("Kalshi Context AI", context_score, context_reason)
+    out["Kalshi Context AI"] = kalshi_context_result(kctx, settlement_px)
 
     recent3 = safe_float((hist["close"].iloc[-1] / hist["close"].iloc[-4] - 1), 0.0) if len(hist) >= 4 else 0.0
     recent15 = safe_float(last.get("ret15"), 0.0)

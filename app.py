@@ -17,7 +17,7 @@ for _runtime_module in (
     "access_control", "lock_focus", "kalshi_paper_engine",
     "outcome_timing", "contribution_evidence", "contract_calibration", "reliability_v31", "council_v4",
     "kalshi_chart_data", "settlement_predictor", "research_lab", "horizon_models", "ai_core",
-    "council_accounting", "specialist_knowledge_v5",
+    "council_accounting", "specialist_knowledge_v5", "hourly_forecast",
     "background_paper", "pro_trade_ticket", "live_feeds", "shared_learning",
 ):
     importlib.reload(importlib.import_module(_runtime_module))
@@ -1360,136 +1360,11 @@ def fetch_kalshi_hourly_bitcoin_markets():
     }
 
 
-def hourly_kalshi_target_ai(hist, specialist_results, hourly_kalshi, spot_price):
-    """
-    Separate 60-minute forecast model.
-
-    Output:
-    - estimated BTC price at next hourly Kalshi settlement
-    - expected move in dollars / percent
-    - confidence
-    - nearest active Kalshi hourly strike
-    - model-vs-Kalshi comparison
-    """
-    px = float(spot_price)
-    last = hist.iloc[-1]
-
-    atr = safe_float(last.get("atr14"), px * 0.002)
-    ema9 = safe_float(last.get("ema9"), px)
-    ema21 = safe_float(last.get("ema21"), px)
-    rsi = safe_float(last.get("rsi"), 50.0)
-
-    # Multi-window returns from 1-minute candles.
-    closes = hist["close"].astype(float)
-    ret5 = (px / float(closes.iloc[-6]) - 1.0) if len(closes) >= 6 else 0.0
-    ret15 = (px / float(closes.iloc[-16]) - 1.0) if len(closes) >= 16 else 0.0
-    ret30 = (px / float(closes.iloc[-31]) - 1.0) if len(closes) >= 31 else ret15
-    ret60 = (px / float(closes.iloc[-61]) - 1.0) if len(closes) >= 61 else ret30
-
-    # Specialist council, but smoother than the 15-minute bot.
-    weighted = 0.0
-    weight_total = 0.0
-    for name, result in specialist_results.items():
-        weight = SPECIALIST_WEIGHTS.get(name, 1.0)
-        conf = safe_float(result.get("confidence"), 0.5)
-        score = safe_float(result.get("score"), 0.0)
-        weighted += score * conf * weight
-        weight_total += conf * weight
-
-    council_score = clamp(weighted / weight_total if weight_total else 0.0)
-
-    trend_score = clamp((ema9 - ema21) / max(px * 0.0015, 1.0))
-    momentum_score = clamp(
-        0.20 * (ret5 / 0.003)
-        + 0.30 * (ret15 / 0.006)
-        + 0.25 * (ret30 / 0.009)
-        + 0.25 * (ret60 / 0.014)
-    )
-    rsi_score = clamp((rsi - 50.0) / 25.0)
-
-    hourly_score = clamp(
-        0.45 * council_score
-        + 0.25 * trend_score
-        + 0.23 * momentum_score
-        + 0.07 * rsi_score
-    )
-
-    # Scale expected movement to a 60-minute horizon.
-    base_hour_move = max(
-        atr * 2.35,
-        px * 0.0022,
-    )
-
-    projected_move = base_hour_move * hourly_score
-    ai_target = px + projected_move
-
-    # Confidence increases with directional agreement and signal magnitude,
-    # but remains bounded because this is still a probabilistic forecast.
-    direction_votes = []
-    for result in specialist_results.values():
-        score = safe_float(result.get("score"), 0.0)
-        if abs(score) >= 0.05:
-            direction_votes.append(1 if score > 0 else -1)
-
-    agreement = (
-        abs(sum(direction_votes)) / len(direction_votes)
-        if direction_votes else 0.0
-    )
-
-    confidence = min(
-        0.92,
-        max(
-            0.45,
-            0.50
-            + abs(hourly_score) * 0.25
-            + agreement * 0.12,
-        ),
-    )
-
-    markets = hourly_kalshi.get("event_markets", []) if hourly_kalshi else []
-    nearest_market = None
-    nearest_strike = np.nan
-    nearest_distance = np.nan
-
-    if markets:
-        nearest_market = min(
-            markets,
-            key=lambda row: abs(row["_strike"] - ai_target),
-        )
-        nearest_strike = safe_float(nearest_market.get("_strike"))
-        nearest_distance = (
-            ai_target - nearest_strike
-            if pd.notna(nearest_strike)
-            else np.nan
-        )
-
-    close_ts = hourly_kalshi.get("close_ts", np.nan) if hourly_kalshi else np.nan
-    seconds_remaining = (
-        max(0, int(close_ts - time.time()))
-        if pd.notna(close_ts)
-        else np.nan
-    )
-
-    direction = (
-        "UP" if projected_move > px * 0.00025
-        else "DOWN" if projected_move < -px * 0.00025
-        else "FLAT"
-    )
-
-    return {
-        "target_price": ai_target,
-        "projected_move": projected_move,
-        "projected_move_pct": projected_move / px if px else 0.0,
-        "direction": direction,
-        "confidence": confidence,
-        "hourly_score": hourly_score,
-        "nearest_strike": nearest_strike,
-        "nearest_distance": nearest_distance,
-        "nearest_market": nearest_market,
-        "seconds_remaining": seconds_remaining,
-        "close_ts": close_ts,
-        "kalshi_available": bool(markets),
-    }
+def hourly_kalshi_target_ai(hist, specialist_results, hourly_kalshi, spot_price, learning_state=None):
+    from hourly_forecast import predict
+    state = learning_state if learning_state is not None else (fetch_remote_learning_state() or {})
+    return predict(hist, specialist_results, hourly_kalshi, spot_price,
+                   root=state.get("hourly_forecast", {}))
 
 
 def hourly_target_chart(hist, spot_price, hourly_ai):
@@ -5317,11 +5192,11 @@ def live_dashboard():
         settlement_price=price,
         reference_healthy=bool(_display_feed.get("available")),
     )
-    hourly_ai = hourly_kalshi_target_ai(hist, results, hourly_kalshi, price)
+    _shared_learning_state = fetch_remote_learning_state() or {}
+    hourly_ai = hourly_kalshi_target_ai(hist, results, hourly_kalshi, price, _shared_learning_state)
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
 
-    _shared_learning_state = fetch_remote_learning_state() or {}
     _settlement_market = _display_context.get("market") or {}
     _settlement_expiry = kalshi_close_timestamp(_settlement_market)
     _settlement_prediction = predict_settlement(
@@ -6014,9 +5889,36 @@ def live_dashboard():
                     unsafe_allow_html=True,
                 )
             h4.metric(
-                "Confidence",
+                "Signal confidence",
                 f"{hourly_ai['confidence']*100:.1f}%",
             )
+
+            hourly_lab = _shared_learning_state.get("hourly_forecast", {})
+            hourly_stats = hourly_lab.get("scorecard", {})
+            hourly_samples = int(hourly_stats.get("samples", 0))
+            if hourly_lab.get("error"):
+                st.warning("Hourly learning could not refresh on its last worker pass. Saved outcomes are retained.")
+            if hourly_samples:
+                st.caption(f"Hourly settlement accuracy: {hourly_stats['accuracy']*100:.1f}% "
+                           f"across {hourly_samples} graded calls. The first saved call per hourly event "
+                           "is checked against the official result; later live estimates can change.")
+            else:
+                st.caption("Hourly outcome tracking is starting. Signal confidence is not measured accuracy.")
+            with st.expander("Every bot’s hourly forecast", expanded=False):
+                forecast_rows = []
+                for name, member in hourly_ai["specialist_forecasts"].items():
+                    forecast_rows.append({
+                        "Bot": name,
+                        "Price target": fmt_money(member["target_price"]) if member["active"] else "HOLD",
+                        "Kalshi call": "YES" if member["predicted_yes"] is True else "NO" if member["predicted_yes"] is False else "HOLD",
+                        "Influence": f"{member['vote_share']*100:.1f}%",
+                        "Hourly accuracy": f"{member['accuracy']*100:.1f}%" if member["accuracy"] is not None else "Awaiting outcomes",
+                        "Graded calls": member["graded_samples"],
+                    })
+                st.dataframe(pd.DataFrame(forecast_rows), use_container_width=True, hide_index=True)
+                st.caption("Each bot contributes its own target. Neutral bots remain available. "
+                           "Combination AI summarizes the council and receives no extra vote. "
+                           "Hourly influence starts adapting after 20 graded calls per bot.")
 
             h5, h6, h7 = st.columns(3)
             h5.metric(
