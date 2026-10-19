@@ -434,7 +434,9 @@ def projected_net_pnl(contracts, entry, projected_exit):
 def executable_entry_quote(bid, ask):
     """Require a finite, non-crossed selected-side book before a paper fill."""
     bid, ask = _f(bid), _f(ask)
-    return bid is not None and ask is not None and 0 <= bid <= ask < 1 and ask > 0
+    # Binary asks are 1 - opposite_bid; tolerate arithmetic dust, not a tick.
+    return (bid is not None and ask is not None and 0 <= bid < 1 and 0 < ask < 1
+            and (bid <= ask or math.isclose(bid, ask, rel_tol=0, abs_tol=1e-12)))
 
 
 def expected_lock_net_pnl(contracts, entry, decision, side):

@@ -20,6 +20,18 @@ from reliability_v31 import (
 
 
 class ReliabilityTests(unittest.TestCase):
+    def test_locked_veto_marks_pending_waiting_without_rewriting_original_call(self):
+        pending = self.locked_pending()
+        pending['would_wait'] = False
+        live = dict(ticker='X', opened_at=1500, master_action='LOCK DOWN',
+                    execution_approved=True, execution_reason='LOCK DOWN')
+        refresh_pending_lock_focus({'pending': pending}, live, {'ticker': 'X'})
+        self.assertTrue(pending['would_wait'])
+        self.assertFalse(pending['execution_approved'])
+        self.assertEqual(pending['master_action'], 'LOCK UP')
+        # Independent current evidence must not be relabeled as the old LOCK.
+        self.assertEqual(live['master_action'], 'LOCK DOWN')
+
     def locked_pending(self):
         return dict(ticker="X", expires_at=2000, opened_at=1000,
                     master_action="LOCK UP", predicted_direction=1,

@@ -4,10 +4,41 @@ import json
 from unittest.mock import patch
 
 import background_paper as bg
+from kalshi_microstructure import orderbook_features
+from kalshi_paper_engine import executable_entry_quote
+from contract_calibration import BASIS
 from tests import test_background_paper as fixtures
 
 
 class PaperLiquidityTests(unittest.TestCase):
+    def test_equal_bid_and_ask_from_binary_book_can_fill_qualified_lock(self):
+        # 1 - .32 is slightly below .68 in binary floating point.
+        book = orderbook_features({'orderbook_fp': {
+            'yes_dollars': [['0.6800', '100']],
+            'no_dollars': [['0.3200', '100']],
+        }})
+        state = fixtures.BackgroundPaperTests().pending(
+            master_action='LOCK UP', execution_approved=True,
+            contract_probability_up=.85, contract_probability_basis=BASIS,
+            contract_calibrator_active=True)
+        market = fixtures.BackgroundPaperTests.market(
+            **{key+'_dollars': book[key] for key in ('yes_bid','yes_ask','no_bid','no_ask')},
+            execution_book=book, quotes_observed_at=1000)
+        paper = bg.run_cycle(state, lambda _: market, now=1000)
+        self.assertIsNotNone(paper['open_position'], paper['last_message'])
+        self.assertEqual(paper['open_position']['strategy'], 'LOCK')
+
+    def test_equal_price_books_pass_both_sides_but_real_crosses_are_rejected(self):
+        for price in (.07, .32, .45, .68, .93, .6801):
+            book = orderbook_features({'orderbook_fp': {
+                'yes_dollars': [[str(price), '100']],
+                'no_dollars': [[str(round(1-price, 4)), '100']],
+            }})
+            for side in ('yes', 'no'):
+                with self.subTest(price=price, side=side):
+                    self.assertTrue(executable_entry_quote(book[side+'_bid'], book[side+'_ask']))
+        self.assertFalse(executable_entry_quote(.6801, .68))
+
     def test_live_market_reader_uses_depth_quotes_and_marks_failed_depth(self):
         market = fixtures.BackgroundPaperTests.market()
         book = {'orderbook_fp': {'yes_dollars': [['0.40', '3']], 'no_dollars': [['0.55', '2']]}}

@@ -701,6 +701,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
     ):
         pending["execution_approved"] = False
         pending["execution_reason"] = "FRESH_SAME_TICKER_EVALUATION_UNAVAILABLE"
+        pending["would_wait"] = True
         pending["execution_checked_at"] = time.time()
         return False
     old_action = str(pending.get("master_action") or "WAIT").upper()
@@ -722,6 +723,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         elif fresh_action != old_action:
             pending["execution_approved"] = False
             pending["execution_reason"] = "CURRENT_LOCK_DIRECTION_OR_QUALIFICATION_CHANGED"
+        pending["would_wait"] = pending.get("execution_approved") is not True
         return False
     for key in (
         "specialists", "master_confidence", "master_base_score", "council_vote",
@@ -866,10 +868,6 @@ def main():
         safe_float(_live_focus.get("consensus"), 0.0),
     )
     refreshed_lock_focus = refresh_pending_lock_focus(state, live_call, market_info)
-    pending_action = str((state.get("pending") or {}).get("master_action") or "").upper()
-    if live_call and pending_action.startswith("LOCK"):
-        live_call["master_action"] = pending_action
-        live_call["would_wait"] = False
     # Research phases use the current observation time, while execution keeps
     # the original pending forecast geometry for strict expiry grading.
     shadow_call = live_call or state.get("pending")
