@@ -19,6 +19,10 @@ and cannot substitute for contract probability. An immutable LOCK direction
 does not freeze authorization: current probability and reliability evidence
 must still approve an unfilled call. Promotion of existing SCALP exposure also
 requires current approval and a validated advantage to holding versus selling.
+Pending LOCK wait status follows that current authorization; independent live
+research calls retain their own action and veto rather than being relabeled as
+the original LOCK. The shared entry-quote check tolerates only floating-point
+subtraction noise in binary complementary quotes, while rejecting crossed ticks.
 
 The active scheduled entrypoint is `learner_v31.py`, supported by `learner.py`
 and `learner_v3.py`. `.github/workflows/learn.yml` runs learning, enrichment and
