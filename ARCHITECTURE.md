@@ -23,6 +23,13 @@ Pending LOCK wait status follows that current authorization; independent live
 research calls retain their own action and veto rather than being relabeled as
 the original LOCK. The shared entry-quote check tolerates only floating-point
 subtraction noise in binary complementary quotes, while rejecting crossed ticks.
+The scheduled worker anchors terminal probabilities and technical forecast moves
+to a fresh, matching Kalshi event-chart price, as the dashboard does. Binance
+candles remain the technical signal and path-learning source; a missing, stale,
+future or mismatched Kalshi reference vetoes entry rather than substituting USDT.
+For active markets, an unusable execution book on the first public host is
+retried on the backup host before simulated fills are rejected. Both failed
+depth reads still block fills; official closed-market settlement reads continue.
 
 The active scheduled entrypoint is `learner_v31.py`, supported by `learner.py`
 and `learner_v3.py`. `.github/workflows/learn.yml` runs learning, enrichment and

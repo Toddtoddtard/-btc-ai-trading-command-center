@@ -205,6 +205,7 @@ def _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, m
 
 def _market(ticker, timeout=2.5):
     last_error = None
+    fallback_market = None
     for base in (
         "https://api.elections.kalshi.com/trade-api/v2",
         "https://external-api.kalshi.com/trade-api/v2",
@@ -229,9 +230,16 @@ def _market(ticker, timeout=2.5):
                         value = book.get(name)
                         market[name+'_dollars'] = value
                         market[name] = None if value is None else value*100
+                if not book.get('available') or not executable_entry_quote(*_quotes(market, 'YES')):
+                    # A metadata response is not a usable execution book. Try
+                    # the other public host before reporting missing liquidity.
+                    fallback_market = market
+                    continue
             return market
         except Exception as exc:
             last_error = exc
+    if fallback_market is not None:
+        return fallback_market
     raise RuntimeError(str(last_error) if last_error else "Kalshi endpoints failed")
 
 

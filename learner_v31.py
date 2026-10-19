@@ -616,8 +616,25 @@ def current_shadow_call(state, df, market_info):
     seconds_remaining = expires_at - opened_at
     predicted_end = safe_float(forecast.get("predicted_end"), None)
     target = safe_float(market_info.get("target"), None)
+    # Technical candle moves remain Binance-based. The strike comparison must
+    # use the same exact-event BTC/USD reference as the live dashboard.
+    reference = market_info.get("settlement_reference") or {}
+    reference_price = safe_float(reference.get("price"), None)
+    reference_time = safe_float(reference.get("timestamp"), None)
+    needs_reference = bool(event_ticker(market_info.get("ticker")))
+    reference_healthy = not needs_reference or bool(
+        reference.get("available") and reference_price is not None and reference_price > 1000
+        and reference_time is not None and 0 <= opened_at-reference_time <= 30
+        and reference.get("event_ticker") == event_ticker(market_info.get("ticker"))
+    )
+    terminal_price = (reference_price if reference_healthy else None) if needs_reference else price
+    settlement_end = (terminal_price + predicted_end-price
+                      if terminal_price is not None and predicted_end is not None else None)
+    call["settlement_reference_price"] = terminal_price
+    call["settlement_reference_timestamp"] = reference_time
+    call["settlement_forecast_end"] = settlement_end
     contract_view = terminal_above_probability(
-        spot=price,
+        spot=terminal_price,
         strike=target,
         seconds_remaining=seconds_remaining,
         volatility_per_minute=realized_minute_volatility(
@@ -650,17 +667,18 @@ def current_shadow_call(state, df, market_info):
     call["late_window_stress"] = bool(contract_view.get("late_window_stress"))
     price_floor = price * 0.00035
     target_confirmed = bool(
-        predicted_end is not None
+        reference_healthy
+        and settlement_end is not None
         and target is not None
         and (
-            (direction == "UP" and predicted_end >= target)
-            or (direction == "DOWN" and predicted_end < target)
+            (direction == "UP" and settlement_end >= target)
+            or (direction == "DOWN" and settlement_end < target)
         )
         and (
             contract_probability_up is None
             or abs(contract_probability_up - 0.5) >= 0.05
         )
-        and abs(predicted_end - target) >= price_floor
+        and abs(settlement_end - target) >= price_floor
     )
     policy = learned_policy(state, detect_regime(df))
     focus = evaluate_lock_focus(
@@ -682,6 +700,9 @@ def current_shadow_call(state, df, market_info):
         execution_approved = False
         execution_reason = vote["precision_gate_reason"]
         call["master_action"] = "WAIT"
+    if not reference_healthy:
+        execution_approved = False
+        execution_reason = "WAIT — KALSHI REFERENCE"
     call["execution_approved"] = bool(execution_approved)
     call["execution_reason"] = execution_reason
     call["would_wait"] = not execution_approved
@@ -710,6 +731,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         "contract_probability_basis", "contract_calibrator_active",
         "contract_probability_edge", "strike_distance_sigma",
         "execution_approved", "execution_reason",
+        "settlement_reference_price", "settlement_reference_timestamp", "settlement_forecast_end",
     ):
         pending[key] = live_call.get(key)
     pending["execution_checked_at"] = live_call.get("opened_at")
