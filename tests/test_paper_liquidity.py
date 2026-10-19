@@ -11,6 +11,28 @@ from tests import test_background_paper as fixtures
 
 
 class PaperLiquidityTests(unittest.TestCase):
+    def test_live_depth_failure_tries_backup_before_rejecting_quote(self):
+        market = fixtures.BackgroundPaperTests.market()
+        book = {'orderbook_fp': {'yes_dollars': [['0.48', '20']],
+                                 'no_dollars': [['0.50', '20']]}}
+        requests = []
+        def read(request, **kwargs):
+            url = request.full_url
+            requests.append(url)
+            if url.endswith('/orderbook'):
+                if 'api.elections.kalshi.com' in url:
+                    raise OSError('primary depth unavailable')
+                return io.BytesIO(json.dumps(book).encode())
+            return io.BytesIO(json.dumps({'market': market}).encode())
+        with patch.object(bg, 'urlopen', side_effect=read):
+            result = bg._market(market['ticker'])
+        self.assertTrue(result['execution_book']['available'])
+        self.assertTrue(any('external-api.kalshi.com' in url for url in requests))
+        state = fixtures.BackgroundPaperTests().pending(expires_at=result['quotes_observed_at']+600)
+        paper = bg.run_cycle(state, lambda _: result, now=result['quotes_observed_at'])
+        self.assertIsNotNone(paper['open_position'], paper['last_message'])
+        self.assertEqual(bg._fill_size(result, 'YES', 'ask', result['quotes_observed_at']), 20)
+
     def test_equal_bid_and_ask_from_binary_book_can_fill_qualified_lock(self):
         # 1 - .32 is slightly below .68 in binary floating point.
         book = orderbook_features({'orderbook_fp': {

@@ -11,7 +11,7 @@ Start here for a specific issue. This is a navigation guide, not a current healt
 | Hourly specialist targets, learned influence and official outcomes | `hourly_forecast.py`: `predict`, `capture`, `resolve`, `update`; `learner_v31.py`: hourly worker capture; `app.py`: `hourly_kalshi_target_ai`; `ai_core.py`: shared `kalshi_context_result` | `test_hourly_forecast`, `test_official_calibration`, `test_worker_session` |
 | Exact 15-minute YES/NO settlement challenger | `settlement_predictor.py`: independent worker captures, official resolution, correction validation and timing scorecards; `kalshi_chart_data.py`; evidence UI in `research_dashboard.py` and `app.py` | `test_settlement_predictor`, `test_settlement_evidence`, `test_kalshi_chart_data` |
 | LOCK/SCALP qualification | `lock_focus.py`, `pro_trade_ticket.py`; app/learner callers | `test_lock_focus`, `test_entry_caps`, `test_contract_regressions` |
-| Persistent paper balance, positions, settlements | `background_paper.py`: live depth reads and fill-size checks; shared helpers in `kalshi_paper_engine.py`; `app.py` consumes `shared_paper_summary` | `test_background_paper`, `test_paper_liquidity`, `test_paper_recovery`, `test_state_preservation` |
+| Persistent paper balance, positions, settlements | `background_paper.py`: live depth reads, backup-host recovery and fill-size checks; shared helpers in `kalshi_paper_engine.py`; `app.py` consumes `shared_paper_summary` | `test_background_paper`, `test_paper_liquidity`, `test_paper_recovery`, `test_state_preservation` |
 | Journal correctness and resolved counts | `prediction_journal.py`, `council_accounting.py` | `test_persistent_journal`, `test_journal_integration` |
 | Rolling chart curve and prospective path evidence | `forecast_curve.py`; `learner_v31.py`: `current_shadow_call` / worker reference reuse; `app.py`: `refresh_market_chart`, `predictedCandles` | `test_forecast_curve`, `test_chart_curve_integration`, `test_chart_execution`, `test_smooth_chart` |
 | Eastern display, tables, chart ticks and hover | `display_time.py`; `app.py` browser `easternTime` / `easternAxis`; `dashboard_ui.py`, `research_dashboard.py`, `multi_asset_command_center.py` | `test_display_time`, `test_smooth_chart` |
@@ -24,7 +24,7 @@ Start here for a specific issue. This is a navigation guide, not a current healt
 | Other market pages | `pages/`, `multi_asset_command_center.py`, `multi_asset_paper.py` | `test_multi_asset_paper`, `test_multi_market_nav_routes` |
 | Login and deployed build label | `access_control.py` | `test_access_control` |
 | Archive replay, label deadlines, training inputs | Shared `historical_backtest.py` archive reader; `council_backtest_v4.py`, `historical_specialist_backtest_v7.py`, `train_horizon_models.py` | `test_historical_deadlines`, `test_historical_cross_month_v16`, `test_council_backtest_v4`, `test_train_horizon_models` |
-| LOCK fee economics and fresh execution evidence | `kalshi_paper_engine.py`: `expected_lock_net_pnl`; `learner_v31.py`: `refresh_pending_lock_focus`; `background_paper.py`; `pro_trade_ticket.py` | `test_lock_expected_return`, `test_reliability_v31`, `test_pro_trade_ticket` |
+| LOCK fee economics and fresh execution evidence | `kalshi_paper_engine.py`: `expected_lock_net_pnl`; `learner_v31.py`: `current_shadow_call` uses exact-event Kalshi reference, `refresh_pending_lock_focus` retains its diagnostics; `background_paper.py`; `pro_trade_ticket.py` | `test_lock_expected_return`, `test_reliability_v31`, `test_pro_trade_ticket` |
 
 ## Source navigation without rereading whole files
 

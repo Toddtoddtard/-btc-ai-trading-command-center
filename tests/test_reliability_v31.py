@@ -20,6 +20,43 @@ from reliability_v31 import (
 
 
 class ReliabilityTests(unittest.TestCase):
+    def test_worker_terminal_forecast_uses_exact_kalshi_chart_price(self):
+        frame = pd.DataFrame({'close': [82020.]})
+        ticker = 'KXBTC15M-26OCT191700-00'
+        market = dict(ticker=ticker, target=81910., expires_at=2000, prob=.5)
+        reference = dict(available=True, price=81900., timestamp=1000,
+                         event_ticker='KXBTC15M-26OCT191700')
+        with ExitStack() as stack:
+            self.shadow_dependencies(stack)
+            stack.enter_context(patch('learner_v31.forecast_path_core',
+                return_value={'predicted_end': 82040., 'predicted_direction': 1}))
+            stack.enter_context(patch('learner_v31.time.time', return_value=1000))
+            stack.enter_context(patch('learner_v31.legacy.market', return_value=market))
+            stack.enter_context(patch('learner_v31.fetch_chart', return_value=reference))
+            terminal = stack.enter_context(patch('learner_v31.terminal_above_probability',
+                return_value={'probability_up': .6, 'market_probability_up': .5}))
+            call = current_shadow_call({'forecast': {}}, frame, market)
+        self.assertEqual(terminal.call_args.kwargs['spot'], 81900.)
+        self.assertEqual(call['settlement_reference_price'], 81900.)
+        self.assertEqual(call['settlement_forecast_end'], 81920.)
+
+    def test_worker_cannot_use_stale_or_wrong_event_reference_for_entries(self):
+        frame = pd.DataFrame({'close': [82020.]})
+        ticker = 'KXBTC15M-26OCT191700-00'
+        for changes in ({'timestamp': 969}, {'event_ticker': 'OTHER'}, {'available': False}):
+            with self.subTest(changes=changes), ExitStack() as stack:
+                self.shadow_dependencies(stack)
+                market = dict(ticker=ticker, target=81910., expires_at=2000, prob=.5)
+                reference = dict(available=True, price=81900., timestamp=1000,
+                                 event_ticker='KXBTC15M-26OCT191700')
+                reference.update(changes)
+                stack.enter_context(patch('learner_v31.time.time', return_value=1000))
+                stack.enter_context(patch('learner_v31.legacy.market', return_value=market))
+                stack.enter_context(patch('learner_v31.fetch_chart', return_value=reference))
+                call = current_shadow_call({'forecast': {}}, frame, market)
+                self.assertFalse(call['execution_approved'])
+                self.assertEqual(call['execution_reason'], 'WAIT — KALSHI REFERENCE')
+
     def test_locked_veto_marks_pending_waiting_without_rewriting_original_call(self):
         pending = self.locked_pending()
         pending['would_wait'] = False
