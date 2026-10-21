@@ -155,7 +155,9 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
     raw_confidence = float(np.clip(0.46 + abs(base_score) * 0.34 + consensus * coverage * 0.18, 0.40, 0.96))
     health = source_health_from_specialists(results, exclude=exclude)
     policy = learned_policy(state or {}, regime or "UNKNOWN")
-    confidence = calibrate_confidence(raw_confidence, consensus, policy, health, state or {})
+    formula_confidence = calibrate_confidence(raw_confidence, consensus, policy, health, state or {})
+    from council_confidence import apply as apply_learned_confidence
+    confidence = apply_learned_confidence(formula_confidence, state)
 
     if base_score >= policy["edge_floor"]:
         proposed = "SCALP UP"
@@ -180,6 +182,7 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
         "base_score": float(base_score),
         "confidence": float(confidence),
         "raw_confidence": raw_confidence,
+        "formula_confidence": formula_confidence,
         "consensus": float(consensus),
         "consensus_coverage": coverage,
         "effective_voters": effective_voters,

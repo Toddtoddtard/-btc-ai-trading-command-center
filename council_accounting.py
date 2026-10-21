@@ -3,6 +3,7 @@ import copy
 import math
 from datetime import datetime, timezone
 from council_v4 import specialist_active, specialist_model_matches, _direction
+from council_confidence import fit as fit_council_confidence
 
 BASIS = 'official_kalshi_directional_calls_v1'
 MASTER_BASIS = 'official_kalshi_council_confidence_v1'
@@ -46,6 +47,7 @@ def reconcile_master_learning(state):
         bucket['direction_hits'] += hit
         bucket['ewma_accuracy'] = .88*bucket['ewma_accuracy'] + .12*hit
     state['confidence_model'], state['regimes'] = model, regimes
+    state['council_confidence_calibration'] = fit_council_confidence(records)
     penalty = min(.16, max(0., (model['brier_ewma']-.20)*.55))
     wait = state.setdefault('wait_policy', {})
     wait.update(overconfidence_penalty=penalty,

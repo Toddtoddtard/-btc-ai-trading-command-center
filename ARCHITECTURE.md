@@ -13,6 +13,15 @@ reliability checks and contract calibration feed the dashboard and scheduled
 learner. `lock_focus.py` owns LOCK qualification; paper execution uses shared
 strategy and fee helpers in `kalshi_paper_engine.py`.
 
+`council_accounting.py` also fits `council_confidence.py` from independent
+official outcomes and frozen formula confidence. Confidence-band residuals are
+shrunk and bounded; both overall chronological evidence and each applied band's
+own validation must qualify before a correction is used. The dashboard and
+worker consume the same council confidence without a second geometry blend or
+calibration penalty. If the selected settlement side opposes the council, its
+confidence is the complement; neutral council evidence supplies no advantage.
+Contract fair value and fee-aware entry remain separate.
+
 New LOCK entries require validated terminal probability and positive expected
 settlement proceeds after entry fees. Council confidence is a separate measure
 and cannot substitute for contract probability. An immutable LOCK direction

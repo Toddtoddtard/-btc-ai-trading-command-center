@@ -50,6 +50,7 @@ from kalshi_reference import fetch_kalshi_reference
 from kalshi_chart_data import fetch_chart
 from macd_engine import project_macd_path
 from council_v4 import council_vote
+from council_confidence import for_direction as confidence_for_direction
 from specialist_knowledge_v5 import knowledge_council_vote
 from profitability_v5 import summarize_trades, profitability_gate
 from bot_intelligence_dashboard import render_bot_intelligence_dashboard
@@ -84,7 +85,7 @@ from lock_focus import (
 from pro_trade_ticket import build_pro_trade_ticket
 from public_futures import parse_bybit_futures_snapshot
 from reliability_v31 import (
-    calibrate_confidence, detect_regime, execution_cost_bps,
+    detect_regime, execution_cost_bps,
     learned_policy, learned_trade_gate, regime_specialist_weight,
     source_health_from_specialists,
 )
@@ -1622,35 +1623,9 @@ def master_decision(
             else (1.0 - projected_up_value if pd.notna(projected_up_value) else np.nan)
         )
 
-        distance_strength = min(1.0, abs(safe_float(
-            contract_view.get("normalized_strike_distance"),
-            projected_edge / max(target_scale, 1.0),
-        )) / 2.0)
-
-        target_confidence = min(
-            0.97,
-            max(
-                0.45,
-                0.49
-                + abs(score) * 0.28
-                + consensus * 0.13
-                + distance_strength * 0.10,
-            ),
-        )
-        # Never let target geometry erase the reliability calibration learned
-        # by v4. Blend both views and cap at the safer of their high extremes.
-        confidence = float(np.clip(
-            0.58 * target_confidence + 0.42 * council_confidence,
-            0.40,
-            min(0.97, max(target_confidence, council_confidence)),
-        ))
-        confidence = calibrate_confidence(
-            confidence,
-            consensus,
-            policy,
-            source_health=source_health,
-            state=remote_learning,
-        )
+        # Match the worker's learned council reliability. Target geometry
+        # informs direction/value above; it is not confidence evidence.
+        confidence = confidence_for_direction(council_confidence, base_score, raw_side)
 
         # -----------------------------------------------------------
         # LOCK semantics
@@ -1708,10 +1683,7 @@ def master_decision(
     else:
         # Fallback if Kalshi is temporarily unavailable.
         score = base_score
-        confidence = min(
-            0.97,
-            max(0.45, 0.48 + abs(score) * 0.34 + consensus * 0.15),
-        )
+        confidence = council_confidence
         projected_end = px + forecast_move
         target_price = projected_end
         locked_side = None
@@ -1720,14 +1692,6 @@ def master_decision(
         scalp_projected_exit_price = np.nan
 
         action = "HOLD"
-        confidence = calibrate_confidence(
-            confidence,
-            consensus,
-            policy,
-            source_health=source_health,
-            state=remote_learning,
-        )
-
         prediction_label = "Kalshi target unavailable"
 
     gate_note = ""
@@ -1774,6 +1738,9 @@ def master_decision(
             lock_side = "UP" if _registered_side == "YES" else "DOWN"
             action = f"LOCK {lock_side}"
             locked_side = lock_side
+
+    if action.startswith('LOCK '):
+        confidence = confidence_for_direction(council_confidence, base_score, action.split()[-1])
 
     risk_level = (
         "LOW"
