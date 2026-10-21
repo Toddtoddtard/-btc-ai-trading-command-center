@@ -2,6 +2,28 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## Learned council confidence (2026-10-21)
+
+- Added confidence-band residual learning from deduplicated, timestamped official
+  council outcomes. Each chronological validation prediction uses only labels
+  observed before capture. Corrections require 100 prior markets, 100 validation
+  calls, at least .002 overall Brier improvement, and nonnegative recent-100
+  improvement. Each applied band also needs 30 corrected validation observations
+  and its own improvement; thin, harmful and malformed bands retain the formula.
+- Frozen formula confidence is retained separately from corrected confidence to
+  prevent repeated correction learning from its previous output. Changes are
+  capped at 15 percentage points; no outcome or trade history is rewritten.
+- Dashboard confidence now matches the shared council used by the worker instead
+  of blending target geometry and applying penalties twice. Contract probability,
+  strategy thresholds, fees and all specialists remain separate and intact.
+- Confidence follows the selected settlement side: an opposite call receives
+  the complement of council confidence, including an immutable dashboard LOCK.
+  It cannot borrow an 80% DOWN forecast to authorize an 80% UP entry.
+- The retained Oct 21 snapshot yielded 351 chronological candidate comparisons:
+  Brier .232851 versus formula .236881; recent 100 .227950 versus .230501.
+  These retrospective calibration results do not prove increased live accuracy,
+  trading frequency or profitability. New official settlements remain necessary.
+
 ## Authoritative runtime path
 
 1. `app.py` — Streamlit UI, live orchestration, master decision display, and calls into the paper engine.

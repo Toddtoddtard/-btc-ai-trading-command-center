@@ -89,6 +89,7 @@ def weighted_master_confidence(pending, state):
     from specialist_knowledge_v5 import knowledge_council_vote
     vote = knowledge_council_vote(pending.get("specialists", {}), state,
                                   pending.get("regime") or state.get("status", {}).get("current_regime", "UNKNOWN"))
+    pending['council_formula_confidence'] = vote['formula_confidence']
     return vote["confidence"], vote["base_score"]
 
 

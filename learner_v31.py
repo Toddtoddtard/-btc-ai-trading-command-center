@@ -20,6 +20,7 @@ import learner_v3 as v3
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration
+from council_confidence import for_direction as confidence_for_direction
 from kalshi_chart_data import fetch_chart, event_ticker
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
 from settlement_predictor import record_observation, resolve_observations
@@ -549,6 +550,7 @@ def register_with_snapshot(state, df, market_info):
             "regime": p.get("regime", "UNKNOWN"),
             "master_confidence": safe_float(p.get("master_confidence"), 0.5),
             "master_base_score": safe_float(p.get("master_base_score"), 0.0),
+            "council_formula_confidence": p.get("council_formula_confidence"),
             "would_wait": bool(p.get("would_wait", False)),
             "specialists": p.get("specialists", {}),
         }
@@ -606,7 +608,6 @@ def current_shadow_call(state, df, market_info):
     vote = knowledge_council_vote(specialists, state, call["regime"])
     call["council_vote"] = vote
     confidence, base_score = vote["confidence"], vote["base_score"]
-    call["master_confidence"] = confidence
     call["master_base_score"] = base_score
     call["settlement_prediction"] = predict_settlement(
         market_info, market_info.get("settlement_reference") or {}, state,
@@ -653,6 +654,8 @@ def current_shadow_call(state, df, market_info):
         "UP" if base_score > 0 else "DOWN"
     )
     consensus = specialist_consensus(specialists, direction, vote)
+    confidence = confidence_for_direction(confidence, base_score, direction)
+    call["master_confidence"] = confidence
     call["contract_probability_up"] = contract_probability_up
     call["raw_contract_probability_up"] = contract_view.get("raw_probability_up")
     call["contract_probability_basis"] = contract_view.get("probability_basis")

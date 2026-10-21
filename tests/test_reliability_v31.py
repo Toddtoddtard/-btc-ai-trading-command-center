@@ -20,6 +20,19 @@ from reliability_v31 import (
 
 
 class ReliabilityTests(unittest.TestCase):
+    def test_opposite_settlement_side_cannot_borrow_council_confidence(self):
+        frame = pd.DataFrame({'close': [100.]})
+        market = dict(ticker='TEST', target=100., expires_at=2000, prob=.8)
+        with ExitStack() as stack:
+            self.shadow_dependencies(stack)
+            stack.enter_context(patch('learner_v31.time.time', return_value=1000))
+            stack.enter_context(patch('learner_v31.knowledge_council_vote', return_value={
+                'confidence': .8, 'base_score': -.5, 'precision_gate_passed': True}))
+            call = current_shadow_call({}, frame, market)
+        self.assertEqual(call['lock_focus']['direction'], 'UP')
+        self.assertAlmostEqual(call['master_confidence'], .2)
+        self.assertFalse(call['execution_approved'])
+
     def test_worker_terminal_forecast_uses_exact_kalshi_chart_price(self):
         frame = pd.DataFrame({'close': [82020.]})
         ticker = 'KXBTC15M-26OCT191700-00'
