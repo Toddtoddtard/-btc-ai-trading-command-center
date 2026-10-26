@@ -157,6 +157,9 @@ def apply(view, state, settlement=None, now=None):
     active = bool(model.get("basis") == BASIS and model.get("active")
                   and raw is not None and market is not None)
     source = "terminal_blend" if active else "market_midpoint"
+    view['previous_probability_up'] = (
+        candidate(raw, market, (model['market_slope'], model['residual_weight']))
+        if active else market if market is not None else raw)
     # Both callers supply the exact current contract and contemporaneous quotes.
     # A model earned at another horizon or against stale quotes is not usable.
     if settlement:

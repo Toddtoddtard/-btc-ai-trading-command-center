@@ -12,7 +12,40 @@ def _pct(value):
     return "—" if value is None else f"{float(value) * 100:.1f}%"
 
 
-def render_settlement_evidence(score, latest):
+def render_settlement_evidence(score, latest, evidence=None):
+    if evidence is not None:
+        with st.expander('Is the update improving?'):
+            st.caption('New and baseline probabilities are frozen on the same contract at the same time, '
+                       'then scored only against official Kalshi settlement. Each timing row counts '
+                       'a contract once. No old production predictions are invented or backfilled.')
+            revision = evidence.get('code_revision')
+            st.caption(('Verified worker revision: ' + revision[:12] + ' • latest capture '
+                        + eastern_time(evidence['latest_capture'])) if revision and evidence.get('latest_capture') else
+                       'Awaiting the first checkpoint with verified worker revision.')
+            st.caption(evidence['cohort_scope'])
+            rows = []
+            names = dict(previous_execution='Previous execution formula', market='Kalshi price',
+                         independent='Independent model')
+            for timing, comparisons in evidence.get('by_horizon', {}).items():
+                for baseline, metrics in comparisons.items():
+                    low, high = metrics['brier_gain_low'], metrics['brier_gain_high']
+                    rows.append({'Timing': timing, 'Compared with': names[baseline],
+                        'Matched markets': metrics['samples'], 'New accuracy': _pct(metrics['accuracy']),
+                        'Baseline accuracy': _pct(metrics['baseline_accuracy']),
+                        'New accuracy 95% range': _pct(metrics['accuracy_low'])+' to '+_pct(metrics['accuracy_high']),
+                        'Brier gain': metrics['brier_gain'],
+                        'Gain interval': '—' if low is None else f'{low:+.4f} to {high:+.4f}',
+                        'Status': metrics['status']})
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.caption(f"First assessment requires {evidence['minimum_markets']} independent markets per timing row. "
+                       'A positive Brier gain means lower probability error; uncertainty crossing zero '
+                       'does not establish improvement. The 70% accuracy target is supported only when '
+                       'the lower accuracy bound reaches 70%. Timing rows are separate comparisons.')
+            paper = evidence['paper']
+            st.caption(f"Actual new-version paper results: {paper['closed_trades']} closed trades • "
+                       f"{paper['wins']} wins / {paper['losses']} losses • net ${paper['net_pnl']:.2f}. "
+                       'Recorded fees are included. No closed trades means profitability is unverified.')
+            st.caption(evidence['interval_note'])
     with st.expander('Settlement accuracy by timing and data coverage'):
         st.caption('Each timing row counts each contract once. Captures must be before the checkpoint, '
                    'within 150 seconds of it; later calls cannot improve an earlier score. '

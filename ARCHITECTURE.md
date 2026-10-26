@@ -145,6 +145,22 @@ decision cards exclude old proxy rows and WAIT/HOLD; BTC movement, Binance
 settlement proxy, legacy path-versus-official, and new decision accuracy have
 separate keys and sample denominators.
 
+`improvement_evidence.py` compares the production probability, previous execution
+formula, Kalshi midpoint and independent model frozen in the same settlement
+capture. The existing official resolver and checkpoint selector supply labels;
+unknown historical production outputs are never reconstructed as live results.
+Each timing row counts one contract once. Accuracy has a Wilson interval;
+Brier and accuracy differences use approximate paired intervals. These are
+descriptive, assume enough independent markets, and do not account for every
+market dependence or repeated comparison. Monitoring never authorizes entries.
+At least 100 matched markets are required for an initial classification; a
+70% accuracy target needs a lower accuracy bound of at least 70%. Actual tagged
+new-version closed paper trades supply P/L separately, including their fees.
+Worker checkpoints and captures record the real `GITHUB_SHA`, so a running
+workflow or stale deployment caption cannot be mistaken for verified new results.
+The settlement headline now uses the same production probability as execution;
+the independent model and its archival score remain available as challengers.
+
 Each full worker pass freezes a settlement observation independently of research-phase deduplication and trade approval, preserving WAIT calls, specialist votes, timestamps, target/rule, and unavailable reasons. Only official binary results read after expiry resolve these observations; unresolved labels are retained. The last 3,000 settled captures supplement the existing research history. Earliest-per-contract observations train the bounded ridge residual, but it remains disabled until at least 100 chronological validation markets follow at least 100 training markets and beat both the uncorrected model and Kalshi midpoint by 0.0005 Brier overall, with nonnegative recent paired improvement. Each validation fit uses only outcomes observed before its forecast. No retrospective refitting changes a stored prediction.
 
 The settlement evidence panel shows independent accuracy, Brier, log loss, calibration and the paired market/coin-flip benchmarks. Its 10-, 5- and 1-minute checkpoints select the closest capture before each checkpoint within 150 seconds; they never borrow later forecasts. Sampling is limited by worker cadence, not the one-second screen refresh. Coverage describes retained observed markets and unavailable captures, not continuous uptime or unobserved outage windows. The displayed raw estimate does not itself approve execution; the independent execution qualification above is required. Legacy Binance snapshots are not backfilled as official reference features.

@@ -77,6 +77,7 @@ def run_cycle():
     for script in ('enrich_learning_state_v5.py', 'audit_scorecard_v7.py', 'background_paper.py'):
         command(sys.executable, script, env=env)
     command(sys.executable, 'multi_asset_paper.py', '--state', str(output), env=env)
+    command(sys.executable, 'improvement_evidence.py', env=env)
     command(sys.executable, 'scripts/validate_learning_state.py', env=env)
     publish_state()
     print('Published continuous-session learning and paper checkpoint.', flush=True)

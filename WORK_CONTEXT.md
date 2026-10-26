@@ -2,6 +2,29 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## Paired improvement evidence (2026-10-26)
+
+- `improvement_evidence.py` freezes production, previous execution formula,
+  market and independent probabilities in the same prospective capture, with
+  the actual worker revision. Existing official outcome/timing rules determine
+  the matched cohort; no historical production outputs are backfilled.
+- The comparison panel reports timing-specific sample counts, accuracy/Wilson
+  intervals, paired Brier differences and approximate intervals, plus actual
+  tagged new-version paper P/L. At least 100 independent matched markets are
+  needed for an initial assessment. Monitoring does not authorize trading;
+  uncertainty, serial market dependence and repeated comparisons remain limits.
+- The headline settlement forecast now matches the production probability.
+  An inactive model clearly uses the market-price baseline; independent raw
+  forecasts remain frozen and separately scored rather than advertised as
+  production confidence.
+- A causal fixed-ridge logistic experiment did not beat the market probability
+  benchmark on its 100-contract holdout and was rejected for execution. Details
+  and the negative result are recorded in `docs/IMPROVEMENT_EVIDENCE_PLAN.md`.
+- PR #88 was confirmed in immutable learning checkpoint dated
+  `2026-10-26T15:29:06.291496+00:00`; qualification existed, but all settlement
+  buckets were still unqualified and new official-decision samples were zero.
+  Deployment verification is not evidence of improved forecast accuracy.
+
 ## Settlement execution and truthful scoring (2026-10-26)
 
 - `contract_calibration.fit_settlement` qualifies frozen final-average base

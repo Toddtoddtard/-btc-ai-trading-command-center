@@ -57,6 +57,7 @@ from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
+from improvement_evidence import display_forecast, scorecard as improvement_scorecard
 from research_dashboard import render_research_dashboard, render_settlement_evidence
 from background_paper import (
     latest_shared_call_entry,
@@ -5201,7 +5202,7 @@ def live_dashboard():
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
 
-    _settlement_prediction = decision.get("settlement_prediction") or dict(available=False)
+    _settlement_prediction = display_forecast(decision.get("settlement_prediction"), decision)
     _shared_paper = _shared_learning_state.get("background_paper", {})
     auto_result = {
         "event": False,
@@ -5289,7 +5290,7 @@ def live_dashboard():
         _p_yes = _settlement_prediction["probability_yes"]
         _outcome = _settlement_prediction["outcome"]
         st.metric("Predicted final outcome", _outcome,
-                  help="Experimental prediction of this exact contract's official YES/NO settlement; not trade confidence.")
+                  help="The same settlement probability used by the paper decision engine. Entry approval also requires fees, quotes and strategy checks.")
         st.caption(
             f"YES {_p_yes:.1%} • NO {1-_p_yes:.1%} • "
             f"Target {fmt_money(_settlement_prediction['target'])} • "
@@ -5300,19 +5301,24 @@ def live_dashboard():
             + eastern_time(_settlement_prediction['expires_at'], clock_only=True)
             + " • YES means the rounded final-minute reference average is at least the target."
         )
-        st.caption("Shadow estimate, not yet proven accurate. Learned corrections require chronological validation against both the base model and Kalshi; this forecast does not authorize paper entries.")
+        st.caption("Forecast basis: " + (
+            "Kalshi market-price baseline; no validated model advantage yet."
+            if _settlement_prediction.get('probability_source') == 'market_midpoint' else
+            "Validated model correction; paper entries still require positive net value after fees."
+        ))
     else:
         st.info("Settlement prediction unavailable: " + _settlement_prediction.get("reason", "fresh contract data required"))
     _settlement_score = settlement_scorecard(_shared_learning_state)
     if _settlement_score["samples"]:
         st.caption(
-            f"Frozen forecasts: {_settlement_score['samples']} independent settled markets • "
+            f"Independent model archive: {_settlement_score['samples']} settled markets • "
             f"YES/NO accuracy {_settlement_score['accuracy']:.1%} • "
             f"Brier {_settlement_score['brier']:.4f} versus market {_settlement_score['market_brier']:.4f} (lower is better)"
         )
     else:
         st.caption("No prospective official settlement results yet; historical Bitcoin candle accuracy is not this predictor's accuracy.")
-    render_settlement_evidence(_settlement_score, _settlement_prediction)
+    render_settlement_evidence(_settlement_score, _settlement_prediction,
+                               improvement_scorecard(_shared_learning_state))
     render_learning_freshness(_shared_learning_state)
 
     st.caption(

@@ -131,6 +131,8 @@ def record_observation(state, call, market):
                quotes_observed_at=market.get('quotes_observed_at'),
                reference_timestamp=(market.get('settlement_reference') or {}).get('timestamp'),
                seconds_remaining=expiry-opened)
+    from improvement_evidence import freeze
+    row.update(freeze(call))
     pending.append(copy.deepcopy(row))
     # Preserve unresolved outcomes; do not silently discard missing labels.
     return True
