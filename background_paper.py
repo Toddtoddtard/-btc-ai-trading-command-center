@@ -1212,6 +1212,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     position = {"ticker": ticker, "side": side, "direction": "UP" if side == "YES" else "DOWN", "strategy": strategy, "status": "OPEN", "opened_at": now, "expires_at": expires, "entry_price": ask, "spot_entry_price": _f(pending.get("start_price")), "contracts": contracts, "entry_fee": fee, "amount": amount, "last_mark": bid}
     position['fill_basis'] = 'OBSERVED_TOP_OF_BOOK' if fill_size is not None else 'LEGACY_QUOTE_ONLY'
     position['quotes_observed_at'] = market.get('quotes_observed_at')
+    for field in ('code_revision', 'forecast_trial_version', 'contract_probability_source'):
+        position[field] = pending.get(field)
     position["risk_mode"] = "PAPER RECOVERY" if strategy == "SCALP" and gate["recovery"] else "STANDARD"
     paper["cash"] -= amount
     paper["open_position"] = position

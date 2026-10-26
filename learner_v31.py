@@ -21,6 +21,7 @@ from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration, fit_settlement
 from council_confidence import for_direction as confidence_for_direction
+from improvement_evidence import VERSION as FORECAST_TRIAL_VERSION
 from kalshi_chart_data import fetch_chart, event_ticker
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
 from settlement_predictor import record_observation, resolve_observations
@@ -603,6 +604,8 @@ def current_shadow_call(state, df, market_info):
         "expires_at": market_info.get("expires_at"),
         "predicted_direction": forecast.get("predicted_direction"),
         "specialists": specialists,
+        "code_revision": (state.get("status") or {}).get("code_revision"),
+        "forecast_trial_version": FORECAST_TRIAL_VERSION,
     }
     call["regime"] = detect_regime(df)
     vote = knowledge_council_vote(specialists, state, call["regime"])
@@ -661,6 +664,7 @@ def current_shadow_call(state, df, market_info):
     confidence = confidence_for_direction(confidence, base_score, direction)
     call["master_confidence"] = confidence
     call["contract_probability_up"] = contract_probability_up
+    call["previous_contract_probability_up"] = contract_view.get("previous_probability_up")
     call["raw_contract_probability_up"] = contract_view.get("raw_probability_up")
     call["contract_probability_basis"] = contract_view.get("probability_basis")
     call["contract_calibrator_active"] = contract_view.get("calibrator_active", False)
@@ -755,6 +759,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         "contract_probability_basis", "contract_calibrator_active",
         "contract_probability_edge", "strike_distance_sigma",
         "contract_probability_source", "execution_probability_reason",
+        "code_revision", "forecast_trial_version", "previous_contract_probability_up",
         "execution_approved", "execution_reason",
         "settlement_reference_price", "settlement_reference_timestamp", "settlement_forecast_end",
     ):
@@ -835,6 +840,8 @@ def record_learning_gap(state, previous_updated_at, now, frame):
 
 def main():
     state = ensure_v31(load_previous_state())
+    state['status']['code_revision'] = os.environ.get('GITHUB_SHA')
+    state['status']['prediction_policy_version'] = FORECAST_TRIAL_VERSION
     previous_updated_at = state.get("updated_at")
     before_samples = int(state.get("forecast", {}).get("samples", 0))
     df = legacy.history()
