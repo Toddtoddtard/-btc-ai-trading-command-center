@@ -1522,7 +1522,8 @@ def _register_window_lock(ticker, side, expires_at):
 
 
 def master_decision(
-    results, hist, kalshi=None, settlement_price=None, reference_healthy=True
+    results, hist, kalshi=None, settlement_price=None, reference_healthy=True,
+    settlement_reference=None,
 ):
     remote_learning = fetch_remote_learning_state() or {}
     regime_name = detect_regime(hist)
@@ -1553,6 +1554,18 @@ def master_decision(
         hist["close"].astype(float).tail(61).tolist()
     )
     contract_view = {"available": False, "probability_up": None}
+    settlement_prediction = None
+    if settlement_reference and kctx.get("close_time"):
+        settlement_prediction = predict_settlement(
+            dict(ticker=kctx.get("ticker"),
+                 expires_at=pd.Timestamp(kctx["close_time"]).timestamp(),
+                 target=target, prob=up_prob,
+                 strike_type=(kctx.get("market") or {}).get("strike_type"),
+                 quotes_observed_at=(kctx.get("market") or {}).get("quotes_observed_at"),
+                 orderbook=kctx.get("orderbook") or {}),
+            settlement_reference, remote_learning, council_score=base_score)
+        if settlement_prediction.get("available"):
+            projected_end = settlement_prediction["expected_final_average"]
 
     # The decision lock is independent of paper execution. Once a side is
     # registered for a still-open ticker, every refresh and every downstream
@@ -1587,7 +1600,9 @@ def master_decision(
             orderbook=kctx.get("orderbook") or {},
             source_health=source_health,
         )
-        contract_view = apply_contract_calibration(contract_view, remote_learning)
+        contract_view["ticker"] = kctx.get("ticker")
+        contract_view = apply_contract_calibration(
+            contract_view, remote_learning, settlement=settlement_prediction)
         contract_up_probability = safe_float(
             contract_view.get("probability_up"), up_prob
         )
@@ -1640,8 +1655,9 @@ def master_decision(
             )
         )
         settlement_consensus = specialist_consensus(results, raw_side, v5_council)
+        consensus = settlement_consensus
         lock_focus = evaluate_lock_focus(
-            base_score=score,
+            base_score=base_score,
             confidence=confidence,
             consensus=settlement_consensus,
             source_health=source_health,
@@ -1742,6 +1758,13 @@ def master_decision(
     if action.startswith('LOCK '):
         confidence = confidence_for_direction(council_confidence, base_score, action.split()[-1])
 
+    if not contract_view.get("calibrator_active"):
+        execution_approved = False
+        gate_note = "WAIT — NO VALIDATED SETTLEMENT EDGE"
+    if not reference_healthy:
+        execution_approved = False
+        gate_note = "WAIT — KALSHI REFERENCE"
+
     risk_level = (
         "LOW"
         if confidence > 0.78 and consensus > 0.55
@@ -1823,6 +1846,9 @@ def master_decision(
         "raw_contract_probability_up": safe_float(contract_view.get("raw_probability_up"), np.nan),
         "contract_probability_basis": contract_view.get("probability_basis"),
         "contract_calibrator_active": bool(contract_view.get("calibrator_active", False)),
+        "contract_probability_source": contract_view.get("probability_source"),
+        "execution_probability_reason": contract_view.get("execution_probability_reason"),
+        "settlement_prediction": settlement_prediction,
         "contract_probability_edge": safe_float(
             contract_view.get("edge_vs_market"), np.nan
         ),
@@ -2058,13 +2084,15 @@ def get_learning_state():
                 "avg_path_error": 0.0,
                 "kalshi_samples": 0,
                 "kalshi_hits": 0,
+                "official_decision_samples": 0,
+                "official_decision_hits": 0,
             }
             state = {k: r.get(k, v) for k, v in defaults.items()}
             state["samples"] = int(state["samples"])
             state["direction_hits"] = int(state["direction_hits"])
             state["direction_accuracy"] = (
-                state["direction_hits"] / state["samples"]
-                if state["samples"] else np.nan
+                int(state["btc_move_hits"]) / int(state["btc_move_samples"])
+                if int(state["btc_move_samples"]) else np.nan
             )
             state["btc_move_samples"] = int(state.get("btc_move_samples", 0))
             state["btc_move_hits"] = int(state.get("btc_move_hits", 0))
@@ -2818,9 +2846,9 @@ def rolling_master_accuracy(window):
     if isinstance(remote, dict):
         history = remote.get("master_history")
         if isinstance(history, list) and history:
-            rows = history[-int(window):]
+            rows = [r for r in history if r.get("official_decision_correct") in (0, 1)][-int(window):]
             correct = pd.to_numeric(
-                pd.Series([r.get("direction_correct") for r in rows]),
+                pd.Series([r.get("official_decision_correct") for r in rows], dtype="float64"),
                 errors="coerce",
             ).dropna()
             abs_error = pd.to_numeric(
@@ -2859,7 +2887,9 @@ def rolling_master_accuracy(window):
     df["direction_correct"] = pd.to_numeric(df["direction_correct"], errors="coerce")
     df["abs_error"] = pd.to_numeric(df["abs_error"], errors="coerce")
     df["path_error"] = pd.to_numeric(df["path_error"], errors="coerce")
-    valid = df["direction_correct"].dropna()
+    # Local technical rows have no official Kalshi result. Keep price errors
+    # available, but do not substitute their Binance labels into this card.
+    valid = pd.Series(dtype="float64")
 
     return {
         "samples": int(len(valid)),
@@ -2877,7 +2907,7 @@ def rolling_master_accuracy_table():
         rows.append({
             "Window": f"Last {window}",
             "Samples": stats["samples"],
-            "Direction Accuracy %": (
+            "Official decision accuracy %": (
                 np.nan
                 if pd.isna(stats["accuracy"])
                 else stats["accuracy"] * 100.0
@@ -5067,6 +5097,12 @@ def refresh_learning_summary():
             if _kalshi_samples else np.nan
         )
         _btc_move_samples = int(_learning_state.get("btc_move_samples", 0))
+        _decision_samples = int(_learning_state.get("official_decision_samples", 0))
+        _decision_text = (
+            f"Official decision accuracy {_learning_state.get('official_decision_hits', 0) / _decision_samples * 100:.1f}% "
+            f"({_decision_samples} published calls) • " if _decision_samples else
+            "Official decision accuracy collecting new-format results • "
+        )
         _btc_move_text = (
             f"BTC 15m move accuracy {_learning_state.get('btc_move_hits', 0) / _btc_move_samples * 100:.1f}% "
             f"({_btc_move_samples} new-format)"
@@ -5075,11 +5111,11 @@ def refresh_learning_summary():
         st.caption(
             f"Self-learning model: {_learning_state['samples']} completed windows • "
             + (
-                f"official Kalshi settlement accuracy {_kalshi_accuracy:.1f}% "
+                f"Legacy path vs official Kalshi accuracy {_kalshi_accuracy:.1f}% "
                 f"({_kalshi_samples} settled) • "
-                if _kalshi_samples else "official Kalshi settlement accuracy collecting • "
+                if _kalshi_samples else "Legacy path vs official Kalshi accuracy collecting • "
             )
-            + _btc_move_text + " • "
+            + _decision_text + _btc_move_text + " • "
             f"avg final-price error USD {_learning_state['avg_abs_error']:,.2f} • "
             f"avg path error USD {_learning_state['avg_path_error']:,.2f}"
         )
@@ -5158,22 +5194,14 @@ def live_dashboard():
         kalshi,
         settlement_price=price,
         reference_healthy=bool(_display_feed.get("available")),
+        settlement_reference=_display_feed,
     )
     _shared_learning_state = fetch_remote_learning_state() or {}
     hourly_ai = hourly_kalshi_target_ai(hist, results, hourly_kalshi, price, _shared_learning_state)
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
 
-    _settlement_market = _display_context.get("market") or {}
-    _settlement_expiry = kalshi_close_timestamp(_settlement_market)
-    _settlement_prediction = predict_settlement(
-        dict(ticker=_display_context.get("ticker"), expires_at=_settlement_expiry,
-             target=_display_context.get("target"), prob=_display_context.get("up_probability"),
-             strike_type=_settlement_market.get("strike_type"),
-             quotes_observed_at=_settlement_market.get("quotes_observed_at"),
-             orderbook=_display_context.get("orderbook") or {}),
-        _display_feed, _shared_learning_state, council_score=decision.get("base_score", 0.),
-    )
+    _settlement_prediction = decision.get("settlement_prediction") or dict(available=False)
     _shared_paper = _shared_learning_state.get("background_paper", {})
     auto_result = {
         "event": False,
@@ -6399,7 +6427,7 @@ def live_dashboard():
             l1, l2, l3, l4 = st.columns(4)
             l1.metric("Scored 15m windows", int(learn["samples"]))
             l2.metric(
-                "Direction accuracy",
+                "BTC move accuracy",
                 "N/A"
                 if pd.isna(learn["direction_accuracy"])
                 else f"{learn['direction_accuracy']*100:.1f}%"
@@ -6414,30 +6442,31 @@ def live_dashboard():
             q1, q2, q3 = st.columns(3)
 
             q1.metric(
-                "Last 100 accuracy",
+                "Last 100 Kalshi decisions",
                 "N/A"
                 if pd.isna(_quick100["accuracy"])
                 else f"{_quick100['accuracy']*100:.1f}%"
             )
 
             q2.metric(
-                "Last 500 accuracy",
+                "Last 500 Kalshi decisions",
                 "N/A"
                 if pd.isna(_quick500["accuracy"])
                 else f"{_quick500['accuracy']*100:.1f}%"
             )
 
             q3.metric(
-                "Last 1,000 accuracy",
+                "Last 1,000 Kalshi decisions",
                 "N/A"
                 if pd.isna(_quick1000["accuracy"])
                 else f"{_quick1000['accuracy']*100:.1f}%"
             )
 
             st.caption(
-                "The summary and rolling cards use the same resolved 15-minute "
-                "forecast history. HOLD/WAIT trade outcomes remain excluded from "
-                "the separate trading win/loss rate."
+                "BTC movement and official Kalshi decision accuracy are separate. "
+                "Rolling decision scores use only frozen published calls with official "
+                "results; older proxy rows and HOLD/WAIT are excluded. Paper trade "
+                "win/loss is measured separately."
             )
 
             w1, w2, w3, w4 = st.columns(4)

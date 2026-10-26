@@ -515,6 +515,7 @@ def grade(state, df):
             "ticker": pending["ticker"],
             "target": pending["target"],
             "predicted_end": predicted_end,
+            "official_decision": pending.get("official_decision"),
         }
     )
     state["official_pending"] = state["official_pending"][-100:]
@@ -600,11 +601,20 @@ def resolve_official_results(state):
         forecast = state["forecast"]
         forecast["kalshi_samples"] = int(forecast.get("kalshi_samples", 0)) + 1
         forecast["kalshi_hits"] = int(forecast.get("kalshi_hits", 0)) + hit
+        decision = item.get("official_decision") or {}
+        decision_hit = (int(decision["predicted_yes"] == actual_yes)
+                        if isinstance(decision.get("predicted_yes"), bool) else None)
+        if decision_hit is not None:
+            forecast["official_decision_samples"] = int(forecast.get("official_decision_samples", 0)) + 1
+            forecast["official_decision_hits"] = int(forecast.get("official_decision_hits", 0)) + decision_hit
         for row in reversed(state.get("master_history", [])):
             if row.get("ticker") == item["ticker"]:
                 row["kalshi_correct"] = hit
                 row["kalshi_result"] = result
                 row["official_observed_at"] = time.time()
+                if decision_hit is not None:
+                    row["official_decision"] = decision
+                    row["official_decision_correct"] = decision_hit
                 break
         resolved_count += 1
     state["official_pending"] = unresolved[-100:]

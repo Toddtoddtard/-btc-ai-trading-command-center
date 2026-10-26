@@ -5,13 +5,22 @@ uses only markets that expired before it was captured. Unproven corrections
 fall back to the contemporaneous Kalshi midpoint, without inventing an edge.
 """
 import math
-from outcome_timing import outcome_available_at
+import time
+from outcome_timing import outcome_available_at, timestamp
 
 BASIS = "official_kalshi_terminal_probability_v1"
 MIN_TRAIN = 100
 MIN_VALIDATION = 100
 LOOKBACK = 500
 MIN_BRIER_EDGE = 0.002
+SETTLEMENT_BASIS = "official_settlement_execution_v1"
+
+
+def horizon_bucket(seconds):
+    seconds = finite(seconds)
+    if seconds is None or not 0 < seconds <= 900:
+        return None
+    return "10m+" if seconds >= 600 else "5m+" if seconds >= 300 else "1m+" if seconds >= 60 else "final1m"
 
 
 def finite(value):
@@ -105,16 +114,79 @@ def fit(history, as_of=None):
             "reason": "Validated terminal correction" if active else "Terminal correction unproven; Kalshi midpoint fallback"}
 
 
-def apply(view, state):
+def fit_settlement(state, as_of=None):
+    """Qualify the frozen final-average base model separately at each horizon.
+
+    Reuse the existing walk-forward gate, never the base model's fitted residual
+    output. One contract earns one observation per bucket, regardless of retries.
+    """
+    from settlement_predictor import VERSION
+    as_of = time.time() if as_of is None else float(as_of)
+    grouped = {key: [] for key in ("10m+", "5m+", "1m+", "final1m")}
+    history = (list((state.get("research_lab") or {}).get("history") or [])
+               + list((state.get("settlement_predictor") or {}).get("history") or []))
+    for row in history:
+        p = row.get("settlement_prediction") or {}
+        opened, expires = finite(row.get("opened_at")), finite(row.get("expires_at"))
+        observed = timestamp(row.get("result_observed_at"))
+        quoted = finite(p.get("quotes_observed_at"))
+        referenced = finite(p.get("reference_timestamp"))
+        bucket = horizon_bucket(expires-opened) if opened is not None and expires is not None else None
+        if (bucket is None or not p.get("available") or p.get("version") != VERSION
+                or p.get("ticker") != row.get("ticker")
+                or observed is None or not expires <= observed <= as_of
+                or quoted is None or not 0 <= opened-quoted <= 30
+                or referenced is None or not 0 <= opened-referenced <= 30
+                or finite(p.get("captured_at")) != opened
+                or finite(p.get("expires_at")) != expires):
+            continue
+        grouped[bucket].append(dict(row,
+            market_yes_probability=p.get("market_probability_yes"),
+            raw_contract_probability_up=p.get("base_probability_yes")))
+    return dict(basis=SETTLEMENT_BASIS, source=VERSION, fitted_as_of=as_of,
+                by_horizon={key: fit(rows, as_of=as_of) for key, rows in grouped.items()},
+                paper_only=True)
+
+
+def apply(view, state, settlement=None, now=None):
     """Keep raw evidence separate from the probability actually used for calls."""
     view = dict(view)
     raw, market = finite(view.get("probability_up")), finite(view.get("market_probability_up"))
     view["raw_probability_up"] = raw
     model = (state or {}).get("contract_calibration", {})
-    active = bool(model.get("basis") == BASIS and model.get("active"))
+    active = bool(model.get("basis") == BASIS and model.get("active")
+                  and raw is not None and market is not None)
+    source = "terminal_blend" if active else "market_midpoint"
+    # Both callers supply the exact current contract and contemporaneous quotes.
+    # A model earned at another horizon or against stale quotes is not usable.
+    if settlement:
+        from settlement_predictor import VERSION
+        now = time.time() if now is None else float(now)
+        captured, expires = finite(settlement.get("captured_at")), finite(settlement.get("expires_at"))
+        base = finite(settlement.get("base_probability_yes"))
+        bundle = (state or {}).get("settlement_execution_calibration") or {}
+        remaining = finite(view.get("seconds_remaining"))
+        bucket = horizon_bucket(remaining)
+        selected = (bundle.get("by_horizon") or {}).get(bucket) or {}
+        matches = bool(bucket is not None and settlement.get("available") and settlement.get("version") == VERSION
+            and settlement.get("ticker") == view.get("ticker") and view.get("ticker")
+            and captured is not None and 0 <= now-captured <= 30
+            and expires is not None and horizon_bucket(expires-now) == bucket
+            and abs(expires-now-remaining) <= 30
+            and base is not None and 0 <= base <= 1
+            and market is not None and finite(settlement.get("market_probability_yes")) == market)
+        if (matches and bundle.get("basis") == SETTLEMENT_BASIS
+                and bundle.get("source") == VERSION and selected.get("active") is True
+                and finite(bundle.get("fitted_as_of")) is not None
+                and bundle["fitted_as_of"] <= now
+                and selected.get("basis") == BASIS):
+            model, raw, active, source = selected, base, True, VERSION
     if raw is not None and market is not None:
         p = candidate(raw, market, (model["market_slope"], model["residual_weight"])) if active else market
         view.update(probability_up=p, edge_vs_market=p-market)
     view["calibrator_active"] = active
     view["probability_basis"] = BASIS if market is not None else "unvalidated_spot_model"
+    view["probability_source"] = source
+    view["execution_probability_reason"] = (
+        "Validated " + source if active else "No validated settlement edge; observing Kalshi midpoint")
     return view

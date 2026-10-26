@@ -101,7 +101,9 @@ def update_rolling(state):
         if not rows:
             rolling[str(window)] = {"samples": 0, "direction_accuracy": None, "kalshi_accuracy": None, "median_abs_error": None, "median_path_error": None}
             continue
-        direction = [safe_float(r.get("direction_correct"), 0.0) for r in rows if r.get("direction_correct") is not None]
+        direction = [safe_float(r.get("btc_move_correct"), 0.0) for r in rows if r.get("btc_move_correct") is not None]
+        proxy = [safe_float(r["direction_correct"]) for r in rows if r.get("direction_correct") is not None]
+        decisions = [safe_float(r["official_decision_correct"]) for r in rows if r.get("official_decision_correct") is not None]
         kalshi = [safe_float(r.get("kalshi_correct"), 0.0) for r in rows if r.get("kalshi_correct") is not None]
         abs_errors = [safe_float(r.get("abs_error"), np.nan) for r in rows]
         path_errors = [safe_float(r.get("path_error"), np.nan) for r in rows]
@@ -110,6 +112,10 @@ def update_rolling(state):
         rolling[str(window)] = {
             "samples": len(rows),
             "direction_accuracy": float(np.mean(direction)) if direction else None,
+            "btc_move_samples": len(direction),
+            "proxy_settlement_accuracy": float(np.mean(proxy)) if proxy else None,
+            "official_decision_accuracy": float(np.mean(decisions)) if decisions else None,
+            "official_decision_samples": len(decisions),
             "kalshi_accuracy": float(np.mean(kalshi)) if kalshi else None,
             "median_abs_error": float(np.median(abs_errors)) if abs_errors else None,
             "median_path_error": float(np.median(path_errors)) if path_errors else None,

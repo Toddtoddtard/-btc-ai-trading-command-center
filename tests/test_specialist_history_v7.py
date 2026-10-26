@@ -51,7 +51,8 @@ class SpecialistHistoryV7Tests(unittest.TestCase):
         ]
         s = _score(rows)
         self.assertEqual(s["samples"], 2)
-        self.assertEqual(s["direction_accuracy"], 0.5)
+        self.assertIsNone(s["direction_accuracy"])  # These legacy rows lack BTC-move labels.
+        self.assertEqual(s["proxy_settlement_accuracy"], 0.5)
         self.assertEqual(s["kalshi_accuracy"], 1.0)
         self.assertEqual(s["avg_abs_error"], 15.0)
 
