@@ -33,7 +33,7 @@ unproven probability must leave a clear no-edge reason, never manufacture profit
 Baseline: 462 offline tests passed, one skipped. Fresh isolated clone on branch
 `fix/settlement-execution-and-scoring`; source `main` fetched during clone.
 
-Verification: 474 offline tests run, zero failures, one skipped; compile and diff
+Verification: 475 offline tests run, zero failures, one skipped; compile and diff
 checks passed. Independent reviewer found no blocking issues and ran 26 focused
 checks. Diagnostic qualification took about 0.22 seconds; all retained settlement
 buckets remain unqualified. Paper ledger was unchanged by fitting/scoring.
@@ -41,3 +41,9 @@ buckets remain unqualified. Paper ledger was unchanged by fitting/scoring.
 The user explicitly approved publication and merge on 2026-10-26 after the
 automatic approval review requested confirmation. Hosted verification and
 integration are the remaining steps. Local implementation commit: e1596fc.
+
+Graphify advisory triage: reproduced and fixed the missing-horizon TypeError
+with a RED/GREEN regression. Duplicate contract evidence is already deduplicated
+by observations() and covered across retries/histories. Legacy BTC defaults are
+applied before their use; legacy proxy rows intentionally do not enter BTC
+movement accuracy. Hosted CI passed on the initial implementation.

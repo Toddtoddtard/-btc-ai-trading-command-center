@@ -165,13 +165,14 @@ def apply(view, state, settlement=None, now=None):
         captured, expires = finite(settlement.get("captured_at")), finite(settlement.get("expires_at"))
         base = finite(settlement.get("base_probability_yes"))
         bundle = (state or {}).get("settlement_execution_calibration") or {}
-        bucket = horizon_bucket(view.get("seconds_remaining"))
+        remaining = finite(view.get("seconds_remaining"))
+        bucket = horizon_bucket(remaining)
         selected = (bundle.get("by_horizon") or {}).get(bucket) or {}
-        matches = bool(settlement.get("available") and settlement.get("version") == VERSION
+        matches = bool(bucket is not None and settlement.get("available") and settlement.get("version") == VERSION
             and settlement.get("ticker") == view.get("ticker") and view.get("ticker")
             and captured is not None and 0 <= now-captured <= 30
             and expires is not None and horizon_bucket(expires-now) == bucket
-            and abs(expires-now-finite(view.get("seconds_remaining"))) <= 30
+            and abs(expires-now-remaining) <= 30
             and base is not None and 0 <= base <= 1
             and market is not None and finite(settlement.get("market_probability_yes")) == market)
         if (matches and bundle.get("basis") == SETTLEMENT_BASIS

@@ -211,3 +211,12 @@ class SettlementExecutionTests(unittest.TestCase):
         update_rolling(state)
         self.assertEqual(state['rolling']['25']['direction_accuracy'], 0)
         self.assertEqual(state['rolling']['25']['proxy_settlement_accuracy'], 1)
+
+    def test_missing_horizon_on_expired_or_outside_window_forecast_abstains(self):
+        for expiry in (199999, 200901):
+            with self.subTest(expiry=expiry):
+                p = dict(self.prediction(), expires_at=expiry)
+                view = calibration.apply(dict(probability_up=.4, market_probability_up=.6,
+                    ticker='LIVE'), {}, settlement=p, now=200000)
+                self.assertFalse(view['calibrator_active'])
+                self.assertEqual(view['probability_up'], .6)
