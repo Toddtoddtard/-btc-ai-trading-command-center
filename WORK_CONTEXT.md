@@ -2,6 +2,29 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## Settlement execution and truthful scoring (2026-10-26)
+
+- `contract_calibration.fit_settlement` qualifies frozen final-average base
+  predictions independently in four remaining-time buckets, using the existing
+  chronological Brier/accuracy promotion checks. It requires explicit fresh
+  captured quotes/reference timestamps, observed official labels, one contract
+  per bucket, and matching model version. It does not learn from its own fitted
+  output. App and worker use the same selector and publish source/no-edge reason.
+- Unqualified models continue to abstain from paper execution. This repair
+  creates a validated path from settlement forecasts to execution; it does not
+  bypass failed validation, manufacture profitable trades or promise accuracy.
+- New first published directional decisions are frozen separately and scored
+  against official settlement. Their own sample counts drive rolling cards.
+  Binance movement, Binance-based settlement proxy, legacy path-versus-official
+  results, and new official decision scores are explicitly separate. Historical
+  outcomes, council snapshots and paper balances are not rewritten.
+- `tests/test_settlement_execution.py` covers model promotion, duplicate/horizon
+  isolation, delayed labels, stale/wrong-contract evidence, app/worker probability
+  parity, fee-aware positive LOCK economics and separate decision scoring.
+- Diagnostic replay of the retained Oct 26 snapshot still rejected all four
+  settlement execution buckets. Code correctness is not a proven trading edge;
+  fresh prospective evidence remains required.
+
 ## Learned council confidence (2026-10-21)
 
 - Added confidence-band residual learning from deduplicated, timestamped official

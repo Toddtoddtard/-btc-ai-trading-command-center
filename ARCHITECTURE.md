@@ -123,11 +123,31 @@ and limitations.
 
 `contract_probability.py` supplies the existing execution probability using strike distance measured in remaining-window volatility, the council score, and weighted order-book pressure. Kalshi's midpoint remains the dominant anchor until independent walk-forward evidence proves incremental Brier value.
 
-`settlement_predictor.py` is a separate shadow challenger for the exact active KXBTC15M contract: the rounded final 60-second reference average must be at least its target for YES. It uses fresh matching Kalshi event-chart ticks and closed reference candles, accounts for the already observed final-minute prefix, and approximates remaining average uncertainty with arithmetic Brownian motion. Missing prefix seconds, unsupported strike rules, stale data and contract mismatches return unavailable. Timestamped worker and dashboard quotes must be at most 30 seconds old. Legacy observations without quote timestamps remain identifiable; they are not retroactively certified fresh.
+`settlement_predictor.py` estimates the exact active KXBTC15M contract: the rounded final 60-second reference average must be at least its target for YES. It uses fresh matching Kalshi event-chart ticks and closed reference candles, accounts for the already observed final-minute prefix, and approximates remaining average uncertainty with arithmetic Brownian motion. Missing prefix seconds, unsupported strike rules, stale data and contract mismatches return unavailable. Timestamped worker and dashboard quotes must be at most 30 seconds old. Legacy observations without quote timestamps remain identifiable; they are not retroactively certified fresh.
+
+`contract_calibration.fit_settlement` independently qualifies that frozen base
+estimate in four time-remaining buckets (10+ minutes, 5–10, 1–5, final minute).
+Each bucket uses one observation per ticker, at least 100 prior training markets
+and 100 chronological validation markets. Promotion requires at least .002
+overall Brier improvement over contemporaneous Kalshi prices, no accuracy
+regression, and nonnegative recent-100 Brier/accuracy differences. Only outcomes
+already observed at prediction time train each validation fit. Dashboard and
+worker call the same selector with a fresh matching-contract forecast. An
+unqualified settlement model falls back to the existing validated terminal model,
+then to the market midpoint with an explicit no-validated-edge execution veto.
+No safeguard is bypassed to create paper fills. The base model's separately
+fitted shadow residual is never recursively reused as execution training data.
+
+The worker freezes the first published directional decision independently of
+the Binance path and council snapshot. Official results score this new field;
+legacy path outcomes and paper trade history remain unchanged. Dashboard rolling
+decision cards exclude old proxy rows and WAIT/HOLD; BTC movement, Binance
+settlement proxy, legacy path-versus-official, and new decision accuracy have
+separate keys and sample denominators.
 
 Each full worker pass freezes a settlement observation independently of research-phase deduplication and trade approval, preserving WAIT calls, specialist votes, timestamps, target/rule, and unavailable reasons. Only official binary results read after expiry resolve these observations; unresolved labels are retained. The last 3,000 settled captures supplement the existing research history. Earliest-per-contract observations train the bounded ridge residual, but it remains disabled until at least 100 chronological validation markets follow at least 100 training markets and beat both the uncorrected model and Kalshi midpoint by 0.0005 Brier overall, with nonnegative recent paired improvement. Each validation fit uses only outcomes observed before its forecast. No retrospective refitting changes a stored prediction.
 
-The settlement evidence panel shows independent accuracy, Brier, log loss, calibration and the paired market/coin-flip benchmarks. Its 10-, 5- and 1-minute checkpoints select the closest capture before each checkpoint within 150 seconds; they never borrow later forecasts. Sampling is limited by worker cadence, not the one-second screen refresh. Coverage describes retained observed markets and unavailable captures, not continuous uptime or unobserved outage windows. The experimental model never changes paper execution approval. Legacy Binance snapshots are not backfilled as official reference features.
+The settlement evidence panel shows independent accuracy, Brier, log loss, calibration and the paired market/coin-flip benchmarks. Its 10-, 5- and 1-minute checkpoints select the closest capture before each checkpoint within 150 seconds; they never borrow later forecasts. Sampling is limited by worker cadence, not the one-second screen refresh. Coverage describes retained observed markets and unavailable captures, not continuous uptime or unobserved outage windows. The displayed raw estimate does not itself approve execution; the independent execution qualification above is required. Legacy Binance snapshots are not backfilled as official reference features.
 
 The persistent paper reader fetches current public order-book depth. New entries consume no more than the observed selected-side best ask size, with fees recomputed for that size; failed depth or stale quotes block simulated fills. A SCALP exit requires sufficient fresh best-bid size for the full position; otherwise it remains open until another quote or official settlement. This conservative full-fill model does not simulate partial exits, latency or queue priority, and depth availability is not a guarantee of real execution. New positions record `OBSERVED_TOP_OF_BOOK`; injected legacy quote-only snapshots record `LEGACY_QUOTE_ONLY`. Historical ledger results are preserved, not reclassified as depth-validated performance. Contract-versus-market research Brier comparisons use the same subset of markets and display its own sample count and accuracy.
 

@@ -22,7 +22,11 @@ def _score(rows):
         return {"samples": 0}
     return {
         "samples": len(rows),
-        "direction_accuracy": _mean(rows, "direction_correct"),
+        "direction_accuracy": _mean(rows, "btc_move_correct"),
+        "btc_move_samples": sum(r.get("btc_move_correct") is not None for r in rows),
+        "proxy_settlement_accuracy": _mean(rows, "direction_correct"),
+        "official_decision_accuracy": _mean(rows, "official_decision_correct"),
+        "official_decision_samples": sum(r.get("official_decision_correct") is not None for r in rows),
         "kalshi_accuracy": _mean(rows, "kalshi_correct"),
         "avg_abs_error": _mean(rows, "abs_error"),
         "avg_path_error": _mean(rows, "path_error"),

@@ -19,7 +19,7 @@ import learner as legacy
 import learner_v3 as v3
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from contract_probability import realized_minute_volatility, terminal_above_probability
-from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration
+from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration, fit_settlement
 from council_confidence import for_direction as confidence_for_direction
 from kalshi_chart_data import fetch_chart, event_ticker
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
@@ -631,6 +631,8 @@ def current_shadow_call(state, df, market_info):
     terminal_price = (reference_price if reference_healthy else None) if needs_reference else price
     settlement_end = (terminal_price + predicted_end-price
                       if terminal_price is not None and predicted_end is not None else None)
+    if call["settlement_prediction"].get("available"):
+        settlement_end = call["settlement_prediction"]["expected_final_average"]
     call["settlement_reference_price"] = terminal_price
     call["settlement_reference_timestamp"] = reference_time
     call["settlement_forecast_end"] = settlement_end
@@ -646,7 +648,9 @@ def current_shadow_call(state, df, market_info):
         orderbook=market_info.get("orderbook") or {},
         source_health=source_health,
     )
-    contract_view = apply_contract_calibration(contract_view, state)
+    contract_view["ticker"] = call["ticker"]
+    contract_view = apply_contract_calibration(
+        contract_view, state, settlement=call["settlement_prediction"], now=opened_at)
     contract_probability_up = safe_float(contract_view.get("probability_up"), None)
     direction = (
         "UP" if contract_probability_up >= 0.5 else "DOWN"
@@ -660,6 +664,8 @@ def current_shadow_call(state, df, market_info):
     call["raw_contract_probability_up"] = contract_view.get("raw_probability_up")
     call["contract_probability_basis"] = contract_view.get("probability_basis")
     call["contract_calibrator_active"] = contract_view.get("calibrator_active", False)
+    call["contract_probability_source"] = contract_view.get("probability_source")
+    call["execution_probability_reason"] = contract_view.get("execution_probability_reason")
     call["contract_probability_edge"] = safe_float(contract_view.get("edge_vs_market"), None)
     call["strike_distance_sigma"] = safe_float(
         contract_view.get("normalized_strike_distance"), None
@@ -703,6 +709,9 @@ def current_shadow_call(state, df, market_info):
         execution_approved = False
         execution_reason = vote["precision_gate_reason"]
         call["master_action"] = "WAIT"
+    if not contract_view.get("calibrator_active"):
+        execution_approved = False
+        execution_reason = "WAIT — NO VALIDATED SETTLEMENT EDGE"
     if not reference_healthy:
         execution_approved = False
         execution_reason = "WAIT — KALSHI REFERENCE"
@@ -729,10 +738,23 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         pending["execution_checked_at"] = time.time()
         return False
     old_action = str(pending.get("master_action") or "WAIT").upper()
+    # Freeze the first published decision separately from the Binance path and
+    # the immutable council snapshot. Later refreshes cannot rewrite its score.
+    action = old_action if old_action.startswith("LOCK") else str(live_call.get("master_action") or "WAIT").upper()
+    probability = safe_float(live_call.get("contract_probability_up"), None)
+    captured = safe_float(live_call.get("opened_at"), None)
+    expires = safe_float(pending.get("expires_at"), float("inf"))
+    if ("official_decision" not in pending and action in {"LOCK UP", "LOCK DOWN", "SCALP UP", "SCALP DOWN"}
+            and probability is not None and 0 <= probability <= 1
+            and captured is not None and captured < expires):
+        pending["official_decision"] = dict(
+            predicted_yes=action.endswith("UP"), captured_at=captured,
+            source=live_call.get("contract_probability_source"), probability_yes=probability)
     for key in (
         "contract_probability_up", "raw_contract_probability_up",
         "contract_probability_basis", "contract_calibrator_active",
         "contract_probability_edge", "strike_distance_sigma",
+        "contract_probability_source", "execution_probability_reason",
         "execution_approved", "execution_reason",
         "settlement_reference_price", "settlement_reference_timestamp", "settlement_forecast_end",
     ):
@@ -844,6 +866,7 @@ def main():
     state["contract_calibration"] = fit_contract_calibration(
         state.get("research_lab", {}).get("history", []), as_of=time.time()
     )
+    state["settlement_execution_calibration"] = fit_settlement(state, as_of=time.time())
     registered = register_with_snapshot(state, df, market_info)
     live_call = current_shadow_call(state, df, market_info)
     record_observation(state, live_call, market_info)
@@ -927,6 +950,10 @@ def main():
         "lock_gate_recorded_this_run": lock_gate_recorded,
         "lock_gate_resolved_this_run": lock_gate_resolved,
         "continuous_lock_evaluation": True,
+        "execution_probability_source": (live_call or {}).get("contract_probability_source"),
+        "execution_probability_reason": (live_call or {}).get("execution_probability_reason"),
+        "settlement_execution_models_active": [key for key, model in
+            state["settlement_execution_calibration"]["by_horizon"].items() if model.get("active")],
         "forward_outlooks_generated": len(forward_outlooks),
         "forward_outlooks_graded_this_run": forward_outlooks_graded,
         "btc_execution_mode": "BALANCED_CALLS",
