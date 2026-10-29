@@ -55,6 +55,10 @@ POST_FIX_GATE_TRADES = 50
 POST_FIX_VALIDATION_TRADES = 100
 POST_FIX_PROFIT_FACTOR_FLOOR = 1.15
 POST_FIX_MAX_DRAWDOWN_PCT = 0.10
+# A barely positive model estimate is not enough to pay for forecast error.
+# LOCK probabilities must clear the executable ask and rounded entry fee by
+# this additional margin before a paper fill is eligible.
+LOCK_MIN_NET_PROBABILITY_EDGE = 0.05
 UNPROVEN_POSITION_CAP = 0.02
 RECOVERY_POSITION_CAP = 0.005
 RECOVERY_MAX_ENTRIES_PER_MARKET = 1
@@ -454,6 +458,63 @@ def expected_lock_net_pnl(contracts, entry, decision, side):
     return contracts * (probability - entry) - kalshi_taker_fee(contracts, entry)
 
 
+def lock_net_probability_edge(contracts, entry, decision, side):
+    """Return selected-side probability minus executable cost per contract."""
+    if not isinstance(contracts, int) or contracts < 1:
+        return None
+    expected_net = expected_lock_net_pnl(contracts, entry, decision, side)
+    return None if expected_net is None else expected_net / contracts
+
+
+def lock_edge_is_sufficient(contracts, entry, decision, side):
+    edge = lock_net_probability_edge(contracts, entry, decision, side)
+    return edge is not None and edge + 1e-12 >= LOCK_MIN_NET_PROBABILITY_EDGE
+
+
+def lock_validation_policy(performance):
+    """Quarantine new LOCK fills after a mature failed distinct-market cohort."""
+    # Copy the scorecard before returning it inside the policy. Callers may add
+    # the policy back onto the original scorecard for display; retaining the
+    # same object would create a circular, non-serializable learning snapshot.
+    performance = dict(performance or {})
+    markets = int(_f(performance.get("markets"), 0.0))
+    if markets < POST_FIX_VALIDATION_TRADES:
+        return {
+            "approved": True,
+            "status": "COLLECTING EVIDENCE",
+            "reason": (
+                f"{markets}/{POST_FIX_VALIDATION_TRADES} distinct settled Kalshi "
+                "markets collected"
+            ),
+            "performance": performance,
+        }
+    reasons = []
+    raw_profit_factor = performance.get("profit_factor")
+    try:
+        profit_factor = (
+            None if isinstance(raw_profit_factor, bool)
+            else float(raw_profit_factor)
+        )
+    except (TypeError, ValueError):
+        profit_factor = None
+    expectancy = _f(performance.get("expectancy"))
+    drawdown = _f(performance.get("max_drawdown_pct"))
+    if (profit_factor is None or math.isnan(profit_factor)
+            or profit_factor == -math.inf
+            or profit_factor < POST_FIX_PROFIT_FACTOR_FLOOR):
+        reasons.append("profit factor below 1.15")
+    if expectancy is None or expectancy <= 0:
+        reasons.append("after-fee expectancy is not positive")
+    if drawdown is None or drawdown > POST_FIX_MAX_DRAWDOWN_PCT:
+        reasons.append("maximum drawdown above 10%")
+    return {
+        "approved": not reasons,
+        "status": "VALIDATION QUARANTINE" if reasons else "VALIDATED PASS",
+        "reason": "; ".join(reasons) or "all LOCK validation thresholds passed",
+        "performance": performance,
+    }
+
+
 def open_position(db_path, starting_cash, decision, risk, spot_price):
     action = str(decision.get("action", "")).upper()
     side = _side_from_action(action)
@@ -544,7 +605,8 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
             return None
         if strategy == "LOCK":
             expected_net = expected_lock_net_pnl(contracts, entry, decision, side)
-            if expected_net is None or expected_net <= 0:
+            if (expected_net is None or expected_net <= 0
+                    or not lock_edge_is_sufficient(contracts, entry, decision, side)):
                 return None
         # Database work can cross the deadline after the initial window check.
         now = time.time()

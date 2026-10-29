@@ -25,7 +25,7 @@ Start here for a specific issue. This is a navigation guide, not a current healt
 | Other market pages | `pages/`, `multi_asset_command_center.py`, `multi_asset_paper.py` | `test_multi_asset_paper`, `test_multi_market_nav_routes` |
 | Login and deployed build label | `access_control.py` | `test_access_control` |
 | Archive replay, label deadlines, training inputs | Shared `historical_backtest.py` archive reader; `council_backtest_v4.py`, `historical_specialist_backtest_v7.py`, `train_horizon_models.py` | `test_historical_deadlines`, `test_historical_cross_month_v16`, `test_council_backtest_v4`, `test_train_horizon_models` |
-| LOCK fee economics and fresh execution evidence | `kalshi_paper_engine.py`: `expected_lock_net_pnl`; `learner_v31.py`: `current_shadow_call` uses exact-event Kalshi reference, `refresh_pending_lock_focus` retains its diagnostics; `background_paper.py`; `pro_trade_ticket.py` | `test_lock_expected_return`, `test_reliability_v31`, `test_pro_trade_ticket` |
+| LOCK fee economics, net-edge margin and validation quarantine | `kalshi_paper_engine.py`: `expected_lock_net_pnl`, `lock_edge_is_sufficient`, `lock_validation_policy`; `background_paper.py`: authoritative distinct-market gate and promotion checks; `pro_trade_ticket.py`; `learner_v31.py`: exact-event Kalshi reference | `test_lock_expected_return`, `test_reliability_v31`, `test_pro_trade_ticket` |
 
 ## Source navigation without rereading whole files
 

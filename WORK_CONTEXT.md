@@ -2,6 +2,25 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## LOCK edge quarantine (2026-10-29)
+
+- The authoritative post-fix Kalshi cohort exceeded 100 distinct settled
+  markets but failed the saved profit-factor, after-fee expectancy and maximum
+  drawdown thresholds. Losses were concentrated in LOCK entries, while the
+  LOCK path accepted forecast edge that only barely cleared price and fees.
+- New LOCK paper fills now require a calibrated selected-side probability at
+  least five percentage points above executable ask plus the rounded entry fee.
+  The same rule is used by SQLite paper execution, the persistent worker,
+  SCALP-to-LOCK promotion and the order preview.
+- Once 100 distinct settled Kalshi markets exist, a failed overall scorecard
+  quarantines new LOCK fills. LOCK calls, every specialist, blocked-signal
+  records, official-outcome learning, SCALP, existing position management and
+  historical ledger rows remain active and unchanged. The dashboard reports
+  this LOCK gate separately from SCALP recovery.
+- This is a paper-risk repair for an observed failure mode, not evidence or a
+  guarantee of future profitability. New prospective settlements remain the
+  only valid proof.
+
 ## Paired improvement evidence (2026-10-26)
 
 - `improvement_evidence.py` freezes production, previous execution formula,

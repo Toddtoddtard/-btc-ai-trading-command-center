@@ -19,6 +19,7 @@ from kalshi_paper_engine import (
     kalshi_taker_fee,
     executable_entry_quote,
     expected_lock_net_pnl,
+    lock_edge_is_sufficient,
     LOCK_MIN_CONFIDENCE,
     _quote as _execution_quote,
     _projected_scalp_exit,
@@ -74,7 +75,9 @@ def _break_even_price(contracts, total_cost):
     return 1.0
 
 
-def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=False):
+def build_pro_trade_ticket(
+    decision, risk, paper_summary, has_open_position=False, lock_gate=None
+):
     """Return the paper order economics shown before any automatic entry.
 
     The authoritative background paper worker currently allocates the
@@ -175,6 +178,13 @@ def build_pro_trade_ticket(decision, risk, paper_summary, has_open_position=Fals
             expected_net = expected_lock_net_pnl(contracts, entry, decision or {}, side)
         if expected_net is None or expected_net <= 0:
             blockers.append("expected LOCK settlement profit is unavailable or not positive after entry fees")
+        elif not lock_edge_is_sufficient(contracts, entry, decision or {}, side):
+            blockers.append("expected LOCK settlement edge is below the fee-adjusted 5-point safety margin")
+        if isinstance(lock_gate, dict) and lock_gate.get("approved") is False:
+            blockers.append(
+                "LOCK validation quarantine: "
+                + str(lock_gate.get("reason") or "authoritative scorecard failed")
+            )
 
     return {
         "action": action,

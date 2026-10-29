@@ -21,6 +21,7 @@ from kalshi_microstructure import orderbook_features
 
 from kalshi_paper_engine import (
     LOCK_MIN_CONFIDENCE,
+    LOCK_MIN_NET_PROBABILITY_EDGE,
     LOCK_TAKE_PROFIT_PRICE,
     entry_price_limit,
     MIN_SCALP_MARKET_PROBABILITY,
@@ -41,6 +42,8 @@ from kalshi_paper_engine import (
     projected_net_pnl,
     executable_entry_quote,
     expected_lock_net_pnl,
+    lock_edge_is_sufficient,
+    lock_validation_policy,
 )
 
 STATE_INPUT = os.environ.get("LEARNING_STATE_OUTPUT", "/tmp/learning_state.json")
@@ -427,6 +430,7 @@ def shared_paper_scorecard(paper):
     """Recalculate post-fix metrics and validation from persisted trades."""
     paper = paper if isinstance(paper, dict) else {}
     metrics = _post_fix_metrics(paper)
+    metrics["lock_gate"] = lock_validation_policy(metrics)
     return metrics, _paper_gate(paper)
 
 
@@ -990,6 +994,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                     contracts, 0.0, pending, position["side"]
                 )
                 liquidation = contracts * bid - kalshi_taker_fee(contracts, bid)
+                lock_gate = lock_validation_policy(_post_fix_metrics(paper))
+                paper["lock_gate"] = lock_gate
                 if (
                     position["strategy"] == "SCALP"
                     and master_action.startswith("LOCK")
@@ -998,8 +1004,10 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                     and _f(pending.get("master_confidence"), 0.0) >= LOCK_MIN_CONFIDENCE
                     and 0 <= bid <= 1
                     and contracts > 0
+                    and lock_gate["approved"]
                     and expected_proceeds is not None
-                    and expected_proceeds > liquidation
+                    and expected_proceeds - liquidation
+                        >= contracts * LOCK_MIN_NET_PROBABILITY_EDGE - 1e-12
                 ):
                     position["strategy"] = "LOCK"
                     position["promoted_to_lock_at"] = now
@@ -1111,6 +1119,16 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             "BLOCKED", now,
         )
         return paper
+    if strategy == "LOCK":
+        lock_gate = lock_validation_policy(_post_fix_metrics(paper))
+        paper["lock_gate"] = lock_gate
+        if not lock_gate["approved"]:
+            _record_signal_outcome(
+                paper, pending, ticker, side, strategy, confidence,
+                "Skipped PAPER LOCK: validation quarantine — " + lock_gate["reason"] + ".",
+                "BLOCKED", now,
+            )
+            return paper
     if strategy == "SCALP" and not auto_scalping_enabled:
         _record_signal_outcome(
             paper, pending, ticker, side, strategy, confidence,
@@ -1190,10 +1208,11 @@ def run_cycle(learning_state, market_reader=_market, now=None):
         return paper
     if strategy == "LOCK":
         expected_net = expected_lock_net_pnl(contracts, ask, pending, side)
-        if expected_net is None or expected_net <= 0:
+        if (expected_net is None or expected_net <= 0
+                or not lock_edge_is_sufficient(contracts, ask, pending, side)):
             _record_signal_outcome(
                 paper, pending, ticker, side, strategy, confidence,
-                "Skipped PAPER LOCK: expected settlement profit is unavailable or not positive after entry fees.",
+                "Skipped PAPER LOCK: expected settlement edge does not clear the fee-adjusted 5-point safety margin.",
                 "BLOCKED", now,
             )
             return paper

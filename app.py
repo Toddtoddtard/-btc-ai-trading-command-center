@@ -6127,6 +6127,18 @@ def live_dashboard():
                 "Recovery uses the latest 50 SCALP results. Every specialist remains active. "
                 + _scalp_gate["reason"]
             )
+            _lock_gate = _post_fix["lock_gate"]
+            _lock_gate_message = (
+                f"LOCK validation: {_lock_gate['status']} • "
+                f"{_post_fix['markets']}/{_post_fix['validation_sample_target']} "
+                "distinct settled Kalshi markets. LOCK calls and every specialist "
+                "remain active; only new LOCK paper fills are quarantined when this gate fails. "
+                + _lock_gate["reason"]
+            )
+            if _lock_gate["approved"]:
+                st.info(_lock_gate_message)
+            else:
+                st.warning(_lock_gate_message)
 
             _open_contract = _kp.get("open_position")
             if _open_contract:
@@ -6145,6 +6157,7 @@ def live_dashboard():
                 risk,
                 _kp,
                 has_open_position=bool(_open_contract),
+                lock_gate=_lock_gate,
             )
 
             def _ticket_pct(value):
