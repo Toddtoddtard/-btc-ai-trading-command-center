@@ -18,6 +18,7 @@ from kalshi_microstructure import orderbook_features
 from learning_prices import closed_price_at
 from multi_timeframe import fetch_multi_timeframe_context
 from public_futures import parse_bybit_futures_snapshot
+from live_feeds import parallel_calls
 from time_rewards_v1 import time_reward
 
 SPOT = "https://data-api.binance.vision"
@@ -188,8 +189,18 @@ def futures_snapshot():
         "ok": False,
     }
     received = set()
+    def read(endpoint, params):
+        try:
+            return get(FUTURES + endpoint, params)
+        except Exception:
+            return None
+    primary = parallel_calls({
+        'depth': lambda: read('/fapi/v1/depth', {'symbol': 'BTCUSDT', 'limit': 20}),
+        'premium': lambda: read('/fapi/v1/premiumIndex', {'symbol': 'BTCUSDT'}),
+        'oi': lambda: read('/fapi/v1/openInterest', {'symbol': 'BTCUSDT'}),
+    })
     try:
-        depth = get(FUTURES + "/fapi/v1/depth", {"symbol": "BTCUSDT", "limit": 20})
+        depth = primary['depth']
         bids = sum(float(x[0]) * float(x[1]) for x in depth.get("bids", []))
         asks = sum(float(x[0]) * float(x[1]) for x in depth.get("asks", []))
         denom = bids + asks
@@ -198,13 +209,13 @@ def futures_snapshot():
     except Exception:
         pass
     try:
-        premium = get(FUTURES + "/fapi/v1/premiumIndex", {"symbol": "BTCUSDT"})
+        premium = primary['premium']
         result["funding_rate"] = float(premium.get("lastFundingRate") or 0.0)
         received.add("funding")
     except Exception:
         pass
     try:
-        oi = get(FUTURES + "/fapi/v1/openInterest", {"symbol": "BTCUSDT"})
+        oi = primary['oi']
         result["open_interest"] = float(oi.get("openInterest") or 0.0)
         received.add("oi")
     except Exception:
@@ -213,15 +224,13 @@ def futures_snapshot():
         result.update({"source": "Binance Futures public BTCUSDT", "ok": True})
         return result
     try:
-        ticker = get(
-            BYBIT + "/v5/market/tickers",
-            {"category": "linear", "symbol": "BTCUSDT"},
-        )
-        orderbook = get(
-            BYBIT + "/v5/market/orderbook",
-            {"category": "linear", "symbol": "BTCUSDT", "limit": 50},
-        )
-        result.update(parse_bybit_futures_snapshot(ticker, orderbook))
+        fallback = parallel_calls({
+            'ticker': lambda: get(BYBIT + '/v5/market/tickers',
+                                  {'category': 'linear', 'symbol': 'BTCUSDT'}),
+            'book': lambda: get(BYBIT + '/v5/market/orderbook',
+                                {'category': 'linear', 'symbol': 'BTCUSDT', 'limit': 50}),
+        })
+        result.update(parse_bybit_futures_snapshot(fallback['ticker'], fallback['book']))
     except Exception:
         pass
     return result
@@ -375,8 +384,8 @@ def register(state, df, market_info):
     if time.time() >= market_info["expires_at"]:
         return False
     price = float(df.close.iloc[-1])
-    agg = aggregate_trades()
-    futures = futures_snapshot()
+    inputs = parallel_calls({'trades': aggregate_trades, 'futures': futures_snapshot})
+    agg, futures = inputs['trades'], inputs['futures']
     specialists = run_specialists_core(df, agg, futures, kalshi_context(market_info, price))
     forecast = forecast_path_core(
         rows_for_forecast(df), market_info["target"], state["forecast"], state.get("horizon_models")

@@ -2,6 +2,24 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## Worker input latency (2026-10-30 Eastern)
+
+- Reused the dashboard's bounded `parallel_calls` helper in the worker:
+  independent startup feeds, trade/futures inputs, three primary futures reads
+  and the two fallback reads now overlap. No added providers, requests on the
+  successful path, dependencies, paid resources or scheduling frequency changes.
+- Partial optional futures data stays unhealthy until a complete source succeeds.
+  Existing same-contract quote/reference refresh and post-read expiry checks
+  still protect captured forecasts and paper entries. All specialists remain.
+- Controlled seven-run offline benchmark with 40 ms per feed: primary futures
+  median 120.53 to 41.22 ms; failed-primary plus fallback 200.89 to 82.16 ms.
+  This measures request orchestration, not hosted latency, learning throughput,
+  forecast accuracy or profitability. Independent markets still require actual
+  settlement; no validation threshold, ledger or prediction formula changed.
+- Added six worker concurrency/fallback regressions and the learner workflow
+  gate. Full offline verification and hosted/deployed results are recorded in
+  the associated PR; do not infer deployment from this handoff alone.
+
 ## LOCK edge quarantine (2026-10-29)
 
 - The authoritative post-fix Kalshi cohort exceeded 100 distinct settled
