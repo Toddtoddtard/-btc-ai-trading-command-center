@@ -553,6 +553,7 @@ def register_with_snapshot(state, df, market_info):
             "master_confidence": safe_float(p.get("master_confidence"), 0.5),
             "master_base_score": safe_float(p.get("master_base_score"), 0.0),
             "council_formula_confidence": p.get("council_formula_confidence"),
+            "confidence_policy": "evidence-families-v1",
             "would_wait": bool(p.get("would_wait", False)),
             "specialists": p.get("specialists", {}),
         }
@@ -723,6 +724,7 @@ def current_shadow_call(state, df, market_info):
         execution_reason = "WAIT — KALSHI REFERENCE"
     call["execution_approved"] = bool(execution_approved)
     call["execution_reason"] = execution_reason
+    call["decision_schema"] = "settlement-first-v1"
     call["would_wait"] = not execution_approved
     call["lock_focus"] = focus
     return call
@@ -762,6 +764,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         "contract_probability_edge", "strike_distance_sigma",
         "contract_probability_source", "execution_probability_reason",
         "code_revision", "forecast_trial_version", "previous_contract_probability_up",
+        "decision_schema",
         "execution_approved", "execution_reason",
         "settlement_reference_price", "settlement_reference_timestamp", "settlement_forecast_end",
     ):

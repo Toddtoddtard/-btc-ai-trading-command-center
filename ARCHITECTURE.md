@@ -271,3 +271,47 @@ call, influence, sample count and measured hourly accuracy. A failed hourly data
 refresh is recorded without discarding pending labels or changing the existing
 15-minute learning, execution policy or paper ledger. No hourly orders are added,
 and neither functional tests nor weight adaptation establish an accuracy gain.
+
+## Settlement-first assessment (r106)
+
+`trade_assessment.assess_paper_entry` is the shared final entry-value assessment
+used by the current dashboard ticket and persistent paper worker. It identifies
+the exact contract and immutable proposed side, checks contemporaneous quotes
+and reference timestamps, requires validated terminal probability and existing
+reliability approval, and reports rounded-fee break-even and net edge for the
+actual fill size. It adds vetoes; existing depth, size, risk, per-market and
+settlement lifecycle rules remain in `background_paper.py`. Historical replay
+fixtures retain their legacy schema; every real-clock worker entry uses the new
+assessment regardless of schema. A displayed directional outlook never means a
+paper position was entered. The worker's ledger remains the action authority.
+
+A terminal probability cannot establish the timing or availability of a SCALP
+exit. New automatic SCALP fills therefore wait for a separately validated exit
+model. `scalp_exit_research` records one prospective one-contract bid-path episode
+per market even when entry is blocked. Entry, positive-after-fees target, stop,
+smoothed prior probability and revision freeze before outcomes. It records only
+exits actually observed with fresh selected-side bid depth. The official final
+result is required separately before scoring; windows without an observed exit
+are explicitly censored. This is sampled-path research, not continuous-tick
+replay, real execution or an eligible strategy promotion. It has no execution
+or promotion authority; activation requires additional paired policy evidence
+and all previously specified promotion gates. Existing SCALPs remain managed;
+profit-taking requires positive actual net proceeds after both fees, while
+reversal and stop exits remain available. New-schema calls cannot prolong an
+old SCALP on terminal-probability upside alone.
+
+The council retains every specialist and all existing contribution evidence
+requirements. The confidence corroboration bonus now caps duplicate price-trend
+and price-momentum families rather than counting them as independent voters.
+Scores/weights are retained. `confidence_policy=evidence-families-v1` tags new
+snapshots; changed-formula confidence corrections cannot borrow old validation
+samples. This is a conservative confidence safeguard, not a promoted strategy.
+Failed futures snapshots explicitly abstain, including when a failed primary
+read leaves partial values. Existing free primary/fallback sources remain.
+
+`decision_dashboard.py` distinguishes settlement outlook, actual worker paper
+action, current fee-aware preview, probability source and input availability.
+Signal strength is explicitly heuristic. Old labels, ledgers, official outcomes,
+archives and rare-specialist learning remain intact.
+
+Current-schema decisions cannot open positions through the legacy SQLite adapter; its simulations remain available, but the persistent background ledger is the only current execution path.

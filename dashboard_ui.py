@@ -20,9 +20,9 @@ def fmt_pct(value, digits=2):
 def directional_badge_html(label, compact=False):
     """Return the existing visual-only badge for a directional call."""
     text = str(label or "HOLD").upper().strip()
-    if any(key in text for key in ("LOCK UP", "SCALP UP", "BULLISH")) or text == "UP":
+    if any(key in text for key in ("LOCK UP", "SCALP UP", "OUTLOOK UP", "BULLISH")) or text == "UP":
         css_class, icon = "call-up", "▲"
-    elif any(key in text for key in ("LOCK DOWN", "SCALP DOWN", "BEARISH")) or text == "DOWN":
+    elif any(key in text for key in ("LOCK DOWN", "SCALP DOWN", "OUTLOOK DOWN", "BEARISH")) or text == "DOWN":
         css_class, icon = "call-down", "▼"
     else:
         css_class, icon = "call-neutral", "•"

@@ -35,9 +35,11 @@ def _correction(bands, confidence):
     return max(-MAX_CORRECTION, min(MAX_CORRECTION, band['residual_sum']/(n+PRIOR)))
 
 
-def apply(confidence, state):
+def apply(confidence, state, expected_policy=None):
     model = (state or {}).get('council_confidence_calibration') or {}
     if not isinstance(model, dict) or model.get('basis') != BASIS or model.get('active') is not True:
+        return confidence
+    if expected_policy is not None and model.get('confidence_policy') != expected_policy:
         return confidence
     bands = model.get('bands')
     band = bands.get(_band(confidence)) if isinstance(bands, dict) else None
@@ -54,8 +56,16 @@ def apply(confidence, state):
 
 
 def fit(records, as_of=None):
+    records = list(records)
+    # A changed confidence formula needs new frozen calibration evidence. Keep
+    # the legacy archive, but never let its sample count qualify this formula.
+    policy = 'evidence-families-v1' if any(
+        r.get('snapshot', {}).get('confidence_policy') == 'evidence-families-v1'
+        for r, _ in records) else 'legacy'
     rows = []
     for record, outcome in records:
+        if policy != 'legacy' and record.get('snapshot', {}).get('confidence_policy') != policy:
+            continue
         snap = record['snapshot']
         opened, expiry = timestamp(record.get('opened_at')), timestamp(record.get('expires_at'))
         score = timestamp(snap.get('master_base_score'))
@@ -111,7 +121,7 @@ def fit(records, as_of=None):
                   and validation['brier_improvement'] >= .002
                   and recent['brier_improvement'] >= 0
                   and any(b['validated'] for b in bands.values()))
-    return dict(basis=BASIS, active=active, training_markets=len(rows), bands=bands,
+    return dict(basis=BASIS, confidence_policy=policy, active=active, training_markets=len(rows), bands=bands,
                 validation=validation, recent_validation=recent,
                 max_correction=MAX_CORRECTION, scope='council side correctness; not contract value',
                 reason='Chronological confidence improvement passed' if active else

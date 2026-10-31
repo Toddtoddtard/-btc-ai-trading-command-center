@@ -186,7 +186,20 @@ def build_pro_trade_ticket(
                 + str(lock_gate.get("reason") or "authoritative scorecard failed")
             )
 
+    assessment = None
+    from trade_assessment import assess_paper_entry, SCHEMA
+    if decision.get("decision_schema") == SCHEMA:
+        market = dict(decision, ticker=decision.get("kalshi_ticker"), status="open")
+        assessment = assess_paper_entry(decision, market, contracts=contracts,
+                                        now=now, lock_gate=lock_gate)
+        blockers.extend(b for b in assessment["blockers"] if b not in blockers)
+        # Terminal payout is a conditional win scenario, not an expected exit.
+        if strategy == "SCALP":
+            projected_exit = projected_net = projected_return = None
+            projected_exit_fee = take_profit = None
+
     return {
+        "assessment": assessment,
         "action": action,
         "strategy": strategy,
         "direction": direction,

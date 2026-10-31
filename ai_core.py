@@ -341,6 +341,17 @@ def run_specialists_core(
     funding = safe_float((futures or {}).get("funding_rate"), 0.0)
     deriv_score = clamp(book * 1.6 - np.sign(funding) * min(abs(funding) / 0.0005, 1.0) * 0.25)
     out["Derivatives AI"] = _specialist("Derivatives AI", deriv_score, f"Funding {funding*100:.4f}%; OI {safe_float((futures or {}).get('open_interest'), 0):,.0f} BTC")
+    for name in ("Liquidity AI", "Derivatives AI"):
+        # Failed snapshots can contain partial primary-host fields. Those are
+        # not a complete, contemporaneous market view and must abstain.
+        available = bool(futures) and futures.get("ok") is not False
+        out[name]["feed_status"] = "AVAILABLE" if available else "UNAVAILABLE"
+        out[name]["feed_source"] = (futures or {}).get("source", "Unavailable")
+        if not available:
+            out[name].update(score=0.0, confidence=0.0, signal="NEUTRAL",
+                             reason="Futures feed unavailable; specialist abstaining",
+                             evidence="Futures feed unavailable; specialist abstaining")
+
 
     out["Kalshi Context AI"] = kalshi_context_result(kctx, settlement_px)
 

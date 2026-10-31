@@ -516,6 +516,11 @@ def lock_validation_policy(performance):
 
 
 def open_position(db_path, starting_cash, decision, risk, spot_price):
+    # This SQLite adapter is retained for archived simulations and lifecycle
+    # tests. Current decisions execute only through the authoritative persistent
+    # ledger and shared assessment, never a second browser-local account.
+    if decision.get("decision_schema") == "settlement-first-v1":
+        return None
     action = str(decision.get("action", "")).upper()
     side = _side_from_action(action)
     if side is None:

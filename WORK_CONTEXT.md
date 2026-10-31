@@ -291,3 +291,30 @@ Added concise repository instructions in `AGENTS.md`, task-to-module/test routin
   These are local measurements, not guaranteed phone or feed latency.
 - Build label: r103-forecast-curve-eastern. Deployment parity remains a separate
   check. Synthetic turning-series tests prove mechanics, not BTC accuracy.
+
+## 2026-10-31 — settlement-first assessment and truthful outlooks (r106)
+
+User approved the architecture/UX repairs after underperformance review. Added
+shared final fee-aware paper assessment; current decisions cannot execute in the
+legacy local ledger. Related trend/momentum families no longer earn duplicated
+confidence corroboration. New confidence calibration cohorts are versioned and
+legacy active corrections cannot apply to the new formula. Missing/partial failed
+futures snapshots explicitly abstain. Dashboard separates directional outlook,
+actual persistent-worker action, probability source and fees; misleading SCALP
+buy/edge wording removed. All specialists, histories and risk/settlement gates
+remain intact.
+
+New SCALP fills require a separate validated early-exit model (currently none),
+rather than treating settlement value as an early-exit forecast. Prospective
+sampled bid-path research starts even while entries are blocked, freezes targets
+and estimates, uses official market results separately, and discloses censored
+windows. It has no execution/promotion authority. A verified fee regression also
+now prevents a nominal gross gain from being labeled a profit-taking exit when
+both fees make its actual net negative. Reversal/stop exits remain available.
+
+Validation: 529 offline regression tests, OK with one skipped; compileall and
+diff whitespace checks passed. Independent review findings corrected and rechecked.
+This is software/measurement work, not evidence of increased trading accuracy or
+profitability. Hosted regression, fresh worker revision and live build publication
+must be verified separately; authenticated dashboard access remains required for
+full visual inspection.

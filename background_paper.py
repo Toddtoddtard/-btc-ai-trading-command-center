@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from kalshi_microstructure import orderbook_features
+from trade_assessment import assess_paper_entry, SCHEMA
+import scalp_exit_research
 
 from kalshi_paper_engine import (
     LOCK_MIN_CONFIDENCE,
@@ -876,6 +878,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if not isinstance(paper, dict) or paper.get("version") != 1:
         paper = initial_state(now)
         learning_state["background_paper"] = paper
+    paper["entry_assessment"] = {"paper_action": "WAIT", "approved": False, "checked_at": now, "blockers": ["Awaiting current-cycle checks"]}
     paper["last_cycle_at"] = _now_iso(now)
     paper["worker_ok"] = True
     execution_mode = learning_state.get("btc_execution_mode") or {}
@@ -943,6 +946,11 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if str(market.get("ticker") or ticker) != ticker:
         paper["last_message"] = "Kalshi ticker mismatch; no paper action."
         return paper
+
+    # Research runs even while execution is blocked, but only on fresh observed
+    # depth. Official labels remain a separate prerequisite for its scorecard.
+    scalp_exit_research.resolve(learning_state, market_reader, now=now)
+    scalp_exit_research.observe(learning_state, pending, market, now=now)
 
     if position:
         bid, _ = _quotes(market, position["side"])
@@ -1021,7 +1029,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                     pending, market, position["side"]
                 )
                 sees_more_upside = (
-                    signal_side == position["side"]
+                    pending.get("decision_schema") != SCHEMA
+                    and signal_side == position["side"]
                     and projected_exit is not None
                     and projected_exit >= bid + SCALP_MIN_REMAINING_EDGE
                 )
@@ -1029,17 +1038,20 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                     signal_side is not None
                     and signal_side != position["side"]
                 )
-                exit_requested = ((gain >= entry_price * SCALP_MIN_GROSS_RETURN and not sees_more_upside)
-                                  or confirmed_reversal or gain <= -SCALP_STOP_LOSS_POINTS)
+                # A gross price increase can still lose money after two rounded
+                # fees. A profit-taking exit must actually realize positive P/L.
+                net_profit = (contracts * bid - kalshi_taker_fee(contracts, bid)
+                              - contracts * entry_price - _f(position.get("entry_fee"), 0.0))
+                take_profit = (gain >= entry_price * SCALP_MIN_GROSS_RETURN
+                               and net_profit > 0 and not sees_more_upside)
+                exit_requested = (take_profit or confirmed_reversal
+                                  or gain <= -SCALP_STOP_LOSS_POINTS)
                 exit_size = _fill_size(market, position['side'], 'bid',
                                        time.time() if live_clock and 'execution_book' in market else now)
                 if exit_requested and exit_size is not None and exit_size < contracts:
                     paper['last_message'] = 'Holding PAPER position: fresh bid depth cannot fill the full exit.'
                     return paper
-                if (
-                    gain >= entry_price * SCALP_MIN_GROSS_RETURN
-                    and not sees_more_upside
-                ):
+                if take_profit:
                     _close(
                         paper,
                         position,
@@ -1128,6 +1140,18 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 "Skipped PAPER LOCK: validation quarantine — " + lock_gate["reason"] + ".",
                 "BLOCKED", now,
             )
+            return paper
+    if strategy == "SCALP" and (live_clock or pending.get("decision_schema") == SCHEMA):
+        if live_clock:
+            now = time.time()
+            if expires <= now:
+                paper["last_message"] = "Skipped PAPER entry: market expired before fill."
+                return paper
+        assessment = assess_paper_entry(pending, market, now=now, lock_gate=paper.get("lock_gate"))
+        paper["entry_assessment"] = assessment
+        if not assessment["approved"]:
+            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
+                "Skipped PAPER entry: " + "; ".join(assessment["blockers"]), "BLOCKED", now)
             return paper
     if strategy == "SCALP" and not auto_scalping_enabled:
         _record_signal_outcome(
@@ -1225,6 +1249,14 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if _fill_size(market, side, 'ask', now) == 0:
         paper['last_message'] = 'Skipped PAPER entry: quote expired before fill.'
         return paper
+    if live_clock or pending.get("decision_schema") == SCHEMA:
+        assessment = assess_paper_entry(pending, market, contracts=contracts, now=now,
+                                        lock_gate=lock_validation_policy(_post_fix_metrics(paper)))
+        paper["entry_assessment"] = assessment
+        if not assessment["approved"]:
+            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
+                "Skipped PAPER entry: " + "; ".join(assessment["blockers"]), "BLOCKED", now)
+            return paper
     fee = kalshi_taker_fee(contracts, ask)
     amount = contracts * ask + fee
     expires = _f(pending.get("expires_at"))

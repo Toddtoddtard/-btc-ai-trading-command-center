@@ -24,7 +24,7 @@ class CouncilConfidenceTests(unittest.TestCase):
         for i in range(count):
             state['prediction_snapshots'].append({
                 'ticker': str(i), 'opened_at': i*900+1, 'expires_at': i*900+900,
-                'snapshot': {'master_base_score': .3, 'master_confidence': confidence,
+                'snapshot': {'confidence_policy':'evidence-families-v1', 'master_base_score': .3, 'master_confidence': confidence,
                              'specialists': {'Trend AI': {'score': .3}}}})
             state['master_history'].append({
                 'ticker': str(i), 'kalshi_result': 'no' if i % 4 == 0 else 'yes',

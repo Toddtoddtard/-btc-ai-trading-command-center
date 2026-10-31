@@ -44,6 +44,14 @@ BASE_WEIGHTS = {
 # Combination AI is intentionally excluded from the source council so the
 # system cannot double-count its own aggregate vote.
 EXCLUDED_FROM_COUNCIL = {"Combination AI"}
+CONFIDENCE_POLICY = "evidence-families-v1"
+# These members reuse the same price history. This is a conservative cap on
+# corroboration, not evidence that a specialist should be disabled or reweighted.
+EVIDENCE_FAMILIES = {
+    "Trend AI": "price_trend", "Market Regime AI": "price_trend",
+    "Historical Pattern AI": "price_trend",
+    "Momentum AI": "price_momentum", "FVG / MACD AI": "price_momentum",
+}
 
 
 def specialist_active(name, item):
@@ -151,13 +159,17 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
     # Agreement among one voter is not independent corroboration. Three
     # comparably weighted voters earn the full bonus; inactive rare bots do not
     # dilute the denominator or suppress a normally populated council.
-    coverage = min(1.0, max(0.0, (effective_voters-1.0)/2.0))
+    families = {EVIDENCE_FAMILIES.get(m["name"], m["name"])
+                for m in members if abs(m["score"]) >= .08}
+    # Adding another indicator from one family cannot earn an extra independent
+    # confirmation bonus. All original votes and learned contributions remain.
+    coverage = min(1.0, max(0.0, (min(effective_voters, len(families))-1.0)/2.0))
     raw_confidence = float(np.clip(0.46 + abs(base_score) * 0.34 + consensus * coverage * 0.18, 0.40, 0.96))
     health = source_health_from_specialists(results, exclude=exclude)
     policy = learned_policy(state or {}, regime or "UNKNOWN")
     formula_confidence = calibrate_confidence(raw_confidence, consensus, policy, health, state or {})
     from council_confidence import apply as apply_learned_confidence
-    confidence = apply_learned_confidence(formula_confidence, state)
+    confidence = apply_learned_confidence(formula_confidence, state, expected_policy=CONFIDENCE_POLICY)
 
     if base_score >= policy["edge_floor"]:
         proposed = "SCALP UP"
@@ -186,6 +198,8 @@ def council_vote(results, state=None, regime="UNKNOWN", exclude=None):
         "consensus": float(consensus),
         "consensus_coverage": coverage,
         "effective_voters": effective_voters,
+        "evidence_families": len(families),
+        "confidence_policy": CONFIDENCE_POLICY,
         "source_health": float(health),
         "policy": policy,
         "members": members,

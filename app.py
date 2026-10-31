@@ -18,7 +18,8 @@ for _runtime_module in (
     "outcome_timing", "contribution_evidence", "contract_calibration", "reliability_v31", "council_v4",
     "kalshi_chart_data", "settlement_predictor", "research_lab", "horizon_models", "ai_core",
     "council_accounting", "specialist_knowledge_v5", "hourly_forecast",
-    "background_paper", "pro_trade_ticket", "live_feeds", "shared_learning",
+    "trade_assessment", "scalp_exit_research", "background_paper", "pro_trade_ticket",
+    "decision_dashboard", "live_feeds", "shared_learning",
 ):
     importlib.reload(importlib.import_module(_runtime_module))
 
@@ -84,6 +85,7 @@ from lock_focus import (
     specialist_consensus,
 )
 from pro_trade_ticket import build_pro_trade_ticket
+from decision_dashboard import render_decision_assessment, outlook_label
 from public_futures import parse_bybit_futures_snapshot
 from reliability_v31 import (
     detect_regime, execution_cost_bps,
@@ -1822,6 +1824,9 @@ def master_decision(
 
     return {
         "action": action,
+        "decision_schema": "settlement-first-v1",
+        "quotes_observed_at": (kctx.get("market") or {}).get("quotes_observed_at"),
+        "settlement_reference_timestamp": (settlement_reference or {}).get("timestamp"),
         "locked_side": locked_side,
         "score": score,
         "base_score": base_score,
@@ -5235,7 +5240,7 @@ def live_dashboard():
     )
     with m3:
         st.markdown(
-            f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Master</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
+            f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Settlement outlook</div><div class="direction-card-value">{directional_badge_html(outlook_label(decision))}</div></div>',
             unsafe_allow_html=True,
         )
     # Confidence card only: keep every other top metric unchanged and add the
@@ -5259,7 +5264,7 @@ def live_dashboard():
             f"""
             <div class="confidence-metric-card">
                 <div class="confidence-metric-label">
-                    Confidence
+                    Signal strength
                     <span style="color:{_confidence_color};">{_confidence_arrow}&nbsp;{_confidence_direction}</span>
                 </div>
                 <div class="confidence-metric-value">{decision['confidence']*100:.1f}%</div>
@@ -5267,7 +5272,7 @@ def live_dashboard():
             """,
             unsafe_allow_html=True,
         )
-    m5.metric("Consensus", f"{decision['consensus']*100:.1f}%")
+    m5.metric("Vote agreement", f"{decision['consensus']*100:.1f}%")
     _latest_call_entry = latest_shared_call_entry(_shared_paper)
     if _latest_call_entry:
         _entry_pct = _latest_call_entry["kalshi_entry_pct"]
@@ -5319,6 +5324,7 @@ def live_dashboard():
         st.caption("No prospective official settlement results yet; historical Bitcoin candle accuracy is not this predictor's accuracy.")
     render_settlement_evidence(_settlement_score, _settlement_prediction,
                                improvement_scorecard(_shared_learning_state))
+    render_decision_assessment(decision, risk, _shared_learning_state, futures, _display_feed)
     render_learning_freshness(_shared_learning_state)
 
     st.caption(
@@ -5585,7 +5591,7 @@ def live_dashboard():
                 call1, call2, call3, call4 = st.columns(4)
                 with call1:
                     st.markdown(
-                        f'<div class="direction-card metric-direction-card"><div class="direction-card-label">CALL</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
+                        f'<div class="direction-card metric-direction-card"><div class="direction-card-label">CALL</div><div class="direction-card-value">{directional_badge_html(outlook_label(decision))}</div></div>',
                         unsafe_allow_html=True,
                     )
                 call2.metric("Side", side_text)
@@ -5593,17 +5599,17 @@ def live_dashboard():
                     "AI projected end", fmt_money(decision["projected_end"])
                 )
                 call4.metric(
-                    "Confidence", f"{decision['confidence']*100:.1f}%"
+                    "Signal strength", f"{decision['confidence']*100:.1f}%"
                 )
 
                 if decision["action"] == "SCALP UP":
-                    st.success("SCALP UP → paper signal is to BUY UP.")
+                    st.info("OUTLOOK UP — paper action is decided separately by the persistent worker.")
                 elif decision["action"] == "SCALP DOWN":
-                    st.error("SCALP DOWN → paper signal is to BUY DOWN.")
+                    st.info("OUTLOOK DOWN — paper action is decided separately by the persistent worker.")
                 elif decision["action"] in {"LOCK UP", "LOCK DOWN"}:
                     st.warning(
                         f"LOCK {decision['locked_side']} → direction stays fixed; "
-                        "the paper position holds through the end of the current 15-minute Kalshi window or settles at expiry."
+                        "any opened LOCK position holds through the current window and waits for official settlement."
                     )
                 else:
                     st.info("HOLD → no Kalshi side has enough edge yet.")
@@ -5669,7 +5675,7 @@ def live_dashboard():
             d1, d2, d3, d4, d5 = st.columns(5)
             with d1:
                 st.markdown(
-                    f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Call</div><div class="direction-card-value">{directional_badge_html(decision["action"])}</div></div>',
+                    f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Call</div><div class="direction-card-value">{directional_badge_html(outlook_label(decision))}</div></div>',
                     unsafe_allow_html=True,
                 )
                 if _call_entries:
@@ -5677,7 +5683,7 @@ def live_dashboard():
                         f"Entered at {_call_entries[-1]['kalshi_entry_pct']:.0f}%"
                     )
             d2.metric("Master score", f"{decision['score']:+.3f}")
-            d3.metric("Confidence", f"{decision['confidence']*100:.1f}%")
+            d3.metric("Signal strength", f"{decision['confidence']*100:.1f}%")
             d4.metric("Consensus", f"{decision['consensus']*100:.1f}%")
             d5.metric("Risk level", decision["risk_level"])
 
@@ -5715,10 +5721,10 @@ def live_dashboard():
                 plain_call = "The council expects BTC to finish BELOW the Kalshi target at expiration."
                 call_icon = "🔒⬇️"
             elif action == "SCALP UP":
-                plain_call = "The council sees a short-term UP move with enough edge for a paper scalp."
+                plain_call = "The settlement outlook leans UP. This does not establish a profitable early exit or approve a paper trade."
                 call_icon = "⚡⬆️"
             elif action == "SCALP DOWN":
-                plain_call = "The council sees a short-term DOWN move with enough edge for a paper scalp."
+                plain_call = "The settlement outlook leans DOWN. This does not establish a profitable early exit or approve a paper trade."
                 call_icon = "⚡⬇️"
             else:
                 plain_call = "The council does not see a strong enough edge right now. Waiting is the preferred move."
@@ -5740,25 +5746,25 @@ def live_dashboard():
 
             st.markdown("### Council verdict")
             st.markdown(
-                f'<div class="direction-card verdict-card">{directional_badge_html(action)}</div>',
+                f'<div class="direction-card verdict-card">{directional_badge_html(outlook_label(decision))}</div>',
                 unsafe_allow_html=True,
             )
             st.write(plain_call)
             s1, s2, s3 = st.columns(3)
-            s1.metric("How sure?", f"{confidence_pct:.0f}%", confidence_word)
+            s1.metric("Signal strength", f"{confidence_pct:.0f}%", confidence_word)
             s2.metric("How much agreement?", f"{consensus_pct:.0f}%", agreement_word)
             direction_label = "UP" if score > 0.05 else "DOWN" if score < -0.05 else "NEUTRAL"
             s3.metric("Overall lean", direction_label, f"Score {score:+.2f}")
 
             st.caption(
-                "Confidence = how strong the combined signal is. Consensus = how much the specialist AIs agree. "
+                "Signal strength is a heuristic, not measured win probability. Vote agreement is not independent corroboration. "
                 "A strong call with low consensus means the council still has meaningful disagreement."
             )
             if decision["action"] in {"LOCK UP", "LOCK DOWN"}:
-                st.markdown(directional_badge_html(decision["action"]), unsafe_allow_html=True)
+                st.markdown(directional_badge_html(outlook_label(decision)), unsafe_allow_html=True)
                 st.warning(
                     f"LOCKED SIDE: {decision['locked_side']} — direction cannot reverse; "
-                    "paper position holds through the end of the 15-minute window or settles at expiry."
+                    "any opened LOCK position waits for official settlement after the window ends."
                 )
             st.info(decision["reason"])
 
@@ -6213,7 +6219,7 @@ def live_dashboard():
             status1, status2, status3, status4 = st.columns(4)
             status1.metric("AUTO PAPER", "ON" if bool(auto_state["enabled"]) else "OFF")
             status2.metric("Contract position", _status_side)
-            status3.metric("Kalshi call", decision["action"])
+            status3.metric("Settlement outlook", outlook_label(decision))
             status4.metric("Risk approved", "YES" if risk["approved"] else "NO")
 
             if bool(auto_state["enabled"]):
@@ -6240,7 +6246,7 @@ def live_dashboard():
             r1.metric("Approved", "YES" if risk["approved"] else "NO")
             r2.metric("Position size", f"{risk['position_pct']*100:.2f}%")
             r3.metric("Risk score", f"{risk['risk_score']:.2f}")
-            r4.metric("Decision", decision["action"])
+            r4.metric("Settlement outlook", outlook_label(decision))
             st.metric(
                 "Next Approved Amount",
                 f"${_ticket['total_cost']:,.2f}" if _ticket["status"] == "READY" else "$0.00",
@@ -6249,7 +6255,7 @@ def live_dashboard():
             st.caption(
                 "Balanced-call mode publishes a directional outlook for every healthy 15-minute market. "
                 "Paper execution remains separate and may reject a visible call for price, fees, feed health, or weak evidence. "
-                "LOCK qualification is evaluated continuously and requires at least 68% calibrated confidence, "
+                "LOCK outlook qualification uses the 68% signal threshold; paper entries separately require validated settlement value, "
                 "strong council agreement, healthy data, "
                 "target confirmation, market alignment, and a LOCK entry at or below 93%. SCALPs remain capped at 75%. "
                 "LOCK keeps its original direction, "
