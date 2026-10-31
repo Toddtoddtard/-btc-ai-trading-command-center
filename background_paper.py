@@ -950,7 +950,9 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     # Research runs even while execution is blocked, but only on fresh observed
     # depth. Official labels remain a separate prerequisite for its scorecard.
     scalp_exit_research.resolve(learning_state, market_reader, now=now)
-    scalp_exit_research.observe(learning_state, pending, market, now=now)
+    # The live book was fetched after cycle start; measure its age at consumption.
+    scalp_exit_research.observe(learning_state, pending, market,
+                                now=time.time() if live_clock and 'execution_book' in market else now)
 
     if position:
         bid, _ = _quotes(market, position["side"])

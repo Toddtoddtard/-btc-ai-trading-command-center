@@ -56,3 +56,25 @@ class AssessmentIntegrationTests(unittest.TestCase):
             self.assertIsNotNone(engine.open_position(tmp+'/legacy.db',500,d,{'position_pct':.02},50000))
             self.assertIsNone(engine.open_position(tmp+'/current.db',500,
                  dict(d,decision_schema='settlement-first-v1'),{'position_pct':.02},50000))
+
+    def test_live_research_checks_depth_after_network_read(self):
+        clock = [1000.0]
+        state = {'pending': self.call(1000)}
+        def reader(ticker):
+            clock[0] = 1002.0  # time spent obtaining the current public book
+            return dict(self.market(clock[0]), execution_book={'available': True,
+                        'yes_bid_size': 10, 'yes_ask_size': 10})
+        with patch('background_paper.time.time', side_effect=lambda: clock[0]):
+            paper = bg.run_cycle(state, reader)
+        self.assertEqual(len(state['scalp_exit_research']['pending']), 1)
+        self.assertEqual(state['scalp_exit_research']['pending'][0]['opened_at'], 1002)
+        self.assertIsNone(paper['open_position'])
+
+    def test_live_research_still_rejects_future_depth(self):
+        state = {'pending': self.call(1000)}
+        m = dict(self.market(1005), execution_book={'available': True,
+                 'yes_bid_size': 10, 'yes_ask_size': 10})
+        with patch('background_paper.time.time', return_value=1000):
+            bg.run_cycle(state, lambda _: m)
+        self.assertEqual(state['scalp_exit_research']['pending'], [])
+        self.assertEqual(state['scalp_exit_research']['last_observation_status'], 'STALE_DEPTH')

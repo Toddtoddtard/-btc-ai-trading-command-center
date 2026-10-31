@@ -341,3 +341,12 @@ in docs/prediction-repair-2026-10-31.md and its JSON report.
 Verification:540 offline tests OK with one skipped; compileall and diff checks
 passed. Independent review ran18 targeted tests, no blockers. Hosted deployment
 and worker state are separate checks. Existing ledger and promotion gates remain.
+
+
+### 2026-10-31 — r108 research observation clock
+Live SCALP research compared books timestamped during the network read with the
+older cycle-start clock, rejecting available fresh depth as future data. Refresh
+only the research observation clock after reads; injected replay time stays fixed.
+Future quotes and the 30-second limit remain rejected. No execution or promotion
+rules changed. Regression reproduces the two-second network delay and retains a
+future-quote rejection check. This repairs data collection, not predictive edge.
