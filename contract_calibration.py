@@ -6,6 +6,7 @@ fall back to the contemporaneous Kalshi midpoint, without inventing an edge.
 """
 import math
 import time
+import numpy as np
 from outcome_timing import outcome_available_at, timestamp
 
 BASIS = "official_kalshi_terminal_probability_v1"
@@ -14,6 +15,7 @@ MIN_VALIDATION = 100
 LOOKBACK = 500
 MIN_BRIER_EDGE = 0.002
 SETTLEMENT_BASIS = "official_settlement_execution_v1"
+BIAS_ALGORITHM = "market_residual_bias_v2"
 
 
 def horizon_bucket(seconds):
@@ -71,7 +73,25 @@ def coefficients(rows):
             max(0., min(1., (a*e-b*d)/determinant)))
 
 
-def candidate(raw, market, slopes):
+def bias_coefficients(rows):
+    """Learn a signed bias and residual around market odds, using past labels.
+
+    Unlike the legacy symmetric fit, an intercept can represent persistent
+    YES/NO miscalibration without assuming a stronger market slope fixes it.
+    """
+    rows = rows[-LOOKBACK:]
+    if not rows:
+        return 0., 1., 0.
+    x = np.array([[1., r['market']-.5, r['raw']-r['market']] for r in rows])
+    y = np.array([r['y']-r['market'] for r in rows])
+    bias, slope_delta, residual = np.linalg.solve(x.T@x+2*np.eye(3), x.T@y)
+    return float(bias), float(1+slope_delta), float(residual)
+
+
+def candidate(raw, market, slopes, bias=None):
+    if bias is not None:
+        correction = bias + (slopes[0]-1)*(market-.5) + slopes[1]*(raw-market)
+        return max(.001, min(.999, market+max(-.15, min(.15, correction))))
     return max(.01, min(.99, .5 + slopes[0]*(market-.5) + slopes[1]*(raw-market)))
 
 
@@ -88,7 +108,7 @@ def score(rows):
             "accuracy_edge": sum(r[2]-r[3] for r in rows)/n}
 
 
-def fit(history, as_of=None):
+def fit(history, as_of=None, learn_bias=False):
     rows = observations(history)
     if as_of is not None:
         rows = [r for r in rows if r["available_at"] <= float(as_of)]
@@ -97,7 +117,8 @@ def fit(history, as_of=None):
         prior = [r for r in rows[:index] if r["available_at"] <= row["opened"]]
         if len(prior) < MIN_TRAIN:
             continue
-        p = candidate(row["raw"], row["market"], coefficients(prior))
+        bias, *slopes = bias_coefficients(prior) if learn_bias else (None, *coefficients(prior))
+        p = candidate(row["raw"], row["market"], slopes, bias=bias)
         y = row["y"]
         validation.append(((p-y)**2, (row["market"]-y)**2,
                            int((p >= .5) == bool(y)), int((row["market"] >= .5) == bool(y))))
@@ -106,12 +127,17 @@ def fit(history, as_of=None):
                   and overall["brier_edge"] >= MIN_BRIER_EDGE
                   and overall["accuracy_edge"] >= 0
                   and recent["brier_edge"] >= 0 and recent["accuracy_edge"] >= 0)
-    slopes = coefficients(rows)
-    return {"version": 1, "basis": BASIS, "active": active,
+    bias, *slopes = bias_coefficients(rows) if learn_bias else (None, *coefficients(rows))
+    model = {"version": 1, "basis": BASIS, "active": active,
             "training_markets": len(rows), "validation": overall, "recent_validation": recent,
             "market_slope": slopes[0], "residual_weight": slopes[1],
             "fitted_as_of": as_of, "paper_only": True,
             "reason": "Validated terminal correction" if active else "Terminal correction unproven; Kalshi midpoint fallback"}
+    if learn_bias:
+        model.update(version=2, algorithm=BIAS_ALGORITHM, intercept=bias,
+                     reason="Validated horizon bias correction" if active else
+                     "Horizon bias correction unproven; retaining qualified incumbent or market")
+    return model
 
 
 def fit_settlement(state, as_of=None):
@@ -120,7 +146,7 @@ def fit_settlement(state, as_of=None):
     Reuse the existing walk-forward gate, never the base model's fitted residual
     output. One contract earns one observation per bucket, regardless of retries.
     """
-    from settlement_predictor import VERSION
+    from settlement_predictor import VERSION, bias_scorecard
     as_of = time.time() if as_of is None else float(as_of)
     grouped = {key: [] for key in ("10m+", "5m+", "1m+", "final1m")}
     history = (list((state.get("research_lab") or {}).get("history") or [])
@@ -143,8 +169,26 @@ def fit_settlement(state, as_of=None):
         grouped[bucket].append(dict(row,
             market_yes_probability=p.get("market_probability_yes"),
             raw_contract_probability_up=p.get("base_probability_yes")))
+    models = {}
+    prospective = bias_scorecard(state, as_of=as_of)['by_horizon']
+    for key, rows in grouped.items():
+        incumbent = fit(rows, as_of=as_of)
+        challenger = fit(rows, as_of=as_of, learn_bias=True)
+        # Same causal cohort and unchanged market qualification floors. A new
+        # candidate must also beat the incumbent overall without recent harm.
+        evidence = prospective[key]
+        prospective_passed = bool(
+            evidence['market']['status'] == 'IMPROVED_ON_OBSERVED_MARKETS'
+            and evidence['independent']['brier_gain'] is not None
+            and evidence['independent']['brier_gain'] >= 0)
+        better = bool(challenger['active'] and prospective_passed
+            and challenger['validation']['candidate_brier'] < incumbent['validation']['candidate_brier']
+            and challenger['recent_validation']['candidate_brier'] <= incumbent['recent_validation']['candidate_brier'])
+        models[key] = dict(challenger if better else incumbent,
+                           bias_challenger=dict(challenger, selected=better,
+                               prospective_passed=prospective_passed))
     return dict(basis=SETTLEMENT_BASIS, source=VERSION, fitted_as_of=as_of,
-                by_horizon={key: fit(rows, as_of=as_of) for key, rows in grouped.items()},
+                by_horizon=models,
                 paper_only=True)
 
 
@@ -158,7 +202,8 @@ def apply(view, state, settlement=None, now=None):
                   and raw is not None and market is not None)
     source = "terminal_blend" if active else "market_midpoint"
     view['previous_probability_up'] = (
-        candidate(raw, market, (model['market_slope'], model['residual_weight']))
+        candidate(raw, market, (model['market_slope'], model['residual_weight']),
+                  bias=model.get('intercept') if model.get('algorithm') == BIAS_ALGORITHM else None)
         if active else market if market is not None else raw)
     # Both callers supply the exact current contract and contemporaneous quotes.
     # A model earned at another horizon or against stale quotes is not usable.
@@ -185,7 +230,8 @@ def apply(view, state, settlement=None, now=None):
                 and selected.get("basis") == BASIS):
             model, raw, active, source = selected, base, True, VERSION
     if raw is not None and market is not None:
-        p = candidate(raw, market, (model["market_slope"], model["residual_weight"])) if active else market
+        p = candidate(raw, market, (model["market_slope"], model["residual_weight"]),
+                      bias=model.get('intercept') if model.get('algorithm') == BIAS_ALGORITHM else None) if active else market
         view.update(probability_up=p, edge_vs_market=p-market)
     view["calibrator_active"] = active
     view["probability_basis"] = BASIS if market is not None else "unvalidated_spot_model"

@@ -14,6 +14,7 @@ import numpy as np
 
 from contract_probability import _finite, realized_minute_volatility
 from kalshi_chart_data import event_ticker
+from contract_calibration import horizon_bucket, candidate, BIAS_ALGORITHM, SETTLEMENT_BASIS
 
 VERSION = 'kalshi-final-minute-average-v1'
 MIN_TRAINING = 100
@@ -36,7 +37,7 @@ def _history(state):
             + list((state.get('settlement_predictor') or {}).get('history') or []))
 
 
-def _observations(state, as_of, lead_seconds=None):
+def _observations(state, as_of, lead_seconds=None, horizon=None):
     earliest = {}
     for row in _history(state):
         prediction = row.get('settlement_prediction') or {}
@@ -58,6 +59,8 @@ def _observations(state, as_of, lead_seconds=None):
                 or any(_finite(x) is None for x in features)):
             continue
         if lead_seconds is not None and not lead_seconds <= expiry-opened <= lead_seconds+CHECKPOINT_TOLERANCE:
+            continue
+        if horizon is not None and horizon_bucket(expiry-opened) != horizon:
             continue
         # Earliest independent forecast overall; closest BEFORE each checkpoint.
         previous = earliest.get(ticker)
@@ -222,10 +225,25 @@ def predict(market, reference, state, now=None, council_score=0.0):
     pressure = min(1., max(-1., _finite(book.get('weighted_depth_imbalance'), 0.)))
     score = min(1., max(-1., _finite(council_score, 0.)))
     features = [1., market_probability-base, score*.1, pressure*.1]
-    rows = _observations(state, now)
+    bucket = horizon_bucket(expiry-now)
+    rows = _observations(state, now, horizon=bucket)
     validation = correction_validation(rows)
     coefficients = _coefficients(rows) if validation['active'] else np.zeros(4)
     probability = _corrected(base, features, coefficients)
+    bundle = state.get('settlement_execution_calibration') or {}
+    model = ((bundle.get('by_horizon') or {}).get(bucket) or {}).get('bias_challenger') or {}
+    fitted = _finite(bundle.get('fitted_as_of'))
+    parameters = [_finite(model.get(key)) for key in ('intercept', 'market_slope', 'residual_weight')]
+    candidate_available = bool(bundle.get('basis') == SETTLEMENT_BASIS and bundle.get('source') == VERSION
+        and model.get('algorithm') == BIAS_ALGORITHM and fitted is not None and fitted <= now
+        and (_finite(model.get('training_markets'), 0) >= MIN_TRAINING)
+        and all(value is not None for value in parameters)
+        and quote_time is not None and 0 <= now-quote_time <= 30)
+    learning_candidate = dict(version=BIAS_ALGORITHM, available=candidate_available,
+        horizon=bucket, captured_at=now, trained_as_of=fitted, affects_execution=False,
+        probability_yes=candidate(base, market_probability, parameters[1:], bias=parameters[0])
+            if candidate_available else None,
+        baseline_probability_yes=probability)
     return dict(available=True, version=VERSION, ticker=ticker, captured_at=now,
                 expires_at=expiry, target=target, reference_timestamp=timestamp,
                 probability_yes=probability, probability_no=1-probability,
@@ -236,6 +254,8 @@ def predict(market, reference, state, now=None, council_score=0.0):
                 comparison='rounded final-minute average >= target',
                 features=features, coefficients=coefficients.tolist(),
                 training_samples=len(rows), correction_validation=validation,
+                correction_horizon=bucket, correction_version='horizon-residual-v2',
+                learning_candidate=learning_candidate,
                 quotes_observed_at=quote_time, affects_execution=False,
                 status='Shadow estimate; prospective official settlement validation required')
 
@@ -291,4 +311,35 @@ def scorecard(state, as_of=None):
                              unavailable_observations=unavailable, unavailable_reasons=reasons,
                              pending_observations=len((state.get('settlement_predictor') or {}).get('pending') or []),
                              scope='Retained observed markets; worker outages may leave unobserved windows')
+    score['bias_learning'] = bias_scorecard(state, as_of)
     return score
+
+
+def bias_scorecard(state, as_of=None):
+    """Grade frozen candidate outputs, never reconstruct old predictions."""
+    from improvement_evidence import paired
+    as_of = time.time() if as_of is None else float(as_of)
+    history = []
+    for row in _history(state):
+        p = row.get('settlement_prediction') or {}
+        c = p.get('learning_candidate') or {}
+        opened, expiry = _finite(row.get('opened_at')), _finite(row.get('expires_at'))
+        trained = _finite(c.get('trained_as_of'))
+        quotes, reference = _finite(p.get('quotes_observed_at')), _finite(p.get('reference_timestamp'))
+        values = [_finite(c.get(key)) for key in ('probability_yes', 'baseline_probability_yes')]
+        if (not c.get('available') or c.get('version') != BIAS_ALGORITHM
+                or opened is None or expiry is None or trained is None or trained > opened
+                or c.get('captured_at') != opened or p.get('captured_at') != opened
+                or p.get('expires_at') != expiry or c.get('horizon') != horizon_bucket(expiry-opened)
+                or quotes is None or not 0 <= opened-quotes <= 30
+                or reference is None or not 0 <= opened-reference <= 30
+                or any(v is None or not 0 <= v <= 1 for v in values)):
+            continue
+        history.append(dict(row, comparison_probabilities=dict(production=values[0],
+            independent=values[1], market=p.get('market_probability_yes'))))
+    observed = dict(settlement_predictor=dict(history=history))
+    return dict(version=BIAS_ALGORITHM, affects_execution=False,
+        scope='New frozen candidate forecasts; one market per horizon; official observed outcomes only',
+        by_horizon={key: {name: paired(_observations(observed, as_of, horizon=key), name)
+                         for name in ('market', 'independent')}
+                    for key in ('10m+', '5m+', '1m+', 'final1m')})

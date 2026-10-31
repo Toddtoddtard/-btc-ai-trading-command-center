@@ -46,6 +46,27 @@ def render_settlement_evidence(score, latest, evidence=None):
                        f"{paper['wins']} wins / {paper['losses']} losses • net ${paper['net_pnl']:.2f}. "
                        'Recorded fees are included. No closed trades means profitability is unverified.')
             st.caption(evidence['interval_note'])
+    learning = score.get('bias_learning') or {}
+    if learning:
+        with st.expander('Learning algorithm — new official results'):
+            st.caption('The candidate learns separately by time remaining and can correct a persistent YES/NO bias. '
+                       'These are forecasts frozen before settlement, including WAIT, rather than paper trades. '
+                       'Old candidate predictions are never reconstructed.')
+            labels = {'10m+': '10–15 minutes left', '5m+': '5–10 minutes left',
+                      '1m+': '1–5 minutes left', 'final1m': 'Final minute'}
+            rows = []
+            for horizon, comparisons in learning.get('by_horizon', {}).items():
+                metrics = comparisons['market']
+                rows.append({'Time remaining': labels.get(horizon, horizon),
+                    'New settled markets': metrics['samples'],
+                    'Candidate accuracy': _pct(metrics['accuracy']),
+                    'Kalshi accuracy': _pct(metrics['baseline_accuracy']),
+                    'Probability-score gain': metrics['brier_gain'],
+                    'Status': metrics['status']})
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.caption('Positive score gain means lower probability error. Promotion requires at least 100 new '
+                       'settled markets in that timing group, paired improvement over Kalshi, and the existing '
+                       'chronological accuracy and calibration checks. Paper entry safeguards still apply.')
     with st.expander('Settlement accuracy by timing and data coverage'):
         st.caption('Each timing row counts each contract once. Captures must be before the checkpoint, '
                    'within 150 seconds of it; later calls cannot improve an earlier score. '
