@@ -17,6 +17,7 @@ from council_accounting import reconcile_specialists
 from specialist_knowledge_v5 import knowledge_council_vote
 import learner as legacy
 import learner_v3 as v3
+from live_feeds import parallel_calls
 from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration, fit_settlement
@@ -573,10 +574,11 @@ def current_shadow_call(state, df, market_info):
     if time.time() >= expires_at:
         return None
     price = float(df.close.iloc[-1])
+    inputs = parallel_calls({'trades': legacy.aggregate_trades, 'futures': legacy.futures_snapshot})
     specialists = legacy.run_specialists_core(
         df,
-        legacy.aggregate_trades(),
-        legacy.futures_snapshot(),
+        inputs['trades'],
+        inputs['futures'],
         legacy.kalshi_context(market_info, price),
     )
     forecast = forecast_path_core(
@@ -844,9 +846,9 @@ def main():
     state['status']['prediction_policy_version'] = FORECAST_TRIAL_VERSION
     previous_updated_at = state.get("updated_at")
     before_samples = int(state.get("forecast", {}).get("samples", 0))
-    df = legacy.history()
-    market_info = legacy.market()
-    timeframe_context = legacy.market_timeframe_context()
+    feeds = parallel_calls({'history': legacy.history, 'market': legacy.market,
+                            'context': legacy.market_timeframe_context})
+    df, market_info, timeframe_context = feeds['history'], feeds['market'], feeds['context']
     horizon_root = ensure_horizon_state(state)
     horizon_root["latest_context"] = timeframe_context
     # Recover every closed minute independently of whether any trade was called.

@@ -44,6 +44,11 @@ The active scheduled entrypoint is `learner_v31.py`, supported by `learner.py`
 and `learner_v3.py`. `.github/workflows/learn.yml` runs learning, enrichment and
 `background_paper.py`, then publishes the persistent ledger and model state to
 `learning-state`. The dashboard reads that state through `shared_learning.py`.
+The learner reuses `live_feeds.parallel_calls` for independent startup reads,
+trade/futures specialist inputs and the futures primary/fallback requests.
+All requests in a batch finish before it returns or raises. Partial futures
+failures retain the existing fallback and health semantics; same-contract
+quote/reference refresh and expiry checks still run after slow specialist reads.
 After its first validated publication, `worker_session.py` repeats the same
 pipeline for a bounded 55-minute session, starting cycles every 150 seconds
 and publishing each validated checkpoint. Publication uses a separate Git
