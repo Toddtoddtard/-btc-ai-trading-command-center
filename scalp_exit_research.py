@@ -34,19 +34,24 @@ def observe(state, call, market, now=None):
     lab = root(state)
     ticker = call.get('ticker') or call.get('kalshi_ticker')
     if not ticker or market.get('ticker') != ticker:
+        lab['last_observation_status'] = 'CONTRACT_MISMATCH'
         return
     at = finite(market.get('quotes_observed_at'))
     book = market.get('execution_book') or {}
-    if at is None or not 0 <= now-at <= 30 or not book.get('available'):
+    if not book.get('available'):
+        lab['last_observation_status'] = 'DEPTH_UNAVAILABLE'
+        return
+    if at is None or not 0 <= now-at <= 30:
+        lab['last_observation_status'] = 'STALE_DEPTH'
         return
     episode = next((r for r in lab['pending'] if r['ticker'] == ticker), None)
     if episode is None:
         action = str(call.get('master_action') or call.get('action') or '')
         expiry = finite(call.get('expires_at'))
-        if (not action.startswith('SCALP ') or expiry is None or now >= expiry
+        if (action not in ('SCALP UP','SCALP DOWN','LOCK UP','LOCK DOWN') or expiry is None or now >= expiry
                 or any(r['ticker'] == ticker for r in lab['history'])):
             return
-        side = 'YES' if action == 'SCALP UP' else 'NO' if action == 'SCALP DOWN' else None
+        side = 'YES' if action.endswith(' UP') else 'NO' if action.endswith(' DOWN') else None
         if side is None:
             return
         bid, ask = quotes(market, side)
@@ -65,9 +70,10 @@ def observe(state, call, market, now=None):
                        entry=ask,entry_fee=kalshi_taker_fee(1,ask),target=target,
                        stop=max(.01,ask-SCALP_STOP_LOSS_POINTS), probability=p,
                        baseline_probability=.5, code_revision=call.get('code_revision'),
-                       training_markets=len(prior),path_result=None, observations=0,
+                       training_markets=len(prior),source_action=action,path_result=None, observations=0,
                        last_observed_at=at)
         lab['pending'].append(episode)
+        lab['last_observation_status'] = 'CAPTURED'
     if now >= episode['expires_at'] or episode['path_result'] is not None:
         return
     bid, _ = quotes(market, episode['side'])
@@ -76,6 +82,7 @@ def observe(state, call, market, now=None):
             or at < episode['last_observed_at']):
         return
     episode.update(last_observed_at=at, observations=episode['observations']+1)
+    lab['last_observation_status'] = 'OBSERVING'
     if bid >= episode['target'] or bid <= episode['stop']:
         episode.update(path_result='TARGET' if bid >= episode['target'] else 'STOP',
                        exit_bid=bid, exit_observed_at=at,
@@ -111,6 +118,7 @@ def scorecard(state):
     n = len(eligible)
     return dict(version=VERSION,paper_only=True,affects_execution=False,
                 eligible_official_markets=n, censored_markets=sum(r.get('censored',False) for r in lab['history']),
+                last_observation_status=lab.get('last_observation_status','NOT_OBSERVED'),
                 pending_markets=len(lab['pending']),target_hits=sum(r['path_result']=='TARGET' for r in eligible),
                 net_pnl=sum(r['net_pnl'] for r in eligible),
                 brier=sum((r['probability']-(r['path_result']=='TARGET'))**2 for r in eligible)/n if n else None,

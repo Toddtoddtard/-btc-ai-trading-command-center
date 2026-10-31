@@ -19,7 +19,7 @@ class PaperLiquidityTests(unittest.TestCase):
         def read(request, **kwargs):
             url = request.full_url
             requests.append(url)
-            if url.endswith('/orderbook'):
+            if url.split('?')[0].endswith('/orderbook'):
                 if 'api.elections.kalshi.com' in url:
                     raise OSError('primary depth unavailable')
                 return io.BytesIO(json.dumps(book).encode())
@@ -65,14 +65,14 @@ class PaperLiquidityTests(unittest.TestCase):
         market = fixtures.BackgroundPaperTests.market()
         book = {'orderbook_fp': {'yes_dollars': [['0.40', '3']], 'no_dollars': [['0.55', '2']]}}
         def read(request, **kwargs):
-            return io.BytesIO(json.dumps(book if request.full_url.endswith('/orderbook')
+            return io.BytesIO(json.dumps(book if request.full_url.split('?')[0].endswith('/orderbook')
                                          else {'market': market}).encode())
         with patch.object(bg, 'urlopen', side_effect=read):
             result = bg._market(market['ticker'])
         self.assertAlmostEqual(bg._quotes(result, 'YES')[1], .45)
         self.assertEqual(result['execution_book']['yes_ask_size'], 2)
         def failed_depth(request, **kwargs):
-            if request.full_url.endswith('/orderbook'):
+            if request.full_url.split('?')[0].endswith('/orderbook'):
                 raise OSError('depth unavailable')
             return read(request, **kwargs)
         with patch.object(bg, 'urlopen', side_effect=failed_depth):

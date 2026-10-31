@@ -101,7 +101,8 @@ def terminal_above_probability(
     market = _finite(market_probability)
     health = _clip(_finite(source_health, 0.0), 0.0, 1.0)
     if market is not None and 0.0 <= market <= 1.0:
-        market = _clip(market, 0.01, 0.99)
+        # Preserve the observed quote. Numerical log-odds clipping belongs
+        # inside _logit, never in the market baseline used by calibration.
         # Start at 20% independent weight and permit at most 35% when feeds are
         # healthy.  This keeps the model a challenger to, not a replacement for,
         # the executable market estimate until walk-forward evidence promotes it.
@@ -109,10 +110,12 @@ def terminal_above_probability(
         probability_up = market + independent_weight * (independent_probability - market)
         market_edge = probability_up - market
     else:
+        market = None
         probability_up = 0.5 + health * (independent_probability - 0.5)
         market_edge = None
 
     probability_up = _clip(probability_up, 0.01, 0.99)
+    market_edge = probability_up - market if market is not None else None
     return {
         "available": True,
         "probability_up": probability_up,

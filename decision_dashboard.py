@@ -67,5 +67,6 @@ def render_decision_assessment(decision, risk, state, futures, reference):
         st.write(dict(official_markets=research['eligible_official_markets'],
                       censored_markets=research['censored_markets'],
                       target_hits=research['target_hits'],net_pnl=round(research['net_pnl'],3)))
+        st.caption('Latest bid-path observation: '+research['last_observation_status'])
         st.caption(research['scope'])
         st.caption('Research cannot approve fills. New SCALP entries wait for a separately validated exit model; no threshold or settlement safeguard is relaxed.')

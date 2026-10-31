@@ -318,3 +318,26 @@ This is software/measurement work, not evidence of increased trading accuracy or
 profitability. Hosted regression, fresh worker revision and live build publication
 must be verified separately; authenticated dashboard access remains required for
 full visual inspection.
+
+## 2026-10-31 — prediction integrity and rejected model experiment (r107)
+
+User requested actual repair after poor predictive results. Reproduced exact
+market-baseline clipping (.001/.999 became .01/.99) and fixed it without adding
+execution authority. Invalid market inputs no longer become fallback values.
+Requested depth5 across public book readers rather than all levels; app and
+background four-second reads recover empty primary books through the existing
+backup. Live diagnosis saw missing depth, then a usable 259-byte depth5 response
+in2.576s; later network timeouts remained possible and remain fail-closed.
+Research now learns independent SCALP counterfactuals from LOCK as well as SCALP
+outlooks and exposes depth failures; this does not alter immutable locks.
+
+Added reproducible read-only settlement_benchmark.py, three fixed logistic
+candidate forms, causal prior-only fitting and common reserved100 contracts
+across horizons. Development-selected shape candidate FAILED reserved Brier at
+all three horizons. Not deployed, no strategy promoted, no predictive/profitability
+improvement claimed. Exact results/source hash and reproduction instructions are
+in docs/prediction-repair-2026-10-31.md and its JSON report.
+
+Verification:540 offline tests OK with one skipped; compileall and diff checks
+passed. Independent review ran18 targeted tests, no blockers. Hosted deployment
+and worker state are separate checks. Existing ledger and promotion gates remain.

@@ -38,3 +38,23 @@ class ContractProbabilityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class MarketBaselineIntegrityTests(unittest.TestCase):
+    def test_unvalidated_fallback_preserves_exact_market_quote_including_tails(self):
+        from contract_calibration import apply
+        for market in (0., .001, .005, .995, .999, 1.):
+            with self.subTest(market=market):
+                view=terminal_above_probability(83000,83000,120,.0005,market_probability=market)
+                result=apply(view,{})
+                self.assertEqual(result['market_probability_up'],market)
+                self.assertEqual(result['probability_up'],market)
+                self.assertEqual(result['edge_vs_market'],0)
+                self.assertFalse(result['calibrator_active'])
+
+    def test_invalid_market_probability_cannot_become_the_fallback(self):
+        from contract_calibration import apply
+        for market in (-.1,1.1,float('inf')):
+            view=terminal_above_probability(83000,83000,120,.0005,market_probability=market)
+            result=apply(view,{})
+            self.assertIsNone(result['market_probability_up'])
+            self.assertTrue(0<=result['probability_up']<=1)

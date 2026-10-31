@@ -315,3 +315,21 @@ Signal strength is explicitly heuristic. Old labels, ledgers, official outcomes,
 archives and rare-specialist learning remain intact.
 
 Current-schema decisions cannot open positions through the legacy SQLite adapter; its simulations remain available, but the persistent background ledger is the only current execution path.
+
+
+## Baseline integrity and bounded depth (r107)
+
+Terminal calibration receives the exact observed market probability, including
+sub-cent tail quotes; numerical logit clipping never changes the baseline.
+App/learner/background order-book requests explicitly ask for depth5, matching
+the feature extractor. App and background use four-second per-read budgets and
+recover from empty books through the existing backup; learner retains its
+existing timeout. This is bounded REST sampling, not continuous tick coverage.
+SCALP research can observe LOCK or SCALP outlooks independently of paper approval;
+source action is retained, and missing depth is exposed instead of silent zeros.
+
+`settlement_benchmark.py` provides a reproducible read-only chronological test
+with a common reserved-contract set across horizons. It never supplies execution
+coefficients, publishes no live win-rate claim and has no promotion authority.
+The October31 selected candidate failed its reserved Brier comparison and was
+not deployed. See `docs/prediction-repair-2026-10-31.md` for exact scope/results.

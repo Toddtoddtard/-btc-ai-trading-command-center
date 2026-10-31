@@ -271,7 +271,7 @@ def exact_market(ticker):
 def orderbook(ticker):
     """Fetch public, read-only depth for executable quote diagnostics."""
     try:
-        return orderbook_features(kalshi_get("/markets/" + ticker + "/orderbook"))
+        return orderbook_features(kalshi_get("/markets/" + ticker + "/orderbook", {"depth": 5}))
     except Exception:
         return orderbook_features({})
 

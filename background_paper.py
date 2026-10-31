@@ -208,7 +208,7 @@ def _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, m
     paper["last_message"] = message
 
 
-def _market(ticker, timeout=2.5):
+def _market(ticker, timeout=4.0):
     last_error = None
     fallback_market = None
     for base in (
@@ -224,8 +224,8 @@ def _market(ticker, timeout=2.5):
             if str(market.get('status') or '').lower() in {'open', 'active'}:
                 observed = time.time()
                 try:
-                    req = Request(url + '/orderbook', headers={"User-Agent": "BTC-AI-Background-Paper/1.0", "Cache-Control": "no-cache"})
-                    with urlopen(req, timeout=timeout) as response:
+                    req = Request(url + '/orderbook?depth=5', headers={"User-Agent": "BTC-AI-Background-Paper/1.0", "Cache-Control": "no-cache"})
+                    with urlopen(req, timeout=max(timeout, 4.0)) as response:
                         book = orderbook_features(json.load(response))
                 except Exception:
                     book = orderbook_features({})

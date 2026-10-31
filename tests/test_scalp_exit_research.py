@@ -48,3 +48,16 @@ class ScalpExitResearchTests(unittest.TestCase):
         self.observe(s);self.observe(s,at=1010,action='SCALP DOWN')
         self.assertEqual(len(s['scalp_exit_research']['pending']),1)
         self.assertEqual(s['scalp_exit_research']['pending'][0]['side'],'YES')
+
+    def test_locked_outlook_can_still_teach_separate_scalp_research(self):
+        s={};self.observe(s,action='LOCK UP')
+        self.assertEqual(len(s['scalp_exit_research']['pending']),1)
+        self.assertEqual(s['scalp_exit_research']['pending'][0]['source_action'],'LOCK UP')
+        self.assertFalse(s['scalp_exit_research']['affects_execution'])
+
+    def test_missing_depth_is_explained_instead_of_silent_empty_research(self):
+        from scalp_exit_research import observe,scorecard
+        s={};observe(s,dict(ticker='T',master_action='SCALP UP',expires_at=1600),
+                     dict(ticker='T',quotes_observed_at=1000,execution_book={'available':False}),now=1000)
+        self.assertEqual(scorecard(s)['last_observation_status'],'DEPTH_UNAVAILABLE')
+        self.assertEqual(scorecard(s)['eligible_official_markets'],0)

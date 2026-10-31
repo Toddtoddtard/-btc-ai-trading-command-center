@@ -1057,8 +1057,10 @@ def fetch_kalshi_orderbook(ticker):
         return orderbook_features({})
     for base in KALSHI_BASES:
         try:
-            payload, _ = http_json(base + "/markets/" + ticker + "/orderbook", timeout=2.5)
-            return orderbook_features(payload)
+            payload, _ = http_json(base + "/markets/" + ticker + "/orderbook?depth=5", timeout=4.0)
+            book = orderbook_features(payload)
+            if book.get("available"):
+                return book
         except Exception:
             continue
     return orderbook_features({})
