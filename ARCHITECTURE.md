@@ -143,6 +143,15 @@ then to the market midpoint with an explicit no-validated-edge execution veto.
 No safeguard is bypassed to create paper fills. The base model's separately
 fitted shadow residual is never recursively reused as execution training data.
 
+`fit_settlement` also evaluates a bounded three-parameter residual around market
+odds with a learned intercept. This challenger must pass the unchanged causal
+gates, improve the incumbent overall without recent probability-error harm,
+and earn paired improvement against Kalshi over at least 100 newly frozen
+official markets in the same time group before selection. Candidate predictions
+and training cutoffs are saved before outcomes; `bias_scorecard` never backfills
+them. The shared selector applies the intercept for both dashboard and worker.
+See `docs/SETTLEMENT_LEARNING_V2.md` for diagnostic results and limitations.
+
 The worker freezes the first published directional decision independently of
 the Binance path and council snapshot. Official results score this new field;
 legacy path outcomes and paper trade history remain unchanged. Dashboard rolling
@@ -166,7 +175,7 @@ workflow or stale deployment caption cannot be mistaken for verified new results
 The settlement headline now uses the same production probability as execution;
 the independent model and its archival score remain available as challengers.
 
-Each full worker pass freezes a settlement observation independently of research-phase deduplication and trade approval, preserving WAIT calls, specialist votes, timestamps, target/rule, and unavailable reasons. Only official binary results read after expiry resolve these observations; unresolved labels are retained. The last 3,000 settled captures supplement the existing research history. Earliest-per-contract observations train the bounded ridge residual, but it remains disabled until at least 100 chronological validation markets follow at least 100 training markets and beat both the uncorrected model and Kalshi midpoint by 0.0005 Brier overall, with nonnegative recent paired improvement. Each validation fit uses only outcomes observed before its forecast. No retrospective refitting changes a stored prediction.
+Each full worker pass freezes a settlement observation independently of research-phase deduplication and trade approval, preserving WAIT calls, specialist votes, timestamps, target/rule, and unavailable reasons. Only official binary results read after expiry resolve these observations; unresolved labels are retained. The last 3,000 settled captures supplement the existing research history. Earliest-per-contract observations within the same remaining-time group train the bounded ridge residual, but it remains disabled until at least 100 chronological validation markets follow at least 100 training markets and beat both the uncorrected model and Kalshi midpoint by 0.0005 Brier overall, with nonnegative recent paired improvement. Each validation fit uses only outcomes observed before its forecast. No retrospective refitting changes a stored prediction.
 
 The settlement evidence panel shows independent accuracy, Brier, log loss, calibration and the paired market/coin-flip benchmarks. Its 10-, 5- and 1-minute checkpoints select the closest capture before each checkpoint within 150 seconds; they never borrow later forecasts. Sampling is limited by worker cadence, not the one-second screen refresh. Coverage describes retained observed markets and unavailable captures, not continuous uptime or unobserved outage windows. The displayed raw estimate does not itself approve execution; the independent execution qualification above is required. Legacy Binance snapshots are not backfilled as official reference features.
 

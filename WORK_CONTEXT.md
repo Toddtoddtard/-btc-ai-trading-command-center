@@ -2,6 +2,23 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## Settlement algorithm learning (2026-10-30 Eastern)
+
+- Independent final-average residuals now train on the same remaining-time group
+  as the prediction instead of reusing earliest-market corrections near expiry.
+- Added a fixed, bounded three-parameter market residual with a learned YES/NO
+  bias. Existing chronological gates remain, plus a new frozen prospective
+  official cohort must show paired improvement before this candidate replaces
+  an incumbent. All failed candidates remain withheld from paper execution.
+- Saved replay modestly improves early/middle probability error versus the old
+  fit but does not demonstrate a reliable edge over Kalshi. No horizon qualifies
+  on that snapshot; new candidate official samples begin at zero. A larger
+  individual-specialist model was rejected for worse probability error.
+- `docs/SETTLEMENT_LEARNING_V2.md` records algorithm, data fingerprint, diagnostic
+  results and limits. A separate dashboard learning panel reports new frozen
+  official results; no old candidate probabilities, balances or trades are
+  backfilled. Deployment and live accuracy require separate verification.
+
 ## Worker input latency (2026-10-30 Eastern)
 
 - Reused the dashboard's bounded `parallel_calls` helper in the worker:
