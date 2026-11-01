@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 from kalshi_microstructure import orderbook_features
 from trade_assessment import assess_paper_entry, SCHEMA
 import scalp_exit_research
+import cutoff_research
 
 from kalshi_paper_engine import (
     LOCK_MIN_CONFIDENCE,
@@ -963,6 +964,9 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     # The live book was fetched after cycle start; measure its age at consumption.
     scalp_exit_research.observe(learning_state, pending, market,
                                 now=time.time() if live_clock and 'execution_book' in market else now)
+    cutoff_research.observe(learning_state, pending, market, cash=paper.get('cash'),
+                            lock_gate=lock_validation_policy(_post_fix_metrics(paper)),
+                            now=time.time() if live_clock and 'execution_book' in market else now)
 
     if position:
         bid, _ = _quotes(market, position["side"])
@@ -1325,6 +1329,9 @@ def main():
             paper["worker_ok"] = False
             paper["last_cycle_at"] = _now_iso()
             paper["last_message"] = "Background paper cycle failed safely: " + str(exc)
+        # Resolve research labels only after the current execution cycle. Old
+        # ticker/network timeouts must not age a fresh book before entry checks.
+        cutoff_research.resolve(state, _market)
         # Checkpoint every pass so a later transient failure cannot erase an
         # entry or settlement recorded by an earlier retry.
         save_checkpoint(STATE_INPUT, state)

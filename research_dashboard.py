@@ -110,6 +110,46 @@ def render_research_dashboard(learning_state):
         st.info("The research lab will appear after the upgraded learner publishes its first state.")
         return
 
+    from cutoff_research import scorecard as cutoff_scorecard
+    with st.expander('Would relaxed LOCK cutoffs help?'):
+        trial = cutoff_scorecard(learning_state)
+        st.caption(trial['scope'])
+        st.caption(f"Status: {trial['status']} • {trial['markets']} distinct official markets • "
+                   f"{trial['pending_markets']} pending • {trial['additional_entries']} additional candidate entries. "
+                   f"Capture: {trial['last_observation_status']}.")
+        if trial['dropped_pending_all_revisions']:
+            st.caption(f"Unresolved observations dropped at the retention limit, all revisions: "
+                       f"{trial['dropped_pending_all_revisions']}. These are not scored as wins or losses.")
+        st.caption('Bounded PR #63 comparison: 1¢ after-fee margin and relaxed static cutoffs; '
+                   'current reliability approval, calibrated evidence, target checks and quarantine remain. '
+                   'SCALP bid-path research is separate. No paper entry rules are changed.')
+        rows = []
+        for policy, label in [('baseline', 'Current LOCK rules'), ('candidate', 'Relaxed cutoff scenario')]:
+            result = trial[policy]
+            rows.append({'Policy': label, 'Hypothetical entries': result['entries'],
+                         'Settlement scenario P/L ($)': result['net_pnl'],
+                         'Mean per entry ($)': result['expectancy'],
+                         'Scenario drawdown ($)': result['max_scenario_drawdown'],
+                         'Brier': result['brier']})
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        if trial['paired_pnl_low'] is not None:
+            st.caption(f"Mean paired scenario gain per observed market: ${trial['paired_pnl_gain']:+.3f}; "
+                       f"approximate 95% interval ${trial['paired_pnl_low']:+.3f} to ${trial['paired_pnl_high']:+.3f}.")
+        st.caption('Initial review requires 100 distinct settled markets and 100 additional candidate entries '
+                   'from the same producing revision. This is a review checkpoint, not proof of improvement '
+                   'or permission to trade. Worker revision: ' + str(trial['code_revision'] or 'awaiting capture'))
+        blockers = [{'Policy': policy, 'Blocker': blocker, 'Markets': count}
+                    for policy in ('baseline', 'candidate')
+                    for blocker, count in trial[policy]['blockers'].items()]
+        if blockers:
+            st.dataframe(pd.DataFrame(blockers), use_container_width=True, hide_index=True)
+        calibration_rows = [dict(Policy=policy, **bucket)
+                            for policy in ('baseline', 'candidate')
+                            for bucket in trial[policy]['calibration_bins']]
+        if calibration_rows:
+            st.caption('Frozen YES probability versus official YES frequency on each policy’s accepted cohort.')
+            st.dataframe(pd.DataFrame(calibration_rows), use_container_width=True, hide_index=True)
+
     calibration = lab.get("calibration", {}) or {}
     with st.expander("Signal learning — which setups work?"):
         st.caption("Named signals are checked against official Kalshi outcomes, including WAIT observations. Accuracy measures the contract outcome, not just price movement. Results are experimental and do not change trade permissions.")
