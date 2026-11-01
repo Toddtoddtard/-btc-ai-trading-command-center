@@ -41,6 +41,7 @@ from kalshi_paper_engine import (
     SCALP_STOP_LOSS_POINTS,
     UNPROVEN_POSITION_CAP,
     kalshi_taker_fee,
+    PAPER_FEE_MODEL,
     lock_target_pnl,
     scalp_execution_policy,
     projected_net_pnl,
@@ -403,7 +404,7 @@ def shared_paper_summary(paper):
             valuation.get("amount"),
             contracts * entry + _f(valuation.get("entry_fee"), 0.0),
         )
-        unrealized += contracts * mark - kalshi_taker_fee(contracts, mark) - amount
+        unrealized += contracts * mark - kalshi_taker_fee(contracts, mark, action="sell") - amount
         if valuation is open_position:
             open_position["amount_down"] = amount
 
@@ -488,7 +489,7 @@ def shared_paper_history(paper, limit=100):
         elif is_open:
             pnl = (
                 contracts * current_or_exit
-                - kalshi_taker_fee(contracts, current_or_exit)
+                - kalshi_taker_fee(contracts, current_or_exit, action="sell")
                 - amount
             )
             result = "OPEN"
@@ -595,7 +596,7 @@ def latest_shared_call_entry(paper):
 
 def _close(paper, position, exit_price, reason, now, charge_fee=True):
     contracts = int(position["contracts"])
-    exit_fee = kalshi_taker_fee(contracts, exit_price) if charge_fee else 0.0
+    exit_fee = kalshi_taker_fee(contracts, exit_price, action="sell") if charge_fee else 0.0
     proceeds = contracts * exit_price - exit_fee
     pnl = proceeds - position["amount"]
     paper["cash"] = _f(paper.get("cash"), SEED_CASH) + proceeds
@@ -606,6 +607,7 @@ def _close(paper, position, exit_price, reason, now, charge_fee=True):
         settled_at=now,
         exit_price=exit_price,
         exit_fee=exit_fee,
+        exit_fee_model=PAPER_FEE_MODEL if charge_fee else 'official-settlement-no-fee',
         pnl=pnl,
         result="WIN" if pnl > 0 else "LOSS",
         exit_reason=reason,
@@ -1017,7 +1019,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 expected_proceeds = expected_lock_net_pnl(
                     contracts, 0.0, pending, position["side"]
                 )
-                liquidation = contracts * bid - kalshi_taker_fee(contracts, bid)
+                liquidation = contracts * bid - kalshi_taker_fee(contracts, bid, action="sell")
                 lock_gate = lock_validation_policy(_post_fix_metrics(paper))
                 paper["lock_gate"] = lock_gate
                 if (
@@ -1056,7 +1058,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 )
                 # A gross price increase can still lose money after two rounded
                 # fees. A profit-taking exit must actually realize positive P/L.
-                net_profit = (contracts * bid - kalshi_taker_fee(contracts, bid)
+                net_profit = (contracts * bid - kalshi_taker_fee(contracts, bid, action="sell")
                               - contracts * entry_price - _f(position.get("entry_fee"), 0.0))
                 take_profit = (gain >= entry_price * SCALP_MIN_GROSS_RETURN
                                and net_profit > 0 and not sees_more_upside)
@@ -1277,6 +1279,7 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     amount = contracts * ask + fee
     expires = _f(pending.get("expires_at"))
     position = {"ticker": ticker, "side": side, "direction": "UP" if side == "YES" else "DOWN", "strategy": strategy, "status": "OPEN", "opened_at": now, "expires_at": expires, "entry_price": ask, "spot_entry_price": _f(pending.get("start_price")), "contracts": contracts, "entry_fee": fee, "amount": amount, "last_mark": bid}
+    position['entry_fee_model'] = PAPER_FEE_MODEL
     position['fill_basis'] = 'OBSERVED_TOP_OF_BOOK' if fill_size is not None else 'LEGACY_QUOTE_ONLY'
     position['quotes_observed_at'] = market.get('quotes_observed_at')
     for field in ('code_revision', 'forecast_trial_version', 'contract_probability_source'):
@@ -1342,3 +1345,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -69,7 +69,7 @@ def _break_even_price(contracts, total_cost):
     # proceeds, after the estimated taker fee, recover the full entry cost.
     for cents in range(1, 101):
         price = cents / 100.0
-        proceeds = contracts * price - kalshi_taker_fee(contracts, price)
+        proceeds = contracts * price - kalshi_taker_fee(contracts, price, action="sell")
         if proceeds + 1e-12 >= total_cost:
             return price
     return 1.0
@@ -118,7 +118,7 @@ def build_pro_trade_ticket(
         projected_exit = min(1.0, max(0.0, projected_exit))
 
     projected_exit_fee = (
-        kalshi_taker_fee(contracts, projected_exit)
+        kalshi_taker_fee(contracts, projected_exit, action="sell")
         if contracts and projected_exit is not None
         else 0.0
     )
@@ -230,3 +230,4 @@ def build_pro_trade_ticket(
             else "No order while the Master AI waits"
         ),
     }
+

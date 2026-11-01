@@ -2,6 +2,7 @@ import json
 import math
 import sqlite3
 import time
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -37,6 +38,8 @@ def fetch_settled_result(ticker):
 
 
 GENERAL_TAKER_FEE_RATE = 0.07
+PAPER_BALANCE_PRECISION = '0.01'  # Non-direct member paper-account assumption.
+PAPER_FEE_MODEL = 'kalshi-cash-alignment-v1'
 MAX_ENTRY_PRICE = SCALP_MAX_ENTRY_PRICE
 # Paper-trading exploration gate: still reject extreme lottery-style odds,
 # but allow more borderline bot calls to collect evidence. The 75% max entry
@@ -92,12 +95,52 @@ def _f(value, default=None):
         return default
 
 
-def kalshi_taker_fee(contracts, price):
-    """General Kalshi taker-fee model: ceil(0.07*C*P*(1-P)) to cents."""
+def kalshi_fill_fees(contracts, price, *, action='buy',
+                     balance_precision=PAPER_BALANCE_PRECISION,
+                     rounding_accumulator=0, fee_rate=GENERAL_TAKER_FEE_RATE):
+    """Return Decimal cash/fee components for one fill of one paper order.
+
+    https://docs.kalshi.com/getting_started/fee_rounding
+    Carry the returned accumulator only to subsequent fills of the SAME order.
+    Paper execution currently models each full entry/exit as one taker fill;
+    fee_rate=0 also supports a maker fill in a split-order calculation.
+    """
+    try:
+        c, p, precision, accumulator, rate = map(
+            lambda value: Decimal(str(value)),
+            (contracts, price, balance_precision, rounding_accumulator, fee_rate))
+    except (InvalidOperation, ValueError):
+        raise ValueError('Invalid fee inputs') from None
+    if (not all(value.is_finite() for value in (c, p, precision, accumulator, rate))
+            or c < 0 or not 0 <= p <= 1 or accumulator < 0 or rate < 0
+            or precision not in (Decimal('.01'), Decimal('.0001'))
+            or action not in ('buy', 'sell')):
+        raise ValueError('Invalid fee inputs')
+    # quantize follows the exponent, so '.0100' must use the same cent grid
+    # as '.01' after numeric precision validation.
+    precision = precision.normalize()
+    revenue = c * p * (-1 if action == 'buy' else 1)
+    trade_fee = (rate * c * p * (1-p)).quantize(Decimal('.000001'), rounding=ROUND_CEILING)
+    aligned_change = (revenue-trade_fee).quantize(precision, rounding=ROUND_FLOOR)
+    rounding_fee = revenue - trade_fee - aligned_change
+    accumulator += rounding_fee
+    gross_fee = trade_fee + rounding_fee
+    rebate = min(accumulator // precision, gross_fee // precision) * precision
+    return dict(trade_fee=trade_fee, rounding_fee=rounding_fee, rebate=rebate,
+                net_fee=gross_fee-rebate, cash_change=aligned_change+rebate,
+                rounding_accumulator=accumulator-rebate)
+
+
+def kalshi_taker_fee(contracts, price, *, action='buy',
+                     balance_precision=PAPER_BALANCE_PRECISION):
+    """One full taker fill; align signed cash movement at paper precision."""
     c = max(0, int(contracts or 0))
     p = min(1.0, max(0.0, _f(price, 0.0)))
-    raw = GENERAL_TAKER_FEE_RATE * c * p * (1.0 - p)
-    return math.ceil(raw * 100.0 - 1e-12) / 100.0
+    # Public quote dollars have four decimal places. Remove float complement
+    # noise (e.g. 1 - .045) before the exact money calculation.
+    p = Decimal(str(p)).quantize(Decimal('.0001'))
+    return float(kalshi_fill_fees(c, p, action=action,
+                 balance_precision=balance_precision)['net_fee'])
 
 
 def lock_target_pnl(contracts, entry_price):
@@ -107,7 +150,7 @@ def lock_target_pnl(contracts, entry_price):
     entry_cost = entry * c + kalshi_taker_fee(c, entry)
     exit_proceeds = (
         LOCK_TAKE_PROFIT_PRICE * c
-        - kalshi_taker_fee(c, LOCK_TAKE_PROFIT_PRICE)
+        - kalshi_taker_fee(c, LOCK_TAKE_PROFIT_PRICE, action="sell")
     )
     return exit_proceeds - entry_cost
 
@@ -165,6 +208,9 @@ def _connect(db_path, starting_cash=500.0):
         conn.execute(
             "ALTER TABLE kalshi_paper_positions ADD COLUMN settled_at REAL"
         )
+    for column in ('entry_fee_model', 'exit_fee_model'):
+        if column not in columns:
+            conn.execute(f'ALTER TABLE kalshi_paper_positions ADD COLUMN {column} TEXT')
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS kalshi_paper_rearm (
@@ -432,7 +478,7 @@ def scalp_profitability_gate(db_path, starting_cash=500.0):
 def projected_net_pnl(contracts, entry, projected_exit):
     return (contracts * (projected_exit - entry)
             - kalshi_taker_fee(contracts, entry)
-            - kalshi_taker_fee(contracts, projected_exit))
+            - kalshi_taker_fee(contracts, projected_exit, action="sell"))
 
 
 def executable_entry_quote(bid, ask):
@@ -627,8 +673,8 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
             """
             INSERT INTO kalshi_paper_positions(
                 ticker,side,strategy,status,opened_at,expires_at,target_price,
-                spot_entry_price,entry_price,contracts,entry_fee,last_mark
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                spot_entry_price,entry_price,contracts,entry_fee,last_mark,entry_fee_model
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 ticker,
@@ -643,6 +689,7 @@ def open_position(db_path, starting_cash, decision, risk, spot_price):
                 contracts,
                 fee,
                 _quote(decision, side, ask=False),
+                PAPER_FEE_MODEL,
             ),
         )
         conn.commit()
@@ -677,7 +724,7 @@ def _close(conn, row, exit_price, reason, charge_exit_fee=True):
         return {"event": False, "message": "Paper position already closed"}
     exit_price = min(1.0, max(0.0, float(exit_price)))
     contracts = int(row["contracts"])
-    exit_fee = kalshi_taker_fee(contracts, exit_price) if charge_exit_fee else 0.0
+    exit_fee = kalshi_taker_fee(contracts, exit_price, action="sell") if charge_exit_fee else 0.0
     proceeds = exit_price * contracts - exit_fee
     basis = float(row["entry_price"]) * contracts + float(row["entry_fee"])
     pnl = proceeds - basis
@@ -694,7 +741,7 @@ def _close(conn, row, exit_price, reason, charge_exit_fee=True):
         """
         UPDATE kalshi_paper_positions
         SET status='CLOSED',closed_at=?,settled_at=?,exit_price=?,exit_fee=?,
-            pnl=?,exit_reason=?,last_mark=?
+            pnl=?,exit_reason=?,last_mark=?,exit_fee_model=?
         WHERE id=?
         """,
         (
@@ -705,6 +752,7 @@ def _close(conn, row, exit_price, reason, charge_exit_fee=True):
             pnl,
             reason,
             exit_price,
+            PAPER_FEE_MODEL if charge_exit_fee else 'official-settlement-no-fee',
             int(row["id"]),
         ),
     )
@@ -1120,7 +1168,7 @@ def paper_summary(db_path, starting_cash=500.0):
         for position in valuation_rows:
             mark = _f(position["last_mark"], float(position["entry_price"]))
             contracts = int(position["contracts"])
-            unrealized += mark * contracts - kalshi_taker_fee(contracts, mark) - (
+            unrealized += mark * contracts - kalshi_taker_fee(contracts, mark, action="sell") - (
                 float(position["entry_price"]) * contracts
                 + float(position["entry_fee"])
             )
@@ -1173,7 +1221,7 @@ def paper_history(db_path, starting_cash=500.0, limit=100):
             status = str(item["status"]).upper()
             if status == "OPEN":
                 mark = _f(item.get("last_mark"), entry)
-                pnl = mark * contracts - kalshi_taker_fee(contracts, mark) - amount
+                pnl = mark * contracts - kalshi_taker_fee(contracts, mark, action="sell") - amount
                 result = "OPEN"
                 current_or_exit = mark
             elif status == "PENDING_SETTLEMENT":
@@ -1234,3 +1282,4 @@ def paper_chart_entries(db_path, ticker, starting_cash=500.0, limit=11):
         ]
     finally:
         conn.close()
+
