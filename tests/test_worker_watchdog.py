@@ -2,10 +2,28 @@ import unittest
 import base64
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 from worker_watchdog import recovery_needed, state_age
 
 class WatchdogTests(unittest.TestCase):
+    def test_shared_state_queue_cannot_replace_pending_model_publication(self):
+        workflows = Path(__file__).resolve().parents[1] / '.github' / 'workflows'
+        for name in ('learn.yml', 'train-horizon-models.yml'):
+            source = (workflows / name).read_text()
+            block = source.split('group: btc-ai-learning-state\n', 1)[1].split('\n\n', 1)[0]
+            with self.subTest(workflow=name):
+                self.assertIn('queue: max', block)
+                self.assertIn('cancel-in-progress: false', block)
+
+    def test_periodic_recovery_checks_before_dispatch_instead_of_queueing_learners(self):
+        workflows = Path(__file__).resolve().parents[1] / '.github' / 'workflows'
+        learner = (workflows / 'learn.yml').read_text().split('\npermissions:', 1)[0]
+        watchdog = (workflows / 'health-watchdog.yml').read_text()
+        self.assertNotIn('\n  schedule:', learner)
+        self.assertIn("cron: '4-59/5 * * * *'", watchdog)
+        self.assertIn('run: python worker_watchdog.py', watchdog)
+
     def test_fresh_state_never_dispatches(self):
         self.assertFalse(recovery_needed({'updated_at': '1970-01-01T00:15:00+00:00'}, [], 1000))
 

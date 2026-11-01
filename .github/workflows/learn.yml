@@ -67,9 +67,8 @@ on:
       - 'scripts/validate_learning_state.py'
       - 'tests/test_worker_session.py'
       - '.github/workflows/learn.yml'
-  schedule:
-    # Avoid the top-of-hour scheduling peak. GitHub cron is still best effort.
-    - cron: "2-57/5 * * * *"
+  # The five-minute health watchdog checks for an active/queued learner before
+  # dispatching. Direct cron starts would fill the shared publication queue.
 
 permissions:
   contents: write
@@ -77,6 +76,8 @@ permissions:
 
 concurrency:
   group: btc-ai-learning-state
+  # Preserve pending research publication when a successor learner arrives.
+  queue: max
   cancel-in-progress: false
 
 jobs:

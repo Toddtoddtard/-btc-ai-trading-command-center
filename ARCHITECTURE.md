@@ -60,7 +60,11 @@ its own run ID to dispatch one successor directly. The active-run check ignores
 only that finishing run and retains any other active or queued learner; workflow
 concurrency serializes ledger writers. Main push runs use an 12-minute session
 to exercise the first handoff promptly; subsequent workers use 55 minutes.
-Five-minute cron requests and the stale-state watchdog remain recovery backups.
+The five-minute stale-state watchdog remains the recovery backup and checks for
+active/queued learners before dispatching. The learner has no unconditional cron
+starts. Both the learner and horizon publisher use `queue: max` on the shared
+`btc-ai-learning-state` group, so a successor cannot replace a pending model
+publication. Historical training runs outside that lock; only publication waits.
 GitHub runner startup is still best effort; source timestamps determine freshness,
 and a queued successor is never reported as proof of a fresh publication.
 
@@ -189,7 +193,7 @@ The main chart and current-price cards use the Kalshi event chart feed. Technica
 
 ## Learning state
 
-GitHub Actions runs `.github/workflows/learn.yml` every five minutes. The worker writes version-31 state to the `learning-state` branch. `.github/workflows/train-horizon-models.yml` retrains horizon candidates weekly. State includes bounded forecast weights, specialist adaptive weights, rolling history, real 15-candle path error, official Kalshi settlement accuracy, horizon-model evidence, and a paper-only research lab.
+GitHub Actions runs `.github/workflows/learn.yml` through main code changes, explicit dispatch and the worker's successor handoff. The five-minute `.github/workflows/health-watchdog.yml` checks freshness and requests recovery only when no learner is active or queued. The worker writes version-31 state to the `learning-state` branch. `.github/workflows/train-horizon-models.yml` retrains horizon candidates weekly. State includes bounded forecast weights, specialist adaptive weights, rolling history, real 15-candle path error, official Kalshi settlement accuracy, horizon-model evidence, and a paper-only research lab.
 
 The research lab can record one independent shadow call in each `OPEN`, `MIDDLE`, `FINAL 5`, and `FINAL 2` phase. It grades model Brier score against the contemporaneous Kalshi midpoint, counterfactual WAIT outcomes, fee-aware one-contract paper P/L, and simultaneous entry-policy candidates. Specialist lifecycle labels are advisory and never disable execution.
 
