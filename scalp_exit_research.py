@@ -61,7 +61,7 @@ def observe(state, call, market, now=None):
         cost = ask + kalshi_taker_fee(1, ask)
         target = next((c/100 for c in range(1,101)
                        if c/100 >= ask*(1+SCALP_MIN_GROSS_RETURN)
-                       and c/100-kalshi_taker_fee(1,c/100) > cost), None)
+                       and c/100-kalshi_taker_fee(1,c/100,action="sell") > cost), None)
         if target is None:
             return
         prior = [r for r in lab['history'] if r.get('path_result') in ('TARGET','STOP')]
@@ -86,7 +86,7 @@ def observe(state, call, market, now=None):
     if bid >= episode['target'] or bid <= episode['stop']:
         episode.update(path_result='TARGET' if bid >= episode['target'] else 'STOP',
                        exit_bid=bid, exit_observed_at=at,
-                       net_pnl=bid-kalshi_taker_fee(1,bid)-episode['entry']-episode['entry_fee'])
+                       net_pnl=bid-kalshi_taker_fee(1,bid,action="sell")-episode['entry']-episode['entry_fee'])
 
 
 def resolve(state, market_reader, now=None):
@@ -124,3 +124,4 @@ def scorecard(state):
                 brier=sum((r['probability']-(r['path_result']=='TARGET'))**2 for r in eligible)/n if n else None,
                 scope='Sampled one-contract target-before-stop paths; censored windows excluded; not continuous-tick accuracy',
                 promotion='RESEARCH ONLY — no paired execution-policy evidence or promotion authority')
+

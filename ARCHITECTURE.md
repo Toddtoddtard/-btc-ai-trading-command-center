@@ -13,6 +13,18 @@ reliability checks and contract calibration feed the dashboard and scheduled
 learner. `lock_focus.py` owns LOCK qualification; paper execution uses shared
 strategy and fee helpers in `kalshi_paper_engine.py`.
 
+Paper fees use Decimal arithmetic and Kalshi's signed cash-alignment rules:
+model fees round upward to six decimal dollars, then the cash change rounds
+downward to the configured balance precision. The explicit paper assumption is
+non-direct member cent precision (`PAPER_BALANCE_PRECISION`); the shared helper
+also accepts direct-member $0.0001 precision and carries a rounding accumulator
+across fills of one order. The current full-fill paper model starts a separate
+order for each entry or sale, so it does not share accumulators between trades.
+Sale, mark-to-market and projected exits pass the sell action; binary settlement
+has no exit fee. New entry and exit fees record their model version; historical
+entry fees and closed P/L are not recomputed by this change. Sources and the
+read-only retained-ledger comparison are in `docs/KALSHI_FEE_ROUNDING.md`.
+
 `council_accounting.py` also fits `council_confidence.py` from independent
 official outcomes and frozen formula confidence. Confidence-band residuals are
 shrunk and bounded; both overall chronological evidence and each applied band's
@@ -348,3 +360,4 @@ with a common reserved-contract set across horizons. It never supplies execution
 coefficients, publishes no live win-rate claim and has no promotion authority.
 The October31 selected candidate failed its reserved Brier comparison and was
 not deployed. See `docs/prediction-repair-2026-10-31.md` for exact scope/results.
+
