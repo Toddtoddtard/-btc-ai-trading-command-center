@@ -363,3 +363,21 @@ Verification: unchanged full suite (542 tests, one skipped), plus differential
 comparison with the prior release on 102 ledgers, including saved production
 state, randomized duplicate IDs, mixed strategies, close-order ties, zero P/L
 and multiple window limits; outputs and ledger mutations match exactly.
+
+## 2026-11-01 — event-state publication race repair
+
+Audit found Political Event Watch run 41355457881 failed because the learner
+advanced learning-state between the event publisher's fetch and push. Added
+at most three normal pushes, rebasing the event-file-only commit onto newer
+branch state after rejection. No force push or conflict-resolution override.
+Local bare-repository regressions reproduce the rejected push, verify retention
+of newer learner cash/sample data and verify conflicting event edits fail.
+Full offline suite: 571 tests, OK with one skipped. Main worker, settlement,
+ledger and policy safeguards are unchanged. Before publication the worker ran
+24befd9, state updated 22:56 UTC, no candle backlog; ledger reconciled at
+466.365, 159 closed trades / 157 markets, no active position. Research Brier
+0.20758 versus market 0.14193; no league leader, all streaks zero, maximum
+paired count 44. All 16 specialist lifecycle labels remain advisory. SCALP
+research now has 94 official sampled paths, net -5.86, and no execution
+or promotion authority. Hosted checks and event publication require separate
+verification after commit; authenticated UI remains gated.

@@ -67,6 +67,9 @@ and publishing each validated checkpoint. Publication uses a separate Git
 worktree, so runner code remains on its original main revision and unrelated
 state files are preserved. Ordinary pushes and bounded rebase retries retain
 concurrent unrelated branch updates; conflicting ledger writes fail visibly.
+Political Event Watch likewise retries its event-file publication up to three
+pushes, rebasing onto newer branch state after a rejected push; a conflicting
+event-file edit fails rather than overwriting either writer.
 Before a successful main worker finishes, it calls `worker_watchdog.py` with
 its own run ID to dispatch one successor directly. The active-run check ignores
 only that finishing run and retains any other active or queued learner; workflow

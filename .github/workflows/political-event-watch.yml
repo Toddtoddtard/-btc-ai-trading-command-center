@@ -70,4 +70,15 @@ jobs:
           cp /tmp/political_event_watch.json political_event_watch.json
           git add political_event_watch.json
           git commit -m 'Update political event watch state' || exit 0
-          git push origin learning-state
+          # The learner can publish between our fetch and push. Rebase only
+          # this event-file commit onto its newer state; conflicts must fail.
+          for attempt in 1 2 3; do
+            if git push origin learning-state; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            git fetch origin learning-state
+            git rebase FETCH_HEAD
+          done
