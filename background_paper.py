@@ -14,6 +14,7 @@ import os
 import time
 import tempfile
 from pathlib import Path
+from collections import Counter
 from datetime import datetime, timezone
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -140,15 +141,14 @@ def reconcile_shared_paper_ledger(paper, tolerance=0.011):
         row for row in paper.get("trades", [])
         if isinstance(row, dict) and str(row.get("status", "CLOSED")).upper() == "CLOSED"
     ]
-    closed_keys = {_position_key(row) for row in closed}
+    closed_counts = Counter(_position_key(row) for row in closed)
     active = []
     if isinstance(paper.get("open_position"), dict):
         active.append(paper["open_position"])
     active.extend(row for row in paper.get("pending_settlements", []) if isinstance(row, dict))
-    active = [row for row in active if _position_key(row) not in closed_keys]
+    active = [row for row in active if _position_key(row) not in closed_counts]
 
-    keys = [_position_key(row) for row in closed]
-    duplicates = sorted({key for key in keys if keys.count(key) > 1})
+    duplicates = sorted(key for key, count in closed_counts.items() if count > 1)
     if duplicates:
         issues.append("duplicate closed positions: " + ", ".join(duplicates[:5]))
     if sum(str(row.get("status", "OPEN")).upper() == "OPEN" for row in active) > 1:
@@ -325,16 +325,25 @@ def _projected_side_value(pending, market, side):
     return projected_up if side == "YES" else 1.0 - projected_up
 
 
-def _post_fix_metrics(paper, strategy=None, limit=None):
+def _ordered_closed_trades(paper, strategy=None):
     closed = [t for t in paper.get("trades", []) if t.get("status") == "CLOSED"
               and (strategy is None or t.get("strategy") == strategy)]
     closed.sort(key=lambda t: (_f(t.get("closed_at"), 0.0), _f(t.get("opened_at"), 0.0)))
-    if limit:
-        closed = closed[-limit:]
+    return closed
+
+
+def _post_fix_metrics(paper, strategy=None, limit=None):
+    closed = _ordered_closed_trades(paper, strategy)
+    return _closed_trade_metrics(closed[-limit:] if limit else closed)
+
+
+def _closed_trade_metrics(closed):
+    """Score a chronological slice without selecting or sorting it again."""
     pnls = [_f(t.get("pnl"), 0.0) for t in closed]
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
     gross_profit, gross_loss = sum(wins), abs(sum(losses))
+    total_pnl = sum(pnls)
     equity, peak, max_dd = STARTING_CASH, STARTING_CASH, 0.0
     for pnl in pnls:
         equity += pnl
@@ -347,8 +356,8 @@ def _post_fix_metrics(paper, strategy=None, limit=None):
         "losses": len(losses),
         "win_rate": len(wins) / len(pnls) if pnls else None,
         "profit_factor": gross_profit / gross_loss if gross_loss else (math.inf if gross_profit else None),
-        "total_pnl": sum(pnls),
-        "expectancy": sum(pnls) / len(pnls) if pnls else None,
+        "total_pnl": total_pnl,
+        "expectancy": total_pnl / len(pnls) if pnls else None,
         "fees": sum(_f(t.get("entry_fee"), 0.0) + _f(t.get("exit_fee"), 0.0) for t in closed),
         "max_drawdown_pct": max_dd,
         "gate_sample_target": POST_FIX_GATE_TRADES,
@@ -361,9 +370,10 @@ def _gate(metrics):
 
 
 def _paper_gate(paper):
+    closed = _ordered_closed_trades(paper, strategy="SCALP")
     return scalp_execution_policy(
-        _post_fix_metrics(paper, strategy="SCALP"),
-        _post_fix_metrics(paper, strategy="SCALP", limit=POST_FIX_GATE_TRADES),
+        _closed_trade_metrics(closed),
+        _closed_trade_metrics(closed[-POST_FIX_GATE_TRADES:]),
     )
 
 

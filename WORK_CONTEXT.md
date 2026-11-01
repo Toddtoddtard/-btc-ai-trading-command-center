@@ -350,3 +350,16 @@ only the research observation clock after reads; injected replay time stays fixe
 Future quotes and the 30-second limit remain rejected. No execution or promotion
 rules changed. Regression reproduces the two-second network delay and retains a
 future-quote rejection check. This repairs data collection, not predictive edge.
+
+
+### 2026-10-31 — r109 paper-ledger streamlining
+Behavior-preserving cleanup in background_paper.py: Counter replaces repeated
+whole-ledger duplicate scans; the SCALP gate selects/sorts history once, then
+scores full and recent slices through one metrics helper. P/L totals are summed
+once per slice. Existing strict metric status handling remains separate from
+legacy-compatible dashboard/reconciliation status handling. No policies, fees,
+settlement rules, specialist lifecycle, ledger history or feed requests changed.
+Verification: unchanged full suite (542 tests, one skipped), plus differential
+comparison with the prior release on 102 ledgers, including saved production
+state, randomized duplicate IDs, mixed strategies, close-order ties, zero P/L
+and multiple window limits; outputs and ledger mutations match exactly.
