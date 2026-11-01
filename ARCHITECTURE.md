@@ -304,6 +304,17 @@ profit-taking requires positive actual net proceeds after both fees, while
 reversal and stop exits remain available. New-schema calls cannot prolong an
 old SCALP on terminal-probability upside alone.
 
+`cutoff_research` compares current LOCK eligibility with a bounded subset of
+PR #63 using the same fresh worker depth observation and validated probability.
+Each ticker freezes both hypothetical policies, depth/budget-limited quantity,
+rounded fees and producing revision once. Its separate research state resolves
+only against that ticker's official settlement, with at most three label reads
+per cycle. The dashboard reports revision-specific matched markets, blockers,
+additional entries, scenario P/L, calibration and uncertainty. These are snapshot
+scenarios, not ledger trades or portfolio replay; current reliability approval,
+target/data checks and quarantine remain. It cannot change execution or promote
+a strategy. Existing SCALP bid-path research stays separate.
+
 The council retains every specialist and all existing contribution evidence
 requirements. The confidence corroboration bonus now caps duplicate price-trend
 and price-momentum families rather than counting them as independent voters.

@@ -29,6 +29,7 @@ Start here for a specific issue. This is a navigation guide, not a current healt
 | Login and deployed build label | `access_control.py` | `test_access_control` |
 | Archive replay, label deadlines, training inputs | Shared `historical_backtest.py` archive reader; `council_backtest_v4.py`, `historical_specialist_backtest_v7.py`, `train_horizon_models.py` | `test_historical_deadlines`, `test_historical_cross_month_v16`, `test_council_backtest_v4`, `test_train_horizon_models` |
 | LOCK fee economics, net-edge margin and validation quarantine | `kalshi_paper_engine.py`: `expected_lock_net_pnl`, `lock_edge_is_sufficient`, `lock_validation_policy`; `background_paper.py`: authoritative distinct-market gate and promotion checks; `pro_trade_ticket.py`; `learner_v31.py`: exact-event Kalshi reference | `test_lock_expected_return`, `test_reliability_v31`, `test_pro_trade_ticket` |
+| PR #63 bounded cutoff comparison | `cutoff_research.py`: immutable depth-sized paired LOCK scenarios; `background_paper.py`: research observation only; `research_dashboard.py`; `docs/PR63_SHADOW_COMPARISON.md` | `test_cutoff_research` |
 
 ## Source navigation without rereading whole files
 
@@ -48,6 +49,7 @@ This is a small project-specific navigation tool, not Graphify. Static imports a
 
 - Main chart/current-price cards use Kalshi's public event chart. Technical candles and order flow use Binance; worker price proxies are identified separately from official settlement outcomes.
 - The displayed authoritative paper ledger comes from `learning-state` / `background_paper`. The SQLite engine also supplies shared lifecycle, fee and strategy helpers; do not substitute its local totals for the persistent summary.
+- `cutoff_research` stores hypothetical cutoff-policy comparisons separately from that ledger. Its first same-contract depth observation freezes both policies; only official settlement resolves them. It has no execution or model-promotion authority.
 - Active scheduled entrypoint: `learner_v31.py`, which imports `learner.py` and `learner_v3.py` for supporting functionality. Cron requests are best effort; verify actual snapshot and paper-cycle ages.
 - Older patch installers under `tools/` are not the main runtime. Some are still invoked by workflows, so verify references before touching them.
 - `tools/run_offline_tests.py` executes both `unittest.TestCase` methods and standalone `test_*` functions with sockets disabled. Bare unittest discovery does not include the latter.
