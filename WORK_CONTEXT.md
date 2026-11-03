@@ -402,3 +402,15 @@ learner-only watchdog; live browser verification still shows the loading screen.
 No unproven browser code change was made. Hosted checks and new production recovery execution are separate
 verification steps. This improves transient-failure tolerance, not a guarantee
 of continuous free GitHub scheduling or better prediction accuracy.
+
+
+## 2026-11-03 — r110 mobile startup and technical cards
+User screenshot showed four module-import error boxes exactly where the four
+Market-tab technical metrics render. Replaced that group with escaped plain
+HTML cards, retaining values and using two columns on narrow screens. Moved
+page configuration and the owner approval gate ahead of all trading imports and
+runtime reloads. Authentication/rate limits and all trading calculations remain.
+Regression checks first reproduced late authentication and missing HTML-card
+support; full suite then passed577 tests with one skipped. No claim that Safari's
+cache/network cause was reproduced or that all dynamic components are repaired.
+Live build/authenticated mobile behavior must be verified separately.

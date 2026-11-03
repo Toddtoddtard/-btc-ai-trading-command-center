@@ -23,3 +23,22 @@ class AccessControlSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartupOrderingTests(unittest.TestCase):
+    def test_private_gate_precedes_trading_imports_and_runtime_reload(self):
+        import ast
+        tree = ast.parse(Path('app.py').read_text())
+        gate = next(n.lineno for n in tree.body if isinstance(n, ast.Expr)
+                    and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
+                    and n.value.func.id == 'require_owner_approval')
+        expensive = [n.lineno for n in tree.body
+                     if (isinstance(n, ast.Import) and any(a.name.split('.')[0] in
+                         {'numpy', 'pandas', 'plotly', 'prediction_journal'} for a in n.names))
+                     or (isinstance(n, ast.ImportFrom) and n.module in
+                         {'prediction_journal', 'shared_learning', 'ai_core'})
+                     or (isinstance(n, ast.For) and any(isinstance(x, ast.Call)
+                         and isinstance(x.func, ast.Attribute) and x.func.attr == 'reload'
+                         for x in ast.walk(n)))]
+        self.assertTrue(expensive)
+        self.assertTrue(all(gate < line for line in expensive))

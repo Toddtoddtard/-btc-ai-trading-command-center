@@ -4,6 +4,8 @@ This module deliberately contains no trading or persistence logic. Keeping
 formatting here makes ``app.py`` easier to audit without changing decisions.
 """
 
+from html import escape
+
 import pandas as pd
 
 from display_time import eastern_table
@@ -128,3 +130,20 @@ def render_dashboard_table(dataframe, formatters=None):
         f'<div class="dashboard-dark-wrap">{table_html}</div>',
         unsafe_allow_html=True,
     )
+
+
+def metric_cards_html(cards):
+    """Small responsive cards without Streamlit's lazy metric JS module."""
+    body = ''.join(
+        '<div class="technical-card" role="listitem"><div class="technical-label">'
+        + escape(str(label)) + '</div><div class="technical-value">'
+        + escape('Unavailable' if value is None else str(value)) + '</div></div>'
+        for label, value in cards
+    )
+    return """<style>
+.technical-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0}
+.technical-card{border:1px solid #2589ef;border-radius:12px;padding:14px;background:#0b1423;color:#edf4ff;min-width:0}
+.technical-label{font-size:.85rem;color:#b6c9e1;margin-bottom:6px}
+.technical-value{font-size:1.35rem;font-weight:700;overflow-wrap:anywhere}
+@media(max-width:700px){.technical-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style><div class="technical-cards" role="list">""" + body + '</div>'

@@ -367,3 +367,14 @@ coefficients, publishes no live win-rate claim and has no promotion authority.
 The October31 selected candidate failed its reserved Brier comparison and was
 not deployed. See `docs/prediction-repair-2026-10-31.md` for exact scope/results.
 
+
+
+### Mobile startup and technical summary cards
+The main entrypoint renders owner approval before importing/reloading the trading
+stack. An unauthenticated visit therefore does not initialize the council, chart
+or learning modules. Approved sessions keep the existing dependency-ordered
+reloads and decision flow. The Market tab's four FVG/MACD summary cards use
+escaped responsive HTML through dashboard_ui.metric_cards_html, avoiding the
+lazy metric component that failed in the user's iPhone screenshot. All indicator
+calculations and chart data remain unchanged. This does not repair unrelated
+Streamlit asset/network failures or establish an authenticated mobile load time.

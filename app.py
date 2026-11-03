@@ -1,5 +1,24 @@
-import json
+# Render authentication before loading the trading stack or downloading state.
 import importlib
+import streamlit as st
+import access_control
+
+importlib.reload(access_control)
+from access_control import DEPLOYED_BUILD, require_owner_approval
+
+st.set_page_config(
+    page_title="BTC AI Trading Command Center",
+    page_icon="₿",
+    layout="wide",
+    # The owner primarily uses the command center from an iPhone.  Keep the
+    # full controls one tap away without covering the live trading surface.
+    initial_sidebar_state="collapsed",
+)
+
+
+require_owner_approval()
+
+import json
 import math
 import re
 import sqlite3
@@ -14,7 +33,7 @@ from urllib.request import Request, urlopen
 # modules. Refresh these stateless modules in dependency order before binding
 # their exports, so a deployment cannot mix old helpers or price caps with new UI.
 for _runtime_module in (
-    "access_control", "lock_focus", "kalshi_paper_engine",
+    "lock_focus", "kalshi_paper_engine",
     "outcome_timing", "contribution_evidence", "contract_calibration", "reliability_v31", "council_v4",
     "kalshi_chart_data", "settlement_predictor", "research_lab", "horizon_models", "ai_core",
     "council_accounting", "specialist_knowledge_v5", "hourly_forecast",
@@ -26,9 +45,7 @@ for _runtime_module in (
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
 import streamlit.components.v1 as components
-from access_control import DEPLOYED_BUILD, require_owner_approval
 from market_guide import render_market_guide
 from shared_learning import fetch_shared_learning_state, learning_freshness
 
@@ -42,6 +59,7 @@ from ai_core import (
 from display_time import eastern_plotly, eastern_table, eastern_time
 from dashboard_ui import (
     directional_badge_html,
+    metric_cards_html,
     fmt_money,
     fmt_pct,
     render_dashboard_table,
@@ -100,17 +118,7 @@ APP_VERSION = DEPLOYED_BUILD
 # Single-file build. No exchange keys. No live order endpoints.
 # ============================================================
 
-st.set_page_config(
-    page_title="BTC AI Trading Command Center",
-    page_icon="₿",
-    layout="wide",
-    # The owner primarily uses the command center from an iPhone.  Keep the
-    # full controls one tap away without covering the live trading surface.
-    initial_sidebar_state="collapsed",
-)
 
-
-require_owner_approval()
 
 SYMBOL = "BTCUSDT"
 SPOT_BASES = [
@@ -5362,14 +5370,15 @@ def live_dashboard():
             st.caption("Calculated locally from the same live BTC candles used by the bots — no TradingView scraping or paid key required.")
 
             _tech = results.get("FVG / MACD AI", {})
-            _tech_cols = st.columns(4)
-            _tech_cols[0].metric("Technical AI", _tech.get("signal", "NEUTRAL"))
-            _tech_cols[1].metric("Confidence", f"{safe_float(_tech.get('confidence'), 0.0)*100:.1f}%")
-            _tech_cols[2].metric("MACD histogram", f"{safe_float(hist['macd_hist'].iloc[-1], 0.0):+.2f}")
             _fresh_fvg = hist.tail(60)
             _bull_count = int(_fresh_fvg.get("bull_fvg", pd.Series(dtype=bool)).fillna(False).sum())
             _bear_count = int(_fresh_fvg.get("bear_fvg", pd.Series(dtype=bool)).fillna(False).sum())
-            _tech_cols[3].metric("Fresh FVGs (60m)", f"{_bull_count} bull / {_bear_count} bear")
+            st.markdown(metric_cards_html([
+                ("Technical AI", _tech.get("signal", "NEUTRAL")),
+                ("Confidence", f"{safe_float(_tech.get('confidence'), 0.0)*100:.1f}%"),
+                ("MACD histogram", f"{safe_float(hist['macd_hist'].iloc[-1], 0.0):+.2f}"),
+                ("Fresh FVGs (60m)", f"{_bull_count} bull / {_bear_count} bear"),
+            ]), unsafe_allow_html=True)
             st.caption(_tech.get("reason", "FVG/MACD specialist warming up"))
 
             _price_tv = hist.tail(180).copy()
