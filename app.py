@@ -38,7 +38,7 @@ for _runtime_module in (
     "kalshi_chart_data", "settlement_predictor", "research_lab", "horizon_models", "ai_core",
     "council_accounting", "specialist_knowledge_v5", "hourly_forecast",
     "trade_assessment", "scalp_exit_research", "background_paper", "pro_trade_ticket",
-    "decision_dashboard", "live_feeds", "shared_learning",
+    "dashboard_ui", "decision_dashboard", "live_feeds", "shared_learning",
 ):
     importlib.reload(importlib.import_module(_runtime_module))
 

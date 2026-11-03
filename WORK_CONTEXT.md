@@ -414,3 +414,17 @@ Regression checks first reproduced late authentication and missing HTML-card
 support; full suite then passed577 tests with one skipped. No claim that Safari's
 cache/network cause was reproduced or that all dynamic components are repaired.
 Live build/authenticated mobile behavior must be verified separately.
+
+
+## 2026-11-03 — r111 warm-server dashboard import repair
+The r110 change added metric_cards_html, but dashboard_ui was absent from the
+entrypoint's runtime reload list. A server retaining the old module therefore
+raised ImportError at the new from-import, despite a clean-process suite passing.
+A regression now seeds exactly the pre-deployment exports and executes the
+actual entrypoint reload/import statements. It reproduced the missing export.
+Added dashboard_ui to the existing reload list before its exports are bound.
+Authentication ordering and all trading behavior remain unchanged. This repairs
+a deployment regression introduced by r110, not Safari's asset cache itself.
+Validation after repair:578 offline tests, OK with one skipped, including the
+cached-module deployment regression. Hosted CI and authenticated rendering are
+separate verification steps.

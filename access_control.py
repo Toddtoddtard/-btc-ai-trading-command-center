@@ -5,7 +5,7 @@ import time
 import streamlit as st
 
 # Deployment touch: keep Streamlit synced to the latest private-access build.
-DEPLOYED_BUILD = "2026.11.03-r110-mobile-startup"
+DEPLOYED_BUILD = "2026.11.03-r111-dashboard-import"
 
 
 def _hash_code(code: str) -> str:
