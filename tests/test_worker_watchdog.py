@@ -81,3 +81,54 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(len(posts), 1)
         self.assertTrue(posts[0].full_url.endswith('/actions/workflows/learn.yml/dispatches'))
         self.assertEqual(json.loads(posts[0].data), {'ref': 'main'})
+
+    def run_with_api_errors(self, failures, failed_method='GET'):
+        from datetime import datetime, timezone
+        from worker_watchdog import main
+        from io import BytesIO
+        requests = []
+        def respond(request, timeout):
+            requests.append(request)
+            if request.get_method() == failed_method and failures:
+                raise failures.pop(0)
+            if '/contents/' in request.full_url:
+                body = {'encoding': 'base64', 'content': base64.b64encode(json.dumps(
+                    {'updated_at': datetime.now(timezone.utc).isoformat()}).encode()).decode()}
+            elif request.data:
+                body = None
+            else:
+                body = {'workflow_runs': [{'id': 42, 'head_branch': 'main', 'status': 'in_progress'}]}
+            return BytesIO(json.dumps(body).encode() if body is not None else b'')
+        with patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo', 'GH_TOKEN': 'test',
+                                     'WORKER_HANDOFF_RUN_ID': '42'}, clear=True), \
+             patch('worker_watchdog.urlopen', side_effect=respond), patch('time.sleep'):
+            try:
+                main()
+            finally:
+                self.api_requests = requests
+        return requests
+
+    def test_temporary_read_failure_does_not_break_successor_handoff(self):
+        from urllib.error import HTTPError
+        requests = self.run_with_api_errors([HTTPError('https://api.github.com', 502, 'Bad Gateway', {}, None)])
+        self.assertEqual(sum('/contents/' in r.full_url for r in requests), 2)
+        self.assertEqual(sum(r.get_method() == 'POST' for r in requests), 1)
+
+    def test_read_retries_are_bounded_and_never_dispatch_without_run_checks(self):
+        from urllib.error import HTTPError
+        with self.assertRaises(HTTPError):
+            self.run_with_api_errors([HTTPError('https://api.github.com', 502, 'Bad Gateway', {}, None) for _ in range(3)])
+        self.assertEqual(len(self.api_requests), 3)
+        self.assertTrue(all(r.get_method() == 'GET' for r in self.api_requests))
+
+    def test_permission_errors_are_not_retried(self):
+        from urllib.error import HTTPError
+        with self.assertRaises(HTTPError):
+            self.run_with_api_errors([HTTPError('https://api.github.com', 403, 'Forbidden', {}, None)])
+        self.assertEqual(len(self.api_requests), 1)
+
+    def test_ambiguous_dispatch_failure_is_not_retried(self):
+        from urllib.error import HTTPError
+        with self.assertRaises(HTTPError):
+            self.run_with_api_errors([HTTPError('https://api.github.com', 502, 'Bad Gateway', {}, None)], 'POST')
+        self.assertEqual(sum(r.get_method() == 'POST' for r in self.api_requests), 1)

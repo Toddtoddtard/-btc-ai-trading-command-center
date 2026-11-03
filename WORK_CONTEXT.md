@@ -381,3 +381,23 @@ paired count 44. All 16 specialist lifecycle labels remain advisory. SCALP
 research now has 94 official sampled paths, net -5.86, and no execution
 or promotion authority. Hosted checks and event publication require separate
 verification after commit; authenticated UI remains gated.
+
+
+## 2026-11-03 — watchdog transient-read handoff repair
+
+Learner run 41636922899 published a checkpoint, then its successor handoff failed
+on a GitHub Contents API 502. A later watchdog recovered the worker. Retained gap
+evidence records 239.94 minutes (13:23:27–17:23:24 UTC), 240 closed candles
+reloaded and no fabricated/backfilled paper calls. The current worker/state was
+fresh again on 7aec558, no candle backlog, ledger reconciled at 466.365.
+
+Watchdog GETs now retry only HTTP 500/502/503/504, at most three attempts with
+one/two-second backoff. Permission errors, exhausted reads and timestamp errors
+still fail. POST dispatches are not retried: an ambiguous server error could
+already have enqueued a successor. Active-run checks and freshness gates remain.
+Four regressions reproduce the handoff 502, bounded failure, no permission retry
+and no dispatch retry. Full offline suite:575 tests, OK with one skipped.
+The two failed browser health checks also recovered later; no unproven browser
+change was made. Hosted checks and new production recovery execution are separate
+verification steps. This improves transient-failure tolerance, not a guarantee
+of continuous free GitHub scheduling or better prediction accuracy.

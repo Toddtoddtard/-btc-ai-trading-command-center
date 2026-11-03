@@ -2,8 +2,10 @@
 import base64
 import json
 import os
+import time
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 ACTIVE = {'queued', 'in_progress', 'waiting', 'pending', 'requested'}
 
@@ -36,9 +38,17 @@ def main():
                           headers={'Authorization': 'Bearer ' + token,
                                    'Accept': 'application/vnd.github+json',
                                    'X-GitHub-Api-Version': '2022-11-28'})
-        with urlopen(request, timeout=30) as response:
-            body = response.read()
-            return json.loads(body) if body else {}
+        for attempt in range(3):
+            try:
+                with urlopen(request, timeout=30) as response:
+                    body = response.read()
+                    return json.loads(body) if body else {}
+            except HTTPError as exc:
+                # Only retry safe reads. A failed dispatch may already have
+                # reached GitHub, so retrying it could queue a duplicate.
+                if payload is not None or exc.code not in {500, 502, 503, 504} or attempt == 2:
+                    raise
+                time.sleep(attempt + 1)
     content = api('/contents/learning_state.json?ref=learning-state')
     if content.get('encoding') != 'base64' or not content.get('content'):
         content = api('/git/blobs/' + content['sha'])

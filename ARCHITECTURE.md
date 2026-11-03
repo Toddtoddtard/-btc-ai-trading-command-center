@@ -72,7 +72,10 @@ pushes, rebasing onto newer branch state after a rejected push; a conflicting
 event-file edit fails rather than overwriting either writer.
 Before a successful main worker finishes, it calls `worker_watchdog.py` with
 its own run ID to dispatch one successor directly. The active-run check ignores
-only that finishing run and retains any other active or queued learner; workflow
+only that finishing run and retains any other active or queued learner. Transient
+GitHub 500/502/503/504 responses on watchdog reads get at most three attempts
+with bounded backoff; dispatch POSTs are never automatically retried because
+their outcome may be ambiguous. Existing freshness failures stay visible; workflow
 concurrency serializes ledger writers. Main push runs use an 12-minute session
 to exercise the first handoff promptly; subsequent workers use 55 minutes.
 The five-minute stale-state watchdog remains the recovery backup and checks for
