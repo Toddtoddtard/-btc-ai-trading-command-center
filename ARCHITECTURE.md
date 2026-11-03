@@ -378,3 +378,7 @@ escaped responsive HTML through dashboard_ui.metric_cards_html, avoiding the
 lazy metric component that failed in the user's iPhone screenshot. All indicator
 calculations and chart data remain unchanged. This does not repair unrelated
 Streamlit asset/network failures or establish an authenticated mobile load time.
+The MACD history and prediction-horizon selectors use dropdowns rather than
+select sliders after the two slider positions also displayed module-import
+errors on iPhone. Choices and defaults remain 30/60/120/180 minutes (180) and
+1/5/15 minutes (15). These controls only select chart presentation horizons.

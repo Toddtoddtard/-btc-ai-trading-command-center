@@ -2,6 +2,21 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## Mobile MACD selectors (2026-11-03 Eastern, r112)
+
+- User screenshot IMG_5354 shows two module-script import errors between the
+  rendered FVG price chart and MACD projection caption. Those exact positions
+  are the two select sliders, separate from the earlier metric-card failure.
+- Replaced only those selectors with dropdowns, keeping integer values, widget
+  keys, all options and defaults (180-minute history, 15-minute projection).
+  Forecast calculations and execution safeguards are unchanged.
+- Added a real Streamlit AppTest of the extracted production control block:
+  old code fails because it emits two slider components; dropdown version
+  passes all four history and three horizon choices across reruns.
+- Full offline suite: 579 tests, all passed. This validates server controls,
+  not Safari asset delivery. Cloud browser still shows the outer Streamlit
+  loading shell; signed-in iPhone rendering remains unverified here.
+
 ## Settlement algorithm learning (2026-10-30 Eastern)
 
 - Independent final-average residuals now train on the same remaining-time group

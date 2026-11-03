@@ -5419,20 +5419,21 @@ def live_dashboard():
             )
             st.plotly_chart(eastern_plotly(_price_fig), use_container_width=True, key="fvg_price_chart")
 
+            # Dropdowns avoid the slider JS asset failing on mobile Safari.
             _macd_control_cols = st.columns(2)
             with _macd_control_cols[0]:
-                _macd_history_minutes = st.select_slider(
+                _macd_history_minutes = st.selectbox(
                     "MACD history shown",
                     options=[30, 60, 120, 180],
-                    value=180,
+                    index=3,
                     format_func=lambda value: f"{value} minutes",
                     key="macd_history_minutes",
                 )
             with _macd_control_cols[1]:
-                _macd_projection_minutes = st.select_slider(
+                _macd_projection_minutes = st.selectbox(
                     "MACD prediction horizon",
                     options=[1, 5, 15],
-                    value=15,
+                    index=2,
                     format_func=lambda value: f"{value} minute" if value == 1 else f"{value} minutes",
                     key="macd_projection_minutes",
                 )
