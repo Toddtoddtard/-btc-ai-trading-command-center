@@ -397,7 +397,8 @@ still fail. POST dispatches are not retried: an ambiguous server error could
 already have enqueued a successor. Active-run checks and freshness gates remain.
 Four regressions reproduce the handoff 502, bounded failure, no permission retry
 and no dispatch retry. Full offline suite:575 tests, OK with one skipped.
-The two failed browser health checks also recovered later; no unproven browser
-change was made. Hosted checks and new production recovery execution are separate
+The two failed browser health checks are not proven recovered by a green
+learner-only watchdog; live browser verification still shows the loading screen.
+No unproven browser code change was made. Hosted checks and new production recovery execution are separate
 verification steps. This improves transient-failure tolerance, not a guarantee
 of continuous free GitHub scheduling or better prediction accuracy.
