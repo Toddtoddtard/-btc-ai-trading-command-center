@@ -3785,12 +3785,12 @@ def refresh_sidebar_paper_status():
     _sidebar_learning_state = fetch_remote_learning_state() or {}
     _sidebar_paper_state = _sidebar_learning_state.get("background_paper", {})
     auto_paper_enabled = bool(_sidebar_paper_state.get("enabled", True))
-    st.toggle(
-        "AUTO PAPER TRADING",
-        value=auto_paper_enabled,
-        disabled=True,
-        help="Controlled by the persistent GitHub learner. PAPER ONLY.",
+    # A disabled toggle is not actionable and unnecessarily loads an interactive
+    # frontend widget on each fragment refresh. Render the remote state as text.
+    st.markdown(
+        "**AUTO PAPER TRADING: " + ("ON" if auto_paper_enabled else "OFF") + "**"
     )
+    st.caption("Read-only status from the persistent GitHub paper learner.")
 
     if auto_paper_enabled:
         st.info("AUTO PAPER: ENABLED")
