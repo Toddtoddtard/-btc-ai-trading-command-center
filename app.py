@@ -4994,18 +4994,23 @@ def live_dashboard():
             unsafe_allow_html=True,
         )
     m5.metric("Vote agreement", f"{decision['consensus']*100:.1f}%")
-    _latest_call_entry = latest_shared_call_entry(_shared_paper)
-    if _latest_call_entry:
-        _entry_pct = _latest_call_entry["kalshi_entry_pct"]
-        _entry_side = _latest_call_entry["side"]
-        _entry_value = f"{_entry_pct:.0f}% / {_entry_pct:.0f}¢ {_entry_side}"
+    # Show the current settlement forecast, not an unrelated historical paper fill.
+    # This is a display-only indication; it must not imply a trade was opened.
+    if _settlement_prediction.get("available"):
+        _forecast_side = str(_settlement_prediction.get("outcome", "")).upper().strip()
+        _forecast_yes = safe_float(_settlement_prediction.get("probability_yes"), np.nan)
+        _forecast_value = (
+            f"{_forecast_side} forecast"
+            if _forecast_side in ("YES", "NO") else "Unavailable"
+        )
+        _forecast_help = (
+            "Current predicted settlement side, not a paper-trade entry or execution. "
+            "Actual paper entries require independent fee, quote and risk checks."
+        )
     else:
-        _entry_value = "N/A"
-    m6.metric(
-        "Latest paper entry (historical)",
-        _entry_value,
-        help="Actual selected-side Kalshi ask captured when the most recent paper call opened.",
-    )
+        _forecast_value = "Unavailable"
+        _forecast_help = "No current settlement forecast; no paper entry is implied."
+    m6.metric("Current settlement call", _forecast_value, help=_forecast_help)
 
     if _display_feed.get("available"):
         st.caption("Current BTC price and target distance use Kalshi's chart feed. Technical candles and order flow use Binance.")
