@@ -238,4 +238,21 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var
     .technical-value{font-size:1.15rem}
 }
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+/* Compact mobile dashboard: visual changes only. */
+[data-testid="stMetricValue"]{overflow-wrap:anywhere;line-height:1.2!important}
+[data-testid="stMarkdownContainer"]{min-width:0}
+@media(max-width:700px){
+.block-container{padding-top:.65rem!important;padding-left:.8rem!important;padding-right:.8rem!important}
+h1{font-size:1.65rem!important}h2{font-size:1.4rem!important}
+[data-testid="stHorizontalBlock"]{gap:.6rem!important}
+[data-testid="stHorizontalBlock"]>[data-testid="stColumn"]{min-width:0!important}
+[data-testid="stMetric"],.direction-card,.confidence-metric-card{min-height:0!important;height:auto!important;padding:.7rem .75rem!important;border-radius:11px!important}
+[data-testid="stMetricLabel"],.direction-card-label,.confidence-metric-label{font-size:.83rem!important;line-height:1.25!important}
+[data-testid="stMetricValue"],.confidence-metric-value{font-size:clamp(1.1rem,4.6vw,1.4rem)!important;line-height:1.2!important}
+.technical-card{padding:.7rem!important}.technical-cards{gap:.55rem!important;margin:.55rem 0!important}
+.technical-label{font-size:.8rem!important}.technical-value{font-size:1.05rem!important}
+[data-testid="stCaptionContainer"] p{font-size:.82rem!important;line-height:1.4!important}
+[data-testid="stTabs"] [role="tab"]{padding:.45rem .65rem!important}
+}
 </style>"""
