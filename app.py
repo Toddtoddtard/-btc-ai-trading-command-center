@@ -4851,8 +4851,6 @@ def refresh_learning_summary():
             "the first completed 15-minute Kalshi window is graded."
         )
 
-refresh_learning_summary()
-
 @st.fragment(run_every=live_run_every)
 def live_dashboard():
 
@@ -6441,4 +6439,7 @@ def live_dashboard():
 
 
 live_dashboard()
+
+with st.expander("Model performance & learning history", expanded=False):
+    refresh_learning_summary()
 
