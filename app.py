@@ -4035,8 +4035,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             second:"2-digit", timeZoneName:"short"
         }});
         const easternTick = new Intl.DateTimeFormat("en-US", {{
-            timeZone:"America/New_York", hour:"numeric", minute:"2-digit",
-            timeZoneName:"short"
+            timeZone:"America/New_York", hour:"numeric", minute:"2-digit"
         }});
         function easternTime(value) {{
             return easternClock.format(new Date(value));
@@ -4049,7 +4048,11 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             const start = visibleRange ? parseAxisTime(visibleRange[0]) : Math.min(...dates);
             const end = visibleRange ? parseAxisTime(visibleRange[1]) : Math.max(...dates) + 15 * 60000;
             if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return {{}};
-            const step = Math.max(60000, Math.ceil((end - start) / 7 / 60000) * 60000);
+            // Budget tick labels for the actual plot width, not the phone's screen width.
+            // Keep full Eastern timestamps in candle hover text instead.
+            const plotWidth = chart.clientWidth || window.innerWidth;
+            const maxTicks = plotWidth < 480 ? 3 : plotWidth < 800 ? 5 : 7;
+            const step = Math.max(60000, Math.ceil((end - start) / Math.max(1, maxTicks - 1) / 60000) * 60000);
             const tickvals = [];
             for (let tick = Math.ceil(start / step) * step; tick <= end; tick += step) {{
                 tickvals.push(new Date(tick).toISOString());
