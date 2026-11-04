@@ -4043,6 +4043,10 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         function easternAxis(data, visibleRange) {{
             const dates = (data || []).map(r => Date.parse(r.time)).filter(Number.isFinite);
             if (!dates.length) return {{}};
+            // Plotly retains a user's zoom across live react calls. Tick labels
+            // must use that same retained range instead of the full feed.
+            const currentAxis = chart.layout?.xaxis;
+            visibleRange = visibleRange || (currentAxis?.autorange === false ? currentAxis.range : null);
             const parseAxisTime = value => typeof value === "number" ? value :
                 Date.parse(/[zZ]|[+-]\\d{{2}}:?\\d{{2}}$/.test(value) ? value : value + "Z");
             const start = visibleRange ? parseAxisTime(visibleRange[0]) : Math.min(...dates);

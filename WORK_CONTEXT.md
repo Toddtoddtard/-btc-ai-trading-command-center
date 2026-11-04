@@ -2,6 +2,33 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## November 4 audit — retained chart ticks (r114)
+
+- Main 69cf398 had red integration/chart checks. Two assertions still expected
+  the retired historical-entry card and verbose timezone-suffixed phone ticks;
+  the JS unit harness also omitted the chart-width dependency added by that UI.
+  Tests now exercise the current forecast-only card and compact Eastern labels.
+- Found a real chart regression beyond those stale assertions: live react calls
+  retain the user's zoom but recalculated tick labels for the full feed. Reproduced
+  in Node and the real Chromium chart; labels now use the same retained range.
+  Six live updates retain graph identity, price updates, horizon, zoom and labels.
+- Full offline suite: 580 tests passed. Chart browser regression passed locally.
+  No trading/learning/settlement logic or existing paper records changed.
+- State 2026-11-04T22:07:05Z was current, paper cycle 22:09:09Z. Ledger reconciled
+  at $466.365: 159 trades, 92 wins / 67 losses, -$33.635, no open/pending position.
+  Raw Research Lab Brier .207679 vs market .142449; guarded .142423 vs .141828.
+  WAIT counterfactual +$5.956 on 277 observations; only FINAL 2 phase positive.
+  No shadow leader; max 64 eligible paired observations; all streaks zero.
+- Official public market API confirmed KXBTC15M-26NOV041700-00 finalized YES.
+  Current journal rows preserve chronology; 501 retained legacy forecast rows
+  have no historical opened_at, kept unknown rather than invented or scored as
+  paper calls. No duplicate tickers or non-official resolved labels found.
+- Material observation gap recorded 09:34:51–15:24:51 UTC November 4 (~350 min).
+  Failed learner 41810520656 hit repeated GitHub server errors publishing state.
+  Collection recovered; all 350 closed candles were reloaded, but predictions
+  and trades were not backfilled. Missed qualifying calls cannot be determined.
+  Free GitHub scheduling/publication remains best effort, not guaranteed uptime.
+
 ## Calm mobile UI (2026-11-03 Eastern, r113)
 
 - Consolidated two overlapping theme blocks into dashboard_ui.dashboard_theme_css:

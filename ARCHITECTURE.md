@@ -384,6 +384,11 @@ errors on iPhone. Choices and defaults remain 30/60/120/180 minutes (180) and
 1/5/15 minutes (15). These controls only select chart presentation horizons.
 
 ### Calm dashboard presentation
+The persistent chart's Eastern tick labels follow Plotly's retained zoom range
+on each live update. Compact phone labels omit the timezone suffix; full hover
+timestamps and the Time (ET) axis title identify the timezone. Coordinates remain
+UTC. Browser checks verify the tick budget and labels across live updates.
+
 `dashboard_ui.dashboard_theme_css` owns the dark/light shell palette. It replaces
 two overlapping theme blocks with charcoal surfaces, muted directional accents,
 subtle card borders, visible keyboard focus, and two-column mobile metric groups.

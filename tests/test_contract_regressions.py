@@ -698,12 +698,24 @@ def test_live_master_imports_shared_specialist_consensus():
     assert "settlement_consensus = specialist_consensus(results, raw_side, v5_council)" in source
 
 
-def test_call_entry_card_uses_shared_ledger_not_local_sqlite_adapter():
-    app = Path("app.py").read_text()
-    adapter = Path("profitability_v5.py").read_text()
-    assert "latest_shared_call_entry(_shared_paper)" in app
-    assert 'm6.metric(\n        "Kalshi Call Entry"' in app
-    assert 'if normalized == "spot feed":' not in adapter
+def test_current_settlement_card_does_not_imply_a_paper_fill():
+    import ast
+    from types import SimpleNamespace
+    tree = ast.parse(Path('app.py').read_text())
+    dashboard = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'live_dashboard')
+    start = next(i for i, n in enumerate(dashboard.body) if isinstance(n, ast.If)
+                 and any(isinstance(x, ast.Name) and x.id == '_forecast_side' for x in ast.walk(n)))
+    code = compile(ast.Module(body=dashboard.body[start:start+2], type_ignores=[]), 'settlement-card', 'exec')
+    for prediction, expected in (({'available':True,'outcome':'YES','probability_yes':.8},'YES forecast'),
+                                 ({'available':True,'outcome':'NO','probability_yes':.2},'NO forecast'),
+                                 ({'available':False},'Unavailable')):
+        rendered = []
+        namespace = {'_settlement_prediction':prediction, 'np':SimpleNamespace(nan=float('nan')),
+                     'safe_float':lambda value, fallback: float(value) if value is not None else fallback,
+                     'm6':SimpleNamespace(metric=lambda *a, **kw:rendered.append((a,kw)))}
+        exec(code, namespace)
+        assert rendered[0][0] == ('Current settlement call', expected)
+        assert 'paper' in rendered[0][1]['help']
 
 
 def test_execution_validation_uses_persistent_shared_ledger():

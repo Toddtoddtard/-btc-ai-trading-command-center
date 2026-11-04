@@ -107,13 +107,16 @@ main()
                 page.wait_for_timeout(1050)
                 samples.append(frame.evaluate("""({same:retainedGraph===document.querySelector('#persistent-market-chart'),
                     price:retainedGraph.data[0].close.at(-1),zoom:retainedGraph.layout.xaxis.range,
-                    horizon:document.querySelector('button[data-horizon="5"]').style.background,forecast:retainedGraph.data[2].x.length,ticks:retainedGraph.layout.xaxis.ticktext})"""))
+                    horizon:document.querySelector('button[data-horizon="5"]').style.background,forecast:retainedGraph.data[2].x.length,ticks:retainedGraph.layout.xaxis.ticktext,tickvals:retainedGraph.layout.xaxis.tickvals})"""))
             assert all(s['same'] for s in samples), 'Chart node was recreated'
             assert len({s['price'] for s in samples}) >= 4, 'Prices did not update each second'
             assert all(s['zoom'][0] == '2026-10-14T11:40:00Z' for s in samples), 'Zoom reset'
             assert all(s['horizon'] == 'rgb(18, 50, 82)' for s in samples), 'Horizon reset'
             assert all(s['forecast'] == 5 for s in samples), 'Server forecast did not render selected horizon'
-            assert all(all(t.endswith('EDT') for t in s['ticks']) for s in samples), 'Eastern labels missing'
+            assert all(s['ticks'] and len(s['ticks']) <= 3 for s in samples), 'Mobile tick budget exceeded'
+            assert all(s['ticks'] == ['7:40 AM', '7:50 AM', '8:00 AM'] for s in samples), 'Eastern zoom labels changed'
+            assert all(all('2026-10-14T11:40:00' <= t <= '2026-10-14T12:00:00.000Z'
+                           for t in s['tickvals']) for s in samples), 'Tick labels escaped retained zoom'
             frame.locator('button[data-horizon="15"]').click()
             frame.evaluate("Plotly.relayout(retainedGraph, {'xaxis.autorange':true})")
             page.screenshot(path='/tmp/btc-curve-review.png', full_page=True)

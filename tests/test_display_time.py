@@ -56,13 +56,20 @@ def test_browser_ticks_and_clock_ignore_device_timezone():
     start = source.index('        const easternClock =')
     end = source.index('        function candleTrace(', start)
     script = source[start:end].replace('{{', '{').replace('}}', '}')
+    script = 'const chart={clientWidth:390}; const window={innerWidth:390};\n' + script
     script += '''
 const assert=require('assert');
 assert.equal(easternTime('2026-01-15T05:00:00Z'),'12:00:00 AM EST');
 assert.equal(easternTime('2026-07-15T04:00:00Z'),'12:00:00 AM EDT');
-const ticks=easternAxis([{time:'2026-07-15T00:30:00Z'}]);
-assert(ticks.ticktext.every(t=>t.endsWith('EDT')));
+const rows=[{time:'2026-07-15T00:00:00Z'},{time:'2026-07-15T01:00:00Z'}];
+const ticks=easternAxis(rows,['2026-07-15T00:00:00','2026-07-15T00:10:00']);
+assert.deepEqual(ticks.ticktext,['8:00 PM','8:05 PM','8:10 PM']);
 assert(ticks.tickvals.every(t=>t.endsWith('Z')));
+// A live update after zoom must label the retained range, not the full feed.
+chart.layout={xaxis:{autorange:false,range:['2026-07-15T00:00:00','2026-07-15T00:10:00']}};
+assert.deepEqual(easternAxis(rows).ticktext,ticks.ticktext);
+chart.clientWidth=1000;
+assert(easternAxis(rows).tickvals.length<=7);
 '''
     # Python source doubles backslashes inside the containing f-string.
     script = script.replace('\\\\d', '\\d')
