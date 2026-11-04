@@ -60,6 +60,7 @@ from display_time import eastern_plotly, eastern_table, eastern_time
 from dashboard_ui import (
     directional_badge_html,
     metric_cards_html,
+    dashboard_theme_css,
     fmt_money,
     fmt_pct,
     render_dashboard_table,
@@ -170,6 +171,11 @@ st.markdown(
     """
     <style>
     .block-container {padding-top: 1.2rem; padding-bottom: 2rem;}
+    /* Alert text stays readable during reruns; severity colors remain native. */
+    [data-testid="stAlert"] [data-testid="stMarkdownContainer"] p {opacity:1 !important;}
+    a[aria-label="Link to heading"] {opacity:0;}
+    a[aria-label="Link to heading"]:focus-visible,
+    a[aria-label="Link to heading"]:hover {opacity:1;}
     [data-testid="stMetricValue"] {
         font-size: clamp(.84rem, 1.48vw, 1.48rem) !important;
         line-height: 1.15 !important;
@@ -3637,8 +3643,8 @@ def kalshi_15m_chart(hist, spot_price, kctx, projected_end=np.nan):
 init_db()
 
 st.title("₿ BTC AI Trading Command Center")
-st.markdown('<div class="paper-banner">PAPER TRADING ONLY — no real-money execution code or exchange keys are included.</div>', unsafe_allow_html=True)
-st.caption(f"Single-file build {APP_VERSION} • Kalshi BTC multi-AI self-learning engine • 24/7 remote learner • rolling 100/500/1000-window accuracy • paper-only")
+st.markdown('<div class="paper-banner">Paper trading only · Simulated funds · Official Kalshi settlement</div>', unsafe_allow_html=True)
+st.caption("BTC outlook, official settlement results, and automatic paper trading.")
 render_market_guide()
 
 # Keep this in the main script so Streamlit's hot rerun displays new project
@@ -3764,190 +3770,10 @@ dark_mode = st.sidebar.toggle(
 )
 
 # ============================================================
-# VISUAL APP SHELL — R21
+# SHARED DASHBOARD THEME
 # Keeps all trading/learning logic intact; changes presentation only.
 # ============================================================
-if dark_mode:
-    st.markdown(
-        """
-        <style>
-        :root {
-            --cc-bg:#050b14;
-            --cc-panel:#081525;
-            --cc-panel2:#0b1a2d;
-            --cc-border:#18324f;
-            --cc-text:#f4f8ff;
-            --cc-muted:#94a8c6;
-            --cc-blue:#1687ff;
-            --cc-green:#00e6b3;
-            --cc-red:#ff4964;
-        }
-
-        html, body, [data-testid="stAppViewContainer"], .stApp {
-            background: radial-gradient(circle at 65% -10%, #0b213b 0%, #050b14 38%, #030811 100%) !important;
-            color: var(--cc-text) !important;
-        }
-        [data-testid="stHeader"] {background: rgba(3,8,17,.72) !important;}
-        [data-testid="stToolbar"] {background: transparent !important;}
-        .block-container {max-width: 1500px; padding-top: 1rem !important;}
-
-        /* Sidebar */
-        [data-testid="stSidebar"] {
-            background: linear-gradient(180deg,#071321 0%,#06101c 100%) !important;
-            border-right: 1px solid var(--cc-border) !important;
-        }
-        [data-testid="stSidebar"] > div:first-child {background: transparent !important;}
-        [data-testid="stSidebar"] * {color: var(--cc-text);}
-        [data-testid="stSidebar"] h2 {
-            font-size: 1.45rem !important;
-            letter-spacing: -.02em;
-            margin-bottom: .7rem !important;
-        }
-        [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {color:#d9e5f5 !important;}
-        [data-testid="stSidebar"] [data-baseweb="slider"] {padding-top:.15rem;}
-        [data-testid="stSidebar"] [role="switch"][aria-checked="true"] {background:var(--cc-blue) !important;}
-
-        /* Tabs as compact navigation */
-        [data-testid="stTabs"] [role="tablist"] {
-            gap:.35rem !important;
-            background:#071322 !important;
-            border:1px solid var(--cc-border) !important;
-            border-radius:12px !important;
-            padding:.35rem !important;
-            overflow-x:auto !important;
-        }
-        [data-testid="stTabs"] [role="tab"] {
-            border-radius:8px !important;
-            padding:.55rem .78rem !important;
-            color:#9fb2ce !important;
-            background:transparent !important;
-        }
-        [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-            background:linear-gradient(180deg,#0f64c7,#0a4fa8) !important;
-            color:#fff !important;
-            box-shadow:0 0 0 1px rgba(72,159,255,.24) inset !important;
-        }
-        [data-baseweb="tab-highlight"] {display:none !important;}
-
-        /* Cards / metrics */
-        [data-testid="stMetric"] {
-            background:linear-gradient(180deg,rgba(11,27,47,.96),rgba(7,20,35,.96)) !important;
-            border:1px solid #1687ff !important;
-            border-radius:13px !important;
-            padding:.85rem 1rem !important;
-            min-height:92px !important;
-            box-shadow:0 10px 28px rgba(0,0,0,.18), 0 0 0 1px rgba(22,135,255,.08) inset !important;
-        }
-        [data-testid="stMetric"]:hover {border-color:#4aa3ff !important;}
-        [data-testid="stTabs"] [data-testid="stVerticalBlock"] > div {
-            border-radius:12px;
-        }
-        [data-testid="stTabs"] h2, [data-testid="stTabs"] h3 {
-            padding-bottom:.35rem;
-            border-bottom:1px solid rgba(22,135,255,.24);
-        }
-        [data-testid="stMetricLabel"] {color:var(--cc-muted) !important;}
-        [data-testid="stMetricValue"] {color:var(--cc-text) !important; font-weight:750 !important;}
-        [data-testid="stMetricDelta"] {font-weight:650 !important;}
-
-        /* Dataframes/tables */
-        [data-testid="stDataFrame"], [data-testid="stTable"] {
-            background:#071321 !important;
-            border:1px solid var(--cc-border) !important;
-            border-radius:13px !important;
-            overflow:hidden !important;
-            box-shadow:0 10px 28px rgba(0,0,0,.16) !important;
-        }
-        [data-testid="stDataFrame"] * {color:#dbe7f7 !important;}
-        [data-testid="stDataFrame"] canvas {filter:none !important;}
-
-        /* Expanders, forms, inputs */
-        [data-testid="stExpander"], [data-testid="stForm"] {
-            background:rgba(8,21,37,.95) !important;
-            border:1px solid var(--cc-border) !important;
-            border-radius:12px !important;
-        }
-        [data-baseweb="select"] > div,
-        [data-baseweb="input"] > div,
-        input, textarea {
-            background:#081626 !important;
-            color:#f4f8ff !important;
-            border-color:#274564 !important;
-        }
-
-        /* Alerts and banners */
-        [data-testid="stAlert"] {
-            background:linear-gradient(180deg,#0a1a2d,#081522) !important;
-            border:1px solid #1687ff !important;
-            border-radius:12px !important;
-            color:#eaf2ff !important;
-            box-shadow:0 8px 22px rgba(0,0,0,.14) !important;
-        }
-        [data-testid="stAlert"] [data-testid="stMarkdownContainer"],
-        [data-testid="stAlert"] [data-testid="stMarkdownContainer"] p,
-        [data-testid="stAlert"] [data-testid="stMarkdownContainer"] span,
-        [data-testid="stAlert"] > div {
-            color:#eaf2ff !important;
-            opacity:1 !important;
-        }
-        a[aria-label="Link to heading"] {
-            display:none !important;
-        }
-        .paper-banner {
-            background:linear-gradient(90deg,rgba(0,230,179,.12),rgba(22,135,255,.08)) !important;
-            border:1px solid rgba(0,230,179,.35) !important;
-            color:#dffcf5 !important;
-        }
-
-        /* Typography */
-        h1,h2,h3,h4 {color:#f7fbff !important; letter-spacing:-.018em;}
-        p, li, span {text-rendering:optimizeLegibility;}
-        hr {border-color:#17314d !important;}
-
-        /* Buttons */
-        .stButton > button, .stDownloadButton > button {
-            background:linear-gradient(180deg,#0e5fbd,#0a4a98) !important;
-            color:white !important;
-            border:1px solid #237ad1 !important;
-            border-radius:9px !important;
-            box-shadow:none !important;
-        }
-        .stButton > button:hover, .stDownloadButton > button:hover {
-            border-color:#50a5ff !important;
-            transform:translateY(-1px);
-        }
-
-        /* Make the AI Council feel like the mockup */
-        div[data-testid="stVerticalBlock"] > div:has(h3) {
-            border-color:transparent;
-        }
-
-        /* Mobile/tablet fit */
-        @media (max-width:900px) {
-            .block-container {padding-left:.7rem !important; padding-right:.7rem !important;}
-            [data-testid="stMetric"] {padding:.7rem .75rem !important;}
-            [data-testid="stTabs"] [role="tab"] {white-space:nowrap !important;}
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown(
-        """
-        <style>
-        html, body, [data-testid="stAppViewContainer"], .stApp {background:#f4f7fb !important; color:#142033 !important;}
-        [data-testid="stSidebar"] {background:#ffffff !important; border-right:1px solid #dfe7f0 !important;}
-        [data-testid="stMetric"], [data-testid="stDataFrame"], [data-testid="stTable"], [data-testid="stExpander"] {
-            background:#ffffff !important; border:1px solid #dfe7f0 !important; border-radius:12px !important;
-        }
-        [data-testid="stTabs"] [role="tablist"] {background:#fff !important; border:1px solid #dfe7f0 !important; border-radius:12px !important; padding:.3rem !important;}
-        [data-testid="stTabs"] [role="tab"][aria-selected="true"] {background:#e9f3ff !important; color:#075eb5 !important; border-radius:8px !important;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
+st.markdown(dashboard_theme_css(dark_mode), unsafe_allow_html=True)
 
 auto_refresh = st.sidebar.checkbox("Auto refresh", value=True)
 refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=1)
@@ -4863,123 +4689,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 
 
 # ============================================================
-# DASHBOARD THEME
-# ============================================================
-
-if dark_mode:
-    st.markdown(
-        """
-        <style>
-        .stApp {
-            background-color: #080d14;
-            color: #eef3fa;
-        }
-
-        [data-testid="stSidebar"] {
-            background-color: #0d141f;
-            border-right: 1px solid #263244;
-        }
-
-        [data-testid="stSidebar"] * {
-            color: #eef3fa;
-        }
-
-        [data-testid="stHeader"] {
-            background-color: rgba(8, 13, 20, 0.92);
-        }
-
-        [data-testid="stMetric"] {
-            background-color: #0f1825;
-            border: 1px solid #2a374a;
-            border-radius: 10px;
-            padding: 0.45rem 0.6rem;
-        }
-
-        [data-testid="stMetricValue"] {
-            color: #ffffff;
-            font-weight: 750;
-        }
-
-        [data-testid="stMetricLabel"] {
-            color: #c8d2df;
-        }
-
-        [data-testid="stTabs"] button,
-        [data-baseweb="tab"] {
-            color: #dbe4f0 !important;
-            font-weight: 650 !important;
-        }
-
-        [data-testid="stTabs"] button[aria-selected="true"],
-        [data-baseweb="tab"][aria-selected="true"] {
-            color: #ffffff !important;
-        }
-
-        [data-testid="stDataFrame"],
-        div[data-testid="stExpander"] {
-            border-color: #2a374a !important;
-        }
-
-        .stButton > button,
-        .stDownloadButton > button {
-            border-color: #39485d;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown(
-        """
-        <style>
-        .stApp {
-            background-color: #f7f9fc;
-            color: #111827;
-        }
-
-        [data-testid="stSidebar"] {
-            background-color: #ffffff;
-            border-right: 1px solid #d8dee9;
-        }
-
-        [data-testid="stHeader"] {
-            background-color: rgba(255, 255, 255, 0.94);
-        }
-
-        [data-testid="stMetric"] {
-            background-color: #ffffff;
-            border: 1px solid #d8dee9;
-            border-radius: 10px;
-            padding: 0.45rem 0.6rem;
-        }
-
-        [data-testid="stMetricValue"] {
-            color: #111827;
-            font-weight: 750;
-        }
-
-        [data-testid="stMetricLabel"] {
-            color: #4b5563;
-        }
-
-        [data-testid="stTabs"] button,
-        [data-baseweb="tab"] {
-            color: #374151 !important;
-            font-weight: 650 !important;
-        }
-
-        [data-testid="stTabs"] button[aria-selected="true"],
-        [data-baseweb="tab"][aria-selected="true"] {
-            color: #111827 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-
-# ============================================================
+# DASHBOARD THEME is applied once above, through dashboard_theme_css.
 # PERSISTENT MARKET PANEL
 # This is intentionally OUTSIDE the auto-refreshing fragment.
 # ============================================================
@@ -5267,7 +4977,7 @@ def live_dashboard():
         )
         _confidence_direction = "UP" if _confidence_score >= 0 else "DOWN"
 
-    _confidence_color = "#20f0bd" if _confidence_direction == "UP" else "#ff5d72"
+    _confidence_color = "var(--cc-up, #87d4b6)" if _confidence_direction == "UP" else "var(--cc-down, #f0a5ac)"
     _confidence_arrow = "▲" if _confidence_direction == "UP" else "▼"
     with m4:
         st.markdown(
@@ -5332,16 +5042,18 @@ def live_dashboard():
         )
     else:
         st.caption("No prospective official settlement results yet; historical Bitcoin candle accuracy is not this predictor's accuracy.")
-    render_settlement_evidence(_settlement_score, _settlement_prediction,
-                               improvement_scorecard(_shared_learning_state))
+    with st.expander("Forecast accuracy and learning"):
+        render_settlement_evidence(_settlement_score, _settlement_prediction,
+                                   improvement_scorecard(_shared_learning_state))
     render_decision_assessment(decision, risk, _shared_learning_state, futures, _display_feed)
     render_learning_freshness(_shared_learning_state)
 
-    st.caption(
-        f"Data + decision {full_cycle_ms:.0f} ms • feed load {feeds['load_ms']:.0f} ms • "
-        f"kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "
-        f"futures snapshot {futures.get('feed_ms', np.nan):.0f} ms • Kalshi target cache 3s"
-    )
+    if show_raw:
+        st.caption(
+            f"Data + decision {full_cycle_ms:.0f} ms • feed load {feeds['load_ms']:.0f} ms • "
+            f"kline request {kline_ms:.0f} ms • agg-trade request {agg_ms:.0f} ms • "
+            f"futures snapshot {futures.get('feed_ms', np.nan):.0f} ms • Kalshi target cache 3s"
+        )
 
     # ============================================================
     # TABS

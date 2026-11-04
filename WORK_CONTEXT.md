@@ -2,6 +2,25 @@
 
 Start with `AGENTS.md` and `docs/CODE_MAP.md` for focused maintenance. This file is the dated handoff history; read the sections relevant to the task. Current code and workflows supersede older historical descriptions.
 
+## Calm mobile UI (2026-11-03 Eastern, r113)
+
+- Consolidated two overlapping theme blocks into dashboard_ui.dashboard_theme_css:
+  charcoal dark / soft light palettes, subtle borders, muted directional accents,
+  readable warning text and distinct severity borders, two-column phone metrics.
+- Replaced duplicate paper-outlook/economics groups with four compact HTML cards.
+  All entry blockers and source notes remain accessible in a collapsed details
+  section. Current worker action and stale-worker warnings remain visible.
+  Research expanders share a Forecast accuracy and learning parent; latency
+  diagnostics now honor the existing Show diagnostics setting.
+- Real AppTest verifies that an open LOCK stays visible despite a changed outlook,
+  stale warnings remain outside details, and the complete entry checks remain.
+- Full offline suite: 580 tests passed. Chromium preview of actual production
+  styling, top metrics and paper renderer passed at 390px and 1440px in dark and
+  light modes, without overflow or browser errors. Preview used labeled sample
+  data; it is not a signed-in live-data audit or evidence of improved accuracy.
+- Only live_dashboard's presentation changed among app functions; prediction,
+  worker, settlement and risk engine code is unchanged.
+
 ## Mobile MACD selectors (2026-11-03 Eastern, r112)
 
 - User screenshot IMG_5354 shows two module-script import errors between the

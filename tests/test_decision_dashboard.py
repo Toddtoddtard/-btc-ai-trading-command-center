@@ -2,6 +2,27 @@ import unittest
 from unittest.mock import MagicMock,patch
 
 class DecisionDashboardTests(unittest.TestCase):
+    def test_compact_preview_keeps_open_position_and_stale_warning_visible(self):
+        try:
+            from streamlit.testing.v1 import AppTest
+        except ModuleNotFoundError:
+            self.skipTest('UI integration requires application dependencies')
+        app = AppTest.from_string('''
+from decision_dashboard import render_decision_assessment
+state = {'background_paper': {'cash': 500, 'last_cycle_at': '2020-01-01T00:00:00+00:00',
+    'open_position': {'strategy': 'LOCK', 'direction': 'DOWN', 'ticker': 'TEST'},
+    'last_message': 'Holding the recorded LOCK position'}}
+render_decision_assessment({'action': 'SCALP UP'}, {'approved': False}, state, {}, {})
+''').run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertTrue(any('HOLD LOCK DOWN' in x.value for x in app.markdown))
+        self.assertTrue(any('stale or unavailable' in x.value for x in app.warning))
+        details = next(x for x in app.expander if x.label == 'Contract details and entry checks')
+        self.assertFalse(details.proto.expanded)
+        self.assertTrue(any('one paper position is already open' in x.value
+                            for x in details.markdown))
+        self.assertEqual(len(app.info), 0)
+
     def test_blocked_scalp_is_an_outlook_not_an_executable_trade_label(self):
         from decision_dashboard import outlook_label, decision_status
         d={'action':'SCALP UP'}

@@ -382,3 +382,15 @@ The MACD history and prediction-horizon selectors use dropdowns rather than
 select sliders after the two slider positions also displayed module-import
 errors on iPhone. Choices and defaults remain 30/60/120/180 minutes (180) and
 1/5/15 minutes (15). These controls only select chart presentation horizons.
+
+### Calm dashboard presentation
+`dashboard_ui.dashboard_theme_css` owns the dark/light shell palette. It replaces
+two overlapping theme blocks with charcoal surfaces, muted directional accents,
+subtle card borders, visible keyboard focus, and two-column mobile metric groups.
+Warning/error messages retain distinct severity borders and readable text.
+The paper preview uses four compact HTML cards; its full blocker list, futures
+availability and explanatory notes remain under Contract details and entry checks.
+Open-position status and stale-worker warnings stay visible outside that expander.
+Forecast research details share one collapsed section; request latency appears
+only when Show diagnostics is enabled. No forecasting, paper-entry, settlement,
+worker, ledger or specialist rules change in this presentation update.
