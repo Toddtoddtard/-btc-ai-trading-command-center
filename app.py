@@ -3973,8 +3973,8 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             <div id="persistent-market-chart" style="width:100%;height:415px;"></div>
             <div id="prediction-horizon-controls" style="
                 position:absolute;
-                right:14px;
-                bottom:0;
+                right:8px;
+                top:4px;
                 z-index:20;
                 display:flex;
                 gap:4px;
@@ -4230,10 +4230,13 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             paper_bgcolor: paperBg,
             plot_bgcolor: plotBg,
             font: {{color: fontColor}},
-            margin: {{l:8,r:62,t:48,b:65}},
+            margin: {{l:8,r:62,t:48,b:window.innerWidth <= 700 ? 52 : 65}},
             xaxis: {{
                 rangeslider: {{visible:false}},
                 tickformat:"%H:%M",
+                tickangle: 0,
+                nticks: window.innerWidth <= 700 ? 4 : 8,
+                automargin: true,
                 title: {{text:"Time (ET)", standoff:4}},
                 ...easternAxis(initial.candles),
                 showgrid:false,
@@ -4958,7 +4961,7 @@ def live_dashboard():
     )
     with m3:
         st.markdown(
-            f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Settlement outlook</div><div class="direction-card-value">{directional_badge_html(outlook_label(decision))}</div></div>',
+            f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Settlement outlook</div><div class="direction-card-value">{directional_badge_html(outlook_label(decision).replace("LOCKED OUTLOOK ", ""))}</div></div>',
             unsafe_allow_html=True,
         )
     # Confidence card only: keep every other top metric unchanged and add the
@@ -4999,7 +5002,7 @@ def live_dashboard():
     else:
         _entry_value = "N/A"
     m6.metric(
-        "Kalshi Call Entry",
+        "Latest paper entry (historical)",
         _entry_value,
         help="Actual selected-side Kalshi ask captured when the most recent paper call opened.",
     )
