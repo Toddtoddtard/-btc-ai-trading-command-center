@@ -11,7 +11,7 @@ Scope: Issue #95 and confirmed reliability/performance defects. Paper only. This
 - Automatic scalping was still marked enabled in source and the state validator. Restored explicit LOCK_FIRST/disabled mode, preserving directional forecast and shadow research functionality. Updated the validator and existing mode assertions.
 - Missing 8m/2m timing rows: added them to independent and paired scorecards using only original observed pre-checkpoint forecasts and official labels. No missed forecasts were reconstructed.
 - Full state download was 45,738,313 bytes. Lossless gzip measured 4,240,087 bytes (90.7% smaller). Worker publication and the legacy ledger-repair workflow now atomically update JSON and gzip; public clients use gzip with original JSON fallback. Entire history/model state remains intact.
-- Availability watchdog browser job failed before reaching the app: GitHub run 42014063879 / job 127200015026 reported Playwright 1.55 does not support Ubuntu 26.04. Pinned only that browser job to Ubuntu 24.04. Learner recovery in the same run succeeded.
+- Availability watchdog browser job failed before reaching the app: GitHub run 42014063879 / job 127200015026 reported Playwright 1.55 does not support Ubuntu 26.04. Pinned the availability browser job and smooth-chart browser job to Ubuntu 24.04. The first PR chart run 42055714738 reproduced the same dependency failure before its chart test; this follow-up fixes that runner too. Learner recovery in the same run succeeded.
 
 ## Verification
 
