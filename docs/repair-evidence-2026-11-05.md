@@ -20,7 +20,7 @@ Scope: Issue #95 and confirmed reliability/performance defects. Paper only. This
 - Hosted full-audit run 42055922424 passed its tests but failed a legacy BALANCED_CALLS-only source check. Updated it to verify the shared LOCK_FIRST path and use the full offline runner, which also includes standalone tests.
 
 - Baseline: 580 offline tests passed before changes.
-- Final implementation suite: 595 offline tests passed; Python compilation and whitespace checks passed. New failure reproductions were run before their fixes. Two obsolete assertions for enabled scalping/balanced copy were updated to the user's explicit LOCK-first requirement.
+- Initial repair suite: 595 offline tests passed; compressed API recovery follow-up: 598 passed; Python compilation and whitespace checks passed. New failure reproductions were run before their fixes. Two obsolete assertions for enabled scalping/balanced copy were updated to the user's explicit LOCK-first requirement.
 - Independent review found stale SCALP promotion, unsupported-version account replacement, and alternate JSON publisher/gzip divergence. All were addressed; stale promotion and version replacement reproductions now pass.
 - Actual mobile chart browser smoke test passed six updates: retained chart node, changing prices, retained zoom/horizon, Eastern tick labels within mobile budget, server forecast and no page errors.
 - Public deployed app was asleep; wake requested and private access gate rendered at r114. Authenticated live dashboard unavailable without its access code. New build identity is r115-shared-worker-outlook; hosted CI, merge and worker/deployment observations are recorded separately in the final handoff.
@@ -74,3 +74,46 @@ The exact current producing revision's paired production cohort has only 56 sett
 - Exact last-seconds forecast coverage remains bounded by worker cadence. The one-second chart does not imply a one-second learner or worker.
 - No model has demonstrated reliable superiority to market probabilities. All specialists remain available and existing chronology/rare-specialist tests remain active; no speculative indicators or strategy promotion were added.
 - Existing one-LOCK cap, calibrated confidence/validation checks, fee-aware margin, risk limits, reference/depth freshness and official own-ticker settlement safeguards remain. Real-money permissions were not modified.
+
+
+## Live deployment verification and CDN recovery follow-up
+
+- PR #96 merged as `22c651f1fc216e9dd1666913af63de3199e8b5a6`; all five final hosted CI workflows passed, including the browser chart check and full audit. The deployed private-access gate rendered r115. Availability browser and learner-recovery jobs also passed after merge.
+- PR #97 merged as `4eaea0ab47f95f99a4f452bf09eaa03a8eb2fbd8`. Historical ledger repair is now manual-only, uses the shared non-replacing state-writer queue and shallow checkout. The merge-triggered old repair found an already-present correction marker; the original 159 rows and exact cash are unchanged in the verified new worker state.
+- The old worker completed successfully. New worker run `42057983451` passed its startup/regression checks and published revision `22c651f...`. The first rollover checkpoint safely rejected an expired contract; the next published a valid current-market snapshot.
+- Immutable learning-state commit `ab58c706d4980656d18cbe1b293014b9b8b2ed15` contains a fresh-at-capture decision for `KXBTC15M-26NOV051115-15`: ID `622af3590cb83fe6ab06fedb`, capture 2026-11-05 16:03:30 UTC. Snapshot, paper assessment and dashboard selector IDs match. Action WAIT, forecast YES probability 59.5%, approval false, no fill. LOCK_FIRST and automatic scalping=false were confirmed in persisted state. Worker healthy; 4,117 graded samples; zero candle backlog; ledger reconciles at $466.365 with 159 unchanged closed rows.
+- The new producing revision has only **one** officially settled forecast market (including WAIT), no new closed paper trades, and no proven advantage over the market baseline. This is insufficient evidence for the 70% target or profitability. The existing accuracy automation now requires a distinct prospective deployment cohort and preserves LOCK-only safeguards.
+- Direct public branch downloads continued serving the older 15:49 checkpoint after the new worker publication. Verification used the immutable state commit to avoid attributing stale CDN data to the new build. The reader follow-up prefers gzip for authenticated/API recovery too, and allows stale decisions to trigger the existing five-minute-bounded recovery before general learning staleness. Corrupt/truncated gzip, including invalid DEFLATE data, falls back to original JSON. Authentication remains on constructed GitHub API URLs with validated blob SHA; recovery stays capped at 12 attempts/hour (worst-case 48 Contents/blob requests with both fallbacks).
+- Follow-up build label: r116-compressed-state-recovery. Its final hosted results and deployed gate verification are recorded in the PR/final handoff; authenticated dashboard remains untested without an access code. This changes data retrieval, not prediction formulas, financial safeguards or model promotion.
+
+## Complete changed-file inventory
+
+- `.github/workflows/btc-audit-v16.yml`
+- `.github/workflows/health-watchdog.yml`
+- `.github/workflows/learn.yml`
+- `.github/workflows/repair-observed-paper-win.yml`
+- `.github/workflows/smooth-chart.yml`
+- `ARCHITECTURE.md`
+- `access_control.py`
+- `app.py`
+- `background_paper.py`
+- `decision_dashboard.py`
+- `decision_snapshot.py`
+- `docs/CODE_MAP.md`
+- `docs/repair-evidence-2026-11-05.md`
+- `docs/repair-plan-2026-11-05.md`
+- `docs/settlement-benchmark-2026-11-05.json`
+- `improvement_evidence.py`
+- `learner_v31.py`
+- `lock_focus.py`
+- `scripts/validate_learning_state.py`
+- `settlement_predictor.py`
+- `shared_learning.py`
+- `tests/test_contract_regressions.py`
+- `tests/test_decision_snapshot.py`
+- `tests/test_improvement_evidence.py`
+- `tests/test_lock_focus.py`
+- `tests/test_runtime_imports.py`
+- `tests/test_shared_learning.py`
+- `tests/test_worker_session.py`
+- `worker_session.py`

@@ -1,5 +1,6 @@
 import base64
 import gzip
+import zlib
 import json
 import time
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from threading import Lock
 from urllib.request import Request, urlopen
 
 import streamlit as st
+from decision_snapshot import snapshot_blockers
 
 REPO = "Toddtoddtard/-btc-ai-trading-command-center"
 BRANCH = "learning-state"
@@ -73,7 +75,7 @@ def _secret_token():
     return ""
 
 
-def _fetch_private(token):
+def _fetch_private_bytes(token, path):
     headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": "BTC-AI-Command-Center/shared-learning",
@@ -81,7 +83,7 @@ def _fetch_private(token):
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = Request(API_URL, headers=headers)
+    req = Request(API_URL.replace('/contents/'+PATH, '/contents/'+path), headers=headers)
     with urlopen(req, timeout=3.5) as response:
         wrapper = json.loads(response.read().decode("utf-8"))
     # GitHub's Contents API omits content for files larger than 1 MB.
@@ -96,8 +98,16 @@ def _fetch_private(token):
         )
         with urlopen(blob_request, timeout=3.5) as response:
             wrapper = json.loads(response.read().decode("utf-8"))
-    raw = base64.b64decode(wrapper["content"]).decode("utf-8")
-    return json.loads(raw)
+    return base64.b64decode(wrapper["content"])
+
+
+def _fetch_private(token):
+    # Same-host API recovery must not download the 45+ MB uncompressed blob
+    # when the publisher has already supplied its full lossless gzip copy.
+    try:
+        return json.loads(gzip.decompress(_fetch_private_bytes(token, PATH+'.gz')).decode('utf-8'))
+    except (OSError, EOFError, ValueError, zlib.error):
+        return json.loads(_fetch_private_bytes(token, PATH).decode('utf-8'))
 
 
 def _fetch_public(cache_key=None):
@@ -109,7 +119,7 @@ def _fetch_public(cache_key=None):
             'User-Agent':'BTC-AI-Command-Center/shared-learning', 'Cache-Control':'no-cache'})
         with urlopen(request, timeout=3.0) as response:
             return json.loads(gzip.decompress(response.read()).decode('utf-8'))
-    except (OSError, EOFError, ValueError):
+    except (OSError, EOFError, ValueError, zlib.error):
         pass
     url = RAW_URL + suffix
     req = Request(
@@ -145,9 +155,14 @@ def _fetch_shared_learning_state(ttl):
         source = "private-github" if token else "github-raw"
         if isinstance(payload, dict):
             # Raw branch URLs can lag a successful publication despite cache busting.
-            # Bound unauthenticated API recovery to at most 24 requests/hour
-            # (Contents + blob), and never replace a newer saved snapshot.
-            if not token and learning_freshness(payload)["warning"] and now - _PUBLIC_API_RETRY_AT >= 300:
+            # Bound unauthenticated recovery to 12 attempts/hour (up to 48
+            # Contents/blob requests with gzip + JSON fallback), and never
+            # replace a newer saved snapshot.
+            decision = payload.get('settlement_decision') or {}
+            decision_stale = bool(isinstance(decision, dict)
+                and decision.get('version') == 'settlement-decision-v1'
+                and snapshot_blockers(decision, decision.get('ticker')))
+            if not token and (learning_freshness(payload)["warning"] or decision_stale) and now - _PUBLIC_API_RETRY_AT >= 300:
                 _PUBLIC_API_RETRY_AT = now
                 try:
                     recovered = _fetch_private("")
