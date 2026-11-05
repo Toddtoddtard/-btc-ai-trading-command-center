@@ -15,6 +15,8 @@ Scope: Issue #95 and confirmed reliability/performance defects. Paper only. This
 
 ## Verification
 
+- Hosted browser run 42056258938 then timed out while apt waited on azure.archive.ubuntu.com, before launching the chart. Browser jobs now install Chromium using runner-provided libraries, verified by actual browser launch; the mandatory chart test remains unchanged.
+
 - Hosted full-audit run 42055922424 passed its tests but failed a legacy BALANCED_CALLS-only source check. Updated it to verify the shared LOCK_FIRST path and use the full offline runner, which also includes standalone tests.
 
 - Baseline: 580 offline tests passed before changes.

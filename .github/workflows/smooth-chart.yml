@@ -18,5 +18,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt playwright==1.55.0
-      - run: python -m playwright install --with-deps chromium
+      # Runner supplies browser libraries; launch below verifies them. Avoid
+      # an unrelated apt mirror outage blocking all browser verification.
+      - run: python -m playwright install chromium
       - run: python scripts/check_smooth_chart.py
