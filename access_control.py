@@ -43,8 +43,31 @@ def require_owner_approval():
     with st.form("private_access_form", clear_on_submit=False):
         name = st.text_input("Approved user name", key="access_name")
         code = st.text_input("Access code", type="password", key="access_code")
-        unlock_subm…2953 tokens truncated…ty. Cron requests are best effort; verify actual snapshot and paper-cycle ages.
-- Older patch installers under `tools/` are not the main runtime. Some are still invoked by workflows, so verify references before touching them.
-- `tools/run_offline_tests.py` executes both `unittest.TestCase` methods and standalone `test_*` functions with sockets disabled. Bare unittest discovery does not include the latter.
-- `WORK_CONTEXT.md` is the dated handoff log. `ARCHITECTURE.md` explains component relationships. Avoid duplicating numeric strategy settings here; inspect the current constants and explicit user instructions.
+        unlock_submitted = st.form_submit_button(
+            "Unlock",
+            use_container_width=True,
+        )
 
+    if unlock_submitted:
+        submitted = _hash_code(code.strip()) if code else ""
+        matched_user = None
+        for approved_name, approved_hash in codes.items():
+            if name.strip().lower() == str(approved_name).strip().lower() and hmac.compare_digest(submitted, str(approved_hash).strip().lower()):
+                matched_user = approved_name
+                break
+
+        if matched_user:
+            st.session_state["access_granted"] = True
+            st.session_state["access_user"] = str(matched_user)
+            st.session_state["access_failures"] = 0
+            st.rerun()
+
+        failures += 1
+        st.session_state["access_failures"] = failures
+        if failures >= 5:
+            st.session_state["access_locked_until"] = now + 300
+            st.session_state["access_failures"] = 0
+        st.error("Access denied. Ask the owner for approval and a valid access code.")
+
+    st.info("No access code? Ask the owner. Only approved users can enter.")
+    st.stop()
