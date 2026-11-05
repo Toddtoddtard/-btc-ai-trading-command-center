@@ -117,3 +117,14 @@ The exact current producing revision's paired production cohort has only 56 sett
 - `tests/test_shared_learning.py`
 - `tests/test_worker_session.py`
 - `worker_session.py`
+
+
+## Rollover observation and registration repair
+
+The later immutable checkpoint `5540c505ada0e2892ce4c26754fac27a4b769326` (paper cycle 16:17:37 UTC) preserved all159 ledger rows and cash, reported 4,118 graded samples and zero backlog, and exposed a rollover edge case: `graded_this_run=True`, `registered_this_run=False`, `pending=None`. A later execution refresh had a valid current-market forecast, but the shared publisher had no registered window to copy and the paper assessment correctly refused entry as "No active Kalshi learner window".
+
+Root cause: the main pass graded the old market while its startup market read still referenced the just-expired ticker. Registration failed normally; subsequent refreshes observed a valid new market but did not retry the existing registration path. `refresh_execution_decision` now retries `register_with_snapshot` only when pending is absent, using actually observed current history/market inputs before recalculating the live call. Existing registration expiry/deadline checks and first-LOCK latch remain intact. No prior forecast is reconstructed, and no existing pending window is replaced.
+
+The regression was observed failing before the fix, then passed: one registration across repeated refreshes, correct current ticker and LOCK direction in the snapshot. Independent review found no important issue; focused13 checks passed. Full offline suite:599 passed. Build label r117-rollover-window-recovery. Production observation of this final rollover recovery remains pending until its queued worker revision publishes; the previously deployed shared-decision protocol itself was verified live as described above.
+
+Latest retained independent archive at the 16:17 checkpoint:516 distinct official markets, 59.30% independent accuracy, Brier0.23226 versus market0.22452. The current producing revision's prospective cohort contains one market and no new closed paper trades. These small/revision-specific cohorts cannot prove the target or profitability. Current cash/equity remains466.365, closed159, wins92/losses67, fee-adjusted P&L−33.635, profit factor0.9157. All original trade rows were compared and are identical.

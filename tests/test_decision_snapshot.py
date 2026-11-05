@@ -152,6 +152,27 @@ class DecisionSnapshotTests(unittest.TestCase):
         bg.run_cycle(state,lambda _:self.market(1100),now=1100)
         self.assertEqual(paper['open_position']['strategy'],'SCALP')
 
+    def test_refresh_registers_observed_current_window_after_rollover_gap(self):
+        from unittest.mock import patch
+        import learner_v31 as worker
+        call=self.state()['pending']
+        state={'pending':None}
+        market={'ticker':'T','expires_at':1600}
+        def register(current,frame,observed):
+            self.assertEqual(observed,market)
+            current['pending']=copy.deepcopy(call)
+            return True
+        with patch.object(worker,'parallel_calls',return_value={'history':object(),'market':market}), \
+             patch.object(worker,'register_with_snapshot',side_effect=register) as registration, \
+             patch.object(worker,'current_shadow_call',return_value=call), \
+             patch.object(worker,'record_observation'), patch.object(worker,'record_prediction'):
+            worker.refresh_execution_decision(state)
+            worker.refresh_execution_decision(state)
+        registration.assert_called_once()
+        self.assertEqual(state['settlement_decision']['ticker'],'T')
+        self.assertEqual(state['settlement_decision']['master_action'],'LOCK UP')
+        self.assertIsNotNone(state['pending'])
+
     def test_incompatible_existing_account_is_rejected_without_replacement(self):
         self.api()
         for version in (None,2):
