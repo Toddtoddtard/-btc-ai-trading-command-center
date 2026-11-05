@@ -51,10 +51,17 @@ jobs:
       - name: Compile every Python file
         run: python -m compileall -q .
       - name: Run regression tests
-        run: python -m unittest discover -s tests -p 'test_*.py'
+        run: python tools/run_offline_tests.py
       - name: Verify repaired call path exists
         run: |
-          if grep -q '"execution_mode": "BALANCED_CALLS"' app.py; then
+          if grep -q '"execution_mode": "LOCK_FIRST"' app.py; then
+            grep -q 'dashboard_decision(_live_preview, _shared_learning_state)' app.py
+            grep -q 'AUTO_SCALPING_ENABLED = False' lock_focus.py
+            grep -q 'snapshot_blockers(snapshot, ticker, now)' background_paper.py
+            grep -q 'refresh_execution_decision(state)' background_paper.py
+            grep -q 'LOCK_MIN_CONFIDENCE = 0.68' lock_focus.py
+            grep -q 'LOCK_MAX_ENTRY_PRICE = 0.93' lock_focus.py
+          elif grep -q '"execution_mode": "BALANCED_CALLS"' app.py; then
             grep -q 'evaluate_lock_focus(' app.py
             grep -q 'AUTO_SCALPING_ENABLED' app.py
             grep -q 'LOCK_EARLIEST_SECONDS = 15 \* 60' lock_focus.py

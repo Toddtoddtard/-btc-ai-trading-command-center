@@ -15,6 +15,8 @@ Scope: Issue #95 and confirmed reliability/performance defects. Paper only. This
 
 ## Verification
 
+- Hosted full-audit run 42055922424 passed its tests but failed a legacy BALANCED_CALLS-only source check. Updated it to verify the shared LOCK_FIRST path and use the full offline runner, which also includes standalone tests.
+
 - Baseline: 580 offline tests passed before changes.
 - Final implementation suite: 595 offline tests passed; Python compilation and whitespace checks passed. New failure reproductions were run before their fixes. Two obsolete assertions for enabled scalping/balanced copy were updated to the user's explicit LOCK-first requirement.
 - Independent review found stale SCALP promotion, unsupported-version account replacement, and alternate JSON publisher/gzip divergence. All were addressed; stale promotion and version replacement reproductions now pass.
