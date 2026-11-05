@@ -25,6 +25,34 @@ class _Response:
 
 
 class SharedLearningTests(unittest.TestCase):
+    def test_public_compressed_state_preserves_full_history_and_decisions(self):
+        import gzip
+        from io import BytesIO
+        payload = {'updated_at':'2026-11-05T15:00:00Z', 'settlement_decision':{'decision_id':'abc'},
+                   'specialist_history':{'Rare specialist':[1,2]}, 'background_paper':{'cash':466.365}}
+        requests=[]
+        def respond(request, timeout):
+            requests.append(request.full_url)
+            return BytesIO(gzip.compress(json.dumps(payload).encode(),mtime=0))
+        with patch.object(shared_learning,'urlopen',side_effect=respond):
+            self.assertEqual(shared_learning._fetch_public(7),payload)
+        self.assertEqual(len(requests),1)
+        self.assertIn('learning_state.json.gz?v=7',requests[0])
+
+    def test_missing_or_corrupt_compressed_state_falls_back_to_original_json(self):
+        from io import BytesIO
+        payload={'forecast':{'samples':123}}
+        requests=[]
+        def respond(request,timeout):
+            requests.append(request.full_url)
+            if '.json.gz' in request.full_url:
+                return BytesIO(b'incomplete gzip')
+            return BytesIO(json.dumps(payload).encode())
+        with patch.object(shared_learning,'urlopen',side_effect=respond):
+            self.assertEqual(shared_learning._fetch_public(7),payload)
+        self.assertEqual(len(requests),2)
+        self.assertIn('learning_state.json?v=7',requests[-1])
+
     def test_simultaneous_fragments_share_one_learning_download(self):
         barrier = Barrier(3, timeout=2)
         payload = {'updated_at': '2026-10-16T13:00:00Z', 'forecast': {'samples': 1}}

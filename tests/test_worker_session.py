@@ -121,3 +121,6 @@ class WorkerSessionTests(unittest.TestCase):
             self.assertEqual((repo / 'worker.py').read_text(), 'runner code')
             self.assertEqual(git('show', 'learning-state:learning_state.json', cwd=remote), '{"ledger":"new"}')
             self.assertEqual(git('show', 'learning-state:political_event_watch.json', cwd=remote), 'other state')
+            import gzip, json
+            compressed = subprocess.check_output(['git','show','learning-state:learning_state.json.gz'],cwd=remote)
+            self.assertEqual(json.loads(gzip.decompress(compressed)), {'ledger':'new'})

@@ -10,6 +10,21 @@ from tests.test_settlement_predictor import EXPIRY, TICKER, market, feed
 
 
 class ImprovementEvidenceTests(unittest.TestCase):
+    def test_requested_eight_and_two_minute_checkpoints_use_real_captures_only(self):
+        module = self.module()
+        a, b = self.row(0), self.row(1)
+        for row, lead in ((a,480),(b,120)):
+            row['opened_at'] = row['expires_at']-lead
+            row['settlement_prediction']['captured_at'] = row['opened_at']
+        state = {'settlement_predictor': {'history': [a,b]}}
+        for score in (module.scorecard(state,as_of=EXPIRY+2000), predictor.scorecard(state,as_of=EXPIRY+2000)):
+            self.assertIn('8m',score['by_horizon'])
+            self.assertIn('2m',score['by_horizon'])
+        report = module.scorecard(state,as_of=EXPIRY+2000)
+        self.assertEqual(report['by_horizon']['8m']['market']['samples'],1)
+        self.assertEqual(report['by_horizon']['2m']['market']['samples'],1)
+        self.assertEqual(report['by_horizon']['10m']['market']['samples'],0)
+
     def module(self):
         from pathlib import Path
         self.assertTrue(Path('improvement_evidence.py').exists(), 'Paired prospective evidence is missing')

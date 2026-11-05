@@ -56,6 +56,28 @@ The active scheduled entrypoint is `learner_v31.py`, supported by `learner.py`
 and `learner_v3.py`. `.github/workflows/learn.yml` runs learning, enrichment and
 `background_paper.py`, then publishes the persistent ledger and model state to
 `learning-state`. The dashboard reads that state through `shared_learning.py`.
+`decision_snapshot.py` freezes one versioned, timestamped worker decision with a
+content-derived ID, ticker/expiry, original LOCK side, latest forecast side,
+confidence, probability/source, reference time and current approval/veto. The
+worker refreshes actual inputs before each paper pass; retries cannot renew a
+cached timestamp. New production fills and SCALP-to-LOCK promotions require a
+matching snapshot no more than 30 seconds old, plus all existing fee, depth,
+reference, confidence, validation and position checks. Ordinary forecasts become
+WAIT in the action snapshot. Automatic scalping is disabled. Filled LOCKs keep
+their recorded side and official settlement lifecycle, even when evidence changes.
+The dashboard overlays that same decision onto its Master/Outlook presentation;
+local calculations are labeled previews and cannot latch a separate local LOCK.
+Stale/missing snapshots show WAIT with their reason and original decision time.
+Assessments, signal attempts, fills and lifecycle events retain decision IDs.
+Existing ledgers with missing/unsupported versions fail closed; missing old
+migration markers never authorize a balance reset or history archival.
+
+The publisher commits the complete JSON checkpoint and deterministic gzip copy
+atomically; the legacy repair writer updates both. Public dashboard readers try
+gzip first and fall back to JSON on unavailable/corrupt compressed content. All
+model and ledger history survives compression. Alternate future state writers
+must publish both copies in the same commit. On the November 5 retained snapshot,
+45.7 MB compressed to 4.2 MB with standard-library gzip (about 91% fewer bytes).
 The learner reuses `live_feeds.parallel_calls` for independent startup reads,
 trade/futures specialist inputs and the futures primary/fallback requests.
 All requests in a batch finish before it returns or raises. Partial futures
@@ -199,7 +221,7 @@ the independent model and its archival score remain available as challengers.
 
 Each full worker pass freezes a settlement observation independently of research-phase deduplication and trade approval, preserving WAIT calls, specialist votes, timestamps, target/rule, and unavailable reasons. Only official binary results read after expiry resolve these observations; unresolved labels are retained. The last 3,000 settled captures supplement the existing research history. Earliest-per-contract observations within the same remaining-time group train the bounded ridge residual, but it remains disabled until at least 100 chronological validation markets follow at least 100 training markets and beat both the uncorrected model and Kalshi midpoint by 0.0005 Brier overall, with nonnegative recent paired improvement. Each validation fit uses only outcomes observed before its forecast. No retrospective refitting changes a stored prediction.
 
-The settlement evidence panel shows independent accuracy, Brier, log loss, calibration and the paired market/coin-flip benchmarks. Its 10-, 5- and 1-minute checkpoints select the closest capture before each checkpoint within 150 seconds; they never borrow later forecasts. Sampling is limited by worker cadence, not the one-second screen refresh. Coverage describes retained observed markets and unavailable captures, not continuous uptime or unobserved outage windows. The displayed raw estimate does not itself approve execution; the independent execution qualification above is required. Legacy Binance snapshots are not backfilled as official reference features.
+The settlement evidence panel shows independent accuracy, Brier, log loss, calibration and the paired market/coin-flip benchmarks. Its 10-, 8-, 5-, 2- and 1-minute checkpoints select the closest capture before each checkpoint within 150 seconds; they never borrow later forecasts. Sampling is limited by worker cadence, not the one-second screen refresh. Coverage describes retained observed markets and unavailable captures, not continuous uptime or unobserved outage windows. The displayed raw estimate does not itself approve execution; the independent execution qualification above is required. Legacy Binance snapshots are not backfilled as official reference features.
 
 The persistent paper reader fetches current public order-book depth. New entries consume no more than the observed selected-side best ask size, with fees recomputed for that size; failed depth or stale quotes block simulated fills. A SCALP exit requires sufficient fresh best-bid size for the full position; otherwise it remains open until another quote or official settlement. This conservative full-fill model does not simulate partial exits, latency or queue priority, and depth availability is not a guarantee of real execution. New positions record `OBSERVED_TOP_OF_BOOK`; injected legacy quote-only snapshots record `LEGACY_QUOTE_ONLY`. Historical ledger results are preserved, not reclassified as depth-validated performance. Contract-versus-market research Brier comparisons use the same subset of markets and display its own sample count and accuracy.
 

@@ -43,6 +43,9 @@ def render_decision_assessment(decision, risk, state, futures, reference):
     ticket = build_pro_trade_ticket(decision,preview_risk,paper,
              has_open_position=bool(paper.get('open_position')),lock_gate=paper.get('lock_gate'))
     assessment = ticket.get('assessment') or {}
+    worker_assessment = paper.get('entry_assessment') or {}
+    if decision.get('decision_id') and worker_assessment.get('decision_id') == decision['decision_id']:
+        assessment = worker_assessment
     p=finite(assessment.get('selected_probability'))
     breakeven=finite(assessment.get('break_even_probability'))
     edge=finite(assessment.get('net_edge_per_contract'))
@@ -53,6 +56,10 @@ def render_decision_assessment(decision, risk, state, futures, reference):
         ('Net settlement edge / contract', f'{edge*100:+.2f}¢' if edge is not None else 'Unavailable'),
     ]), unsafe_allow_html=True)
     st.caption(view['reason'])
+    if worker_assessment.get('decision_id'):
+        from display_time import eastern_time
+        st.caption('Assessed worker decision ' + str(worker_assessment['decision_id']) +
+                   ' • ' + eastern_time(worker_assessment.get('checked_at'), clock_only=True))
     if ticket['blockers']:
         st.caption('Entry preview: WAIT · approval checks have not passed. See details below.')
     with st.expander('Contract details and entry checks'):

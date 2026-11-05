@@ -29,16 +29,16 @@ assert 'prediction_snapshots' in data
 assert 'wait_counterfactual' in data
 assert data.get('status', {}).get('research_lab_ok') is True
 mode=data.get('btc_execution_mode', {})
-assert mode.get('name') == 'BALANCED_CALLS'
+assert mode.get('name') == 'LOCK_FIRST'
 assert mode.get('paper_only') is True
-assert mode.get('auto_scalping_enabled') is True
+assert mode.get('auto_scalping_enabled') is False
 assert mode.get('earliest_lock_seconds') == 900
 assert mode.get('confidence_floor') == 0.68
 assert mode.get('maximum_entry_price') == 0.93
 assert mode.get('maximum_lock_entry_price') == 0.93
 assert mode.get('maximum_scalp_entry_price') == 0.75
-assert data.get('status', {}).get('btc_execution_mode') == 'BALANCED_CALLS'
-assert data.get('status', {}).get('auto_scalping_enabled') is True
+assert data.get('status', {}).get('btc_execution_mode') == 'LOCK_FIRST'
+assert data.get('status', {}).get('auto_scalping_enabled') is False
 assert data.get('status', {}).get('schedule_target_minutes') == 10.0
 assert data.get('status', {}).get('schedule_late_after_minutes') == 20.0
 assert data.get('status', {}).get('scheduler') == 'GitHub Actions best effort'

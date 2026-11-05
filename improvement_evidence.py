@@ -105,7 +105,7 @@ def scorecard(state, as_of=None):
         latest_capture=latest.get('opened_at'),
         captured_markets=len({r['ticker'] for r in captures}),
         overall=compare(_observations(observed, as_of)),
-        by_horizon={str(m)+'m': compare(_observations(observed, as_of, m*60)) for m in (10, 5, 1)},
+        by_horizon={str(m)+'m': compare(_observations(observed, as_of, m*60)) for m in (10, 8, 5, 2, 1)},
         paper=dict(closed_trades=len(pnl), wins=wins, losses=losses,
                    net_pnl=sum(pnl), win_rate=wins/(wins+losses) if wins+losses else None,
                    scope='Actual tagged new-version paper trades only; includes recorded fees.'))

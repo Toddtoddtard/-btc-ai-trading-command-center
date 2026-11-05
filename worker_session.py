@@ -1,5 +1,6 @@
 """Repeat the existing learner pipeline in one bounded GitHub runner session."""
 import argparse
+import gzip
 import json
 import os
 import shutil
@@ -41,7 +42,9 @@ def publish_state():
             compact = json.dumps(json.loads(source.read_text()), separators=(',', ':'),
                                  ensure_ascii=False, allow_nan=False)
             (Path(tree) / 'learning_state.json').write_text(compact, encoding='utf-8')
-            command('git', 'add', 'learning_state.json', cwd=tree)
+            (Path(tree) / 'learning_state.json.gz').write_bytes(
+                gzip.compress(compact.encode('utf-8'), compresslevel=6, mtime=0))
+            command('git', 'add', 'learning_state.json', 'learning_state.json.gz', cwd=tree)
             if not command('git', 'diff', '--cached', '--name-only', cwd=tree).strip():
                 return
             command('git', 'commit', '-m', 'Update BTC AI learning state', cwd=tree)
@@ -74,9 +77,11 @@ def run_cycle():
     command(sys.executable, 'bot_intelligence_report.py',
             env={**env, 'LEARNING_STATE_INPUT': str(output), 'LEARNING_STATE_OUTPUT': str(enriched)})
     enriched.replace(output)
-    for script in ('enrich_learning_state_v5.py', 'audit_scorecard_v7.py', 'background_paper.py'):
+    for script in ('enrich_learning_state_v5.py', 'audit_scorecard_v7.py'):
         command(sys.executable, script, env=env)
     command(sys.executable, 'multi_asset_paper.py', '--state', str(output), env=env)
+    # Refresh the BTC decision after unrelated network work, just before publish.
+    command(sys.executable, 'background_paper.py', env=env)
     command(sys.executable, 'improvement_evidence.py', env=env)
     command(sys.executable, 'scripts/validate_learning_state.py', env=env)
     publish_state()

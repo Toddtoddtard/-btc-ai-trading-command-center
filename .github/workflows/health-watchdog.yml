@@ -47,7 +47,8 @@ jobs:
     # Browser wake checks need not install Chromium every five minutes.
     # Run them hourly, on explicit changes, or after other periodic workers.
     if: (github.event_name == 'schedule' && github.event.schedule == '11 * * * *') || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.name != 'BTC AI 24x7 Learner')
-    runs-on: ubuntu-latest
+    # Playwright 1.55 cannot install Chromium dependencies on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4

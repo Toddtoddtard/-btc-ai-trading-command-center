@@ -497,7 +497,7 @@ class ContractRegressionTests(unittest.TestCase):
         self.assertIn('_contract_history = shared_paper_history(_shared_paper', source)
         self.assertNotIn('auto_result = manage_auto_paper(', source)
         self.assertIn('persistent GitHub learning-state ledger', source)
-        self.assertIn('Balanced-call mode publishes a directional outlook', source)
+        self.assertIn('LOCK-first mode keeps directional forecasts separate', source)
         self.assertIn('Paper execution remains separate', source)
         self.assertIn('at least 68% calibrated confidence', source)
         self.assertIn('only from that ticker\'s official Kalshi settlement', source)
