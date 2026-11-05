@@ -74,7 +74,11 @@ migration markers never authorize a balance reset or history archival.
 
 The publisher commits the complete JSON checkpoint and deterministic gzip copy
 atomically; the legacy repair writer updates both. Public dashboard readers try
-gzip first and fall back to JSON on unavailable/corrupt compressed content. All
+gzip first and fall back to JSON on unavailable/corrupt compressed content.
+Authenticated/API recovery readers also prefer compressed Contents/blob reads,
+with original JSON fallback. Stale decision snapshots can trigger bounded API
+recovery before the general learning-health warning; a recent download never
+renews a decision timestamp or rolls back a newer cached checkpoint. All
 model and ledger history survives compression. Alternate future state writers
 must publish both copies in the same commit. On the November 5 retained snapshot,
 45.7 MB compressed to 4.2 MB with standard-library gzip (about 91% fewer bytes).

@@ -25,6 +25,52 @@ class _Response:
 
 
 class SharedLearningTests(unittest.TestCase):
+    def test_authenticated_reader_uses_compressed_checkpoint_without_full_blob(self):
+        import gzip
+        from io import BytesIO
+        payload={'forecast':{'samples':4117},'background_paper':{'cash':466.365},
+                 'settlement_decision':{'decision_id':'current'}}
+        requests=[]
+        def respond(request,timeout):
+            requests.append(request)
+            data=gzip.compress(json.dumps(payload).encode(),mtime=0)
+            return BytesIO(json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode())
+        with patch.object(shared_learning,'urlopen',side_effect=respond):
+            self.assertEqual(shared_learning._fetch_private('test-only'),payload)
+        self.assertEqual(len(requests),1)
+        self.assertIn('learning_state.json.gz?ref=learning-state',requests[0].full_url)
+        self.assertEqual(requests[0].get_header('Authorization'),'Bearer test-only')
+
+    def test_stale_decision_recovers_before_learning_health_threshold(self):
+        now=datetime(2026,11,5,16,0,tzinfo=timezone.utc).timestamp()
+        old={'updated_at':'2026-11-05T15:59:00Z','background_paper':{'last_cycle_at':'2026-11-05T15:59:00Z'},
+             'settlement_decision':{'version':'settlement-decision-v1','captured_at':now-120}}
+        new={'updated_at':'2026-11-05T16:00:00Z','background_paper':{'last_cycle_at':'2026-11-05T16:00:00Z'}}
+        with patch.object(shared_learning,'_secret_token',return_value=''), \
+             patch.object(shared_learning,'_fetch_public',return_value=old), \
+             patch.object(shared_learning,'_fetch_private',return_value=new) as api, \
+             patch.object(shared_learning.time,'time',return_value=now):
+            result=shared_learning.fetch_shared_learning_state(ttl=0)
+        self.assertEqual(result['updated_at'],new['updated_at'])
+        api.assert_called_once_with('')
+
+    def test_corrupt_deflate_in_gzip_uses_original_json_for_both_readers(self):
+        from io import BytesIO
+        corrupt=b'\x1f\x8b\x08\x00'+b'\x00'*6+b'\x07'+b'\x00'*8
+        payload={'forecast':{'samples':4117}}
+        for private in (False,True):
+            requests=[]
+            def respond(request,timeout):
+                requests.append(request.full_url)
+                data=corrupt if '.json.gz' in request.full_url else json.dumps(payload).encode()
+                if private:
+                    data=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode()
+                return BytesIO(data)
+            with self.subTest(private=private), patch.object(shared_learning,'urlopen',side_effect=respond):
+                result=shared_learning._fetch_private('test-only') if private else shared_learning._fetch_public(7)
+                self.assertEqual(result,payload)
+                self.assertEqual(len(requests),2)
+
     def test_public_compressed_state_preserves_full_history_and_decisions(self):
         import gzip
         from io import BytesIO
@@ -84,14 +130,17 @@ class SharedLearningTests(unittest.TestCase):
         requests = []
         def fake_open(request, timeout):
             requests.append(request)
+            if 'learning_state.json.gz' in request.full_url:
+                from urllib.error import HTTPError
+                raise HTTPError(request.full_url,404,'Not found',{},None)
             response = _Response()
             value = wrappers.pop(0)
             response.read = lambda: json.dumps(value).encode()
             return response
         with patch.object(shared_learning, "urlopen", side_effect=fake_open):
             self.assertEqual(shared_learning._fetch_private("test-only"), payload)
-        self.assertEqual(requests[1].full_url, f"https://api.github.com/repos/{shared_learning.REPO}/git/blobs/{sha}")
-        self.assertEqual(requests[1].get_header("Authorization"), "Bearer test-only")
+        self.assertEqual(requests[2].full_url, f"https://api.github.com/repos/{shared_learning.REPO}/git/blobs/{sha}")
+        self.assertEqual(requests[2].get_header("Authorization"), "Bearer test-only")
 
     def test_failed_download_keeps_age_and_recovery_clears_warning(self):
         payload = {"updated_at": "2026-10-11T19:00:00Z", "background_paper": {"last_cycle_at": "2026-10-11T19:01:00Z"}}
