@@ -119,7 +119,9 @@ def dashboard_decision(preview, state, now=None):
                   authoritative_available=not blockers, decision_id=snapshot.get('decision_id'),
                   decision_time=snapshot.get('captured_at'), decision_blockers=blockers,
                   execution_reason='; '.join(blockers), contract_probability_up=None,
-                  settlement_prediction=None)
+                  settlement_prediction=None, reason='; '.join(blockers),
+                  score=0., projected_end=float('nan'), source_health=0.,
+                  prediction_label='Worker decision unavailable')
     if snapshot.get('ticker') != ticker:
         return result
     call = snapshot.get('call') or {}
@@ -128,6 +130,8 @@ def dashboard_decision(preview, state, now=None):
     result.update(confidence=snapshot.get('confidence') or 0.,
                   consensus=(call.get('lock_focus') or {}).get('consensus', 0.),
                   base_score=call.get('master_base_score') or 0.,
+                  score=call.get('master_base_score') or 0.,
+                  source_health=(call.get('lock_focus') or {}).get('source_health', 0.),
                   worker_outlook_action=snapshot.get('master_action'),
                   worker_side=snapshot.get('side'),
                   target_price=call.get('target'),
@@ -138,6 +142,9 @@ def dashboard_decision(preview, state, now=None):
                       locked_side=('UP' if snapshot.get('side') == 'YES' else 'DOWN') if snapshot.get('side') else None,
                       execution_approved=snapshot.get('approved') is True,
                       execution_reason=snapshot.get('reason'),
+                      reason=snapshot.get('reason'),
+                      projected_end=_number(call.get('settlement_forecast_end')) or float('nan'),
+                      prediction_label='Worker forecast '+str(snapshot.get('forecast_side') or 'unavailable'),
                       settlement_prediction=copy.deepcopy(call.get('settlement_prediction')))
     else:
         result['execution_reason'] = '; '.join(blockers)

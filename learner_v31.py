@@ -804,6 +804,11 @@ def refresh_execution_decision(state):
     """Observe current inputs immediately before a paper pass; never train here."""
     try:
         feeds = parallel_calls({'history': legacy.history, 'market': legacy.market})
+        # The main pass can grade the prior window while its initial market
+        # read still points at that expired ticker. Register this genuinely
+        # observed window now; never fabricate the missed earlier forecast.
+        if not isinstance(state.get('pending'), dict):
+            register_with_snapshot(state, feeds['history'], feeds['market'])
         live = current_shadow_call(state, feeds['history'], feeds['market'])
         refresh_pending_lock_focus(state, live, feeds['market'])
         record_observation(state, live, feeds['market'])
