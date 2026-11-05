@@ -90,6 +90,20 @@ class DecisionSnapshotTests(unittest.TestCase):
         self.assertEqual(view['action'],'WAIT')
         self.assertFalse(view['authoritative_available'])
 
+    def test_authoritative_panel_never_keeps_opposing_preview_metadata(self):
+        api=self.api();state=self.state()
+        state['pending'].update(master_base_score=.4,lock_focus={'source_health':.8,'consensus':.75})
+        live=dict(state['pending'],settlement_forecast_end=50100.)
+        refresh_pending_lock_focus(state,live,{'ticker':'T','expires_at':1600})
+        preview=dict(kalshi_ticker='T',action='LOCK DOWN',score=-.9,
+                     projected_end=48000.,reason='Opposing preview only')
+        view=api.dashboard_decision(preview,state,now=1000)
+        self.assertEqual(view['action'],'LOCK UP')
+        self.assertEqual(view['reason'],state['settlement_decision']['reason'])
+        self.assertEqual(view['score'],.4)
+        self.assertEqual(view['projected_end'],50100.)
+        self.assertEqual(view['source_health'],.8)
+
     def test_fee_and_reference_checks_still_veto_and_preserve_ledger(self):
         self.api(); state=self.state(probability=.51)
         before=copy.deepcopy(state.get('background_paper',{}).get('trades',[]))
