@@ -5,11 +5,9 @@ from __future__ import annotations
 import math
 
 
-# The Master must publish a directional call for every active 15-minute market.
-# SCALP is the normal directional call; LOCK remains reserved for the strict
-# high-certainty settlement call. Execution safeguards still decide whether a
-# published call is actually paper-entered.
-AUTO_SCALPING_ENABLED = True
+# Directional forecasts remain available, including the legacy SCALP vocabulary.
+# Only explicit qualified LOCKs can reach the shared paper execution snapshot.
+AUTO_SCALPING_ENABLED = False
 LOCK_FOCUS_ENABLED = True
 LOCK_EARLIEST_SECONDS = 15 * 60
 LOCK_LATEST_SECONDS = 30

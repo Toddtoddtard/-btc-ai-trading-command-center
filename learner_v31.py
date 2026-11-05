@@ -23,6 +23,7 @@ from contract_probability import realized_minute_volatility, terminal_above_prob
 from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration, fit_settlement
 from council_confidence import for_direction as confidence_for_direction
 from improvement_evidence import VERSION as FORECAST_TRIAL_VERSION
+from decision_snapshot import publish_decision
 from kalshi_chart_data import fetch_chart, event_ticker
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
 from settlement_predictor import record_observation, resolve_observations
@@ -101,7 +102,7 @@ def ensure_v31(state):
     state.setdefault("lock_gate_history", [])
     state.setdefault("lock_gate_stats", {})
     state["btc_execution_mode"] = {
-        "name": "BALANCED_CALLS",
+        "name": "LOCK_FIRST",
         "paper_only": True,
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "lock_focus_enabled": True,
@@ -734,6 +735,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
     """Refresh execution evidence while preserving a called LOCK's geometry."""
     pending = state.get("pending")
     if not isinstance(pending, dict):
+        publish_decision(state, live_call, market_info)
         return False
     if (
         not isinstance(live_call, dict)
@@ -744,6 +746,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         pending["execution_reason"] = "FRESH_SAME_TICKER_EVALUATION_UNAVAILABLE"
         pending["would_wait"] = True
         pending["execution_checked_at"] = time.time()
+        publish_decision(state, live_call, market_info)
         return False
     old_action = str(pending.get("master_action") or "WAIT").upper()
     # Freeze the first published decision separately from the Binance path and
@@ -781,6 +784,7 @@ def refresh_pending_lock_focus(state, live_call, market_info):
             pending["execution_approved"] = False
             pending["execution_reason"] = "CURRENT_LOCK_DIRECTION_OR_QUALIFICATION_CHANGED"
         pending["would_wait"] = pending.get("execution_approved") is not True
+        publish_decision(state, live_call, market_info)
         return False
     for key in (
         "specialists", "master_confidence", "master_base_score", "council_vote",
@@ -792,7 +796,24 @@ def refresh_pending_lock_focus(state, live_call, market_info):
         pending["lock_called_seconds_remaining"] = (
             (live_call.get("lock_focus") or {}).get("seconds_remaining")
         )
+    publish_decision(state, live_call, market_info)
     return True
+
+
+def refresh_execution_decision(state):
+    """Observe current inputs immediately before a paper pass; never train here."""
+    try:
+        feeds = parallel_calls({'history': legacy.history, 'market': legacy.market})
+        live = current_shadow_call(state, feeds['history'], feeds['market'])
+        refresh_pending_lock_focus(state, live, feeds['market'])
+        record_observation(state, live, feeds['market'])
+        record_prediction(state, live, feeds['market'])
+        state.setdefault('status', {}).pop('decision_refresh_error', None)
+    except Exception as exc:
+        # Keep position management running during a prediction-feed outage.
+        # Clearing approval is essential: a failed read cannot refresh evidence.
+        refresh_pending_lock_focus(state, None, {})
+        state.setdefault('status', {})['decision_refresh_error'] = str(exc)[:300]
 
 
 def cadence_health(previous_updated_at, now):
@@ -968,7 +989,7 @@ def main():
             state["settlement_execution_calibration"]["by_horizon"].items() if model.get("active")],
         "forward_outlooks_generated": len(forward_outlooks),
         "forward_outlooks_graded_this_run": forward_outlooks_graded,
-        "btc_execution_mode": "BALANCED_CALLS",
+        "btc_execution_mode": "LOCK_FIRST",
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "champion_promoted": state.get("champion_challenger", {}).get("promoted", False),
         "challenger_streak": state.get("champion_challenger", {}).get("qualification_streak", 0),

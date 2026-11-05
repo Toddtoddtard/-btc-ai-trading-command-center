@@ -128,6 +128,7 @@ def _record_ledger_event(paper, event_type, position, now, **details):
         "ticker": str(position.get("ticker") or ""),
         "at": float(now),
         "at_utc": _now_iso(now),
+        "decision_id": position.get('decision_id'),
     }
     event.update({key: value for key, value in details.items() if value is not None})
     events.append(event)
@@ -186,9 +187,10 @@ def reconcile_shared_paper_ledger(paper, tolerance=0.011):
 
 def _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, outcome, now):
     """Persist the last actionable signal even when later WAIT cycles replace last_message."""
-    signal_id = f"{ticker}:{pending.get('opened_at', '')}"
+    signal_id = pending.get('decision_id') or f"{ticker}:{pending.get('opened_at', '')}"
     attempt = {
         "signal_id": signal_id,
+        "decision_id": pending.get('decision_id'),
         "at": _now_iso(now),
         "ticker": ticker,
         "side": side,
@@ -884,12 +886,17 @@ def _repair_master_learning_credit(learning_state, corrected_tickers):
     return repaired
 
 
-def run_cycle(learning_state, market_reader=_market, now=None):
+def _run_cycle(learning_state, market_reader=_market, now=None):
     live_clock = now is None
     now = float(time.time() if live_clock else now)
     paper = learning_state.get("background_paper")
-    if not isinstance(paper, dict) or paper.get("version") != 1:
+    if paper is not None and (not isinstance(paper, dict) or paper.get('version') != 1):
+        raise ValueError('Unknown paper account version; preserving existing ledger without execution')
+    if paper is None:
         paper = initial_state(now)
+        # Bootstrap only an empty account. A missing migration marker on an
+        # existing ledger is never authorization to reset or archive it.
+        _reset_paper_account_to_post_fix_500(paper, now)
         learning_state["background_paper"] = paper
     paper["entry_assessment"] = {"paper_action": "WAIT", "approved": False, "checked_at": now, "blockers": ["Awaiting current-cycle checks"]}
     paper["last_cycle_at"] = _now_iso(now)
@@ -899,8 +906,6 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     paper.setdefault("last_signal_at", None)
     paper.setdefault("last_signal_message", "No approved signal has reached execution yet.")
     paper.setdefault("signal_attempts", [])
-    _void_invalid_legacy_paper_trades(paper, now)
-    _reset_paper_account_to_post_fix_500(paper, now)
     if not paper.get("enabled", True):
         paper["last_message"] = "24/7 paper engine paused."
         return paper
@@ -939,7 +944,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
             pending_rows.remove(ended)
             _repair_master_learning_credit(learning_state, [ended_ticker])
 
-    pending = learning_state.get("pending") or {}
+    snapshot = learning_state.get("settlement_decision")
+    pending = dict(snapshot.get("call") or {}, decision_id=snapshot.get('decision_id')) if isinstance(snapshot, dict) else (learning_state.get("pending") or {})
     position = paper.get("open_position")
     pending_ticker = str(pending.get("ticker") or "")
     # While a position exists, its own ticker is authoritative. The old code
@@ -1022,8 +1028,11 @@ def run_cycle(learning_state, market_reader=_market, now=None):
                 liquidation = contracts * bid - kalshi_taker_fee(contracts, bid, action="sell")
                 lock_gate = lock_validation_policy(_post_fix_metrics(paper))
                 paper["lock_gate"] = lock_gate
+                from decision_snapshot import snapshot_blockers
+                decision_current = not snapshot_blockers(snapshot, ticker, time.time() if live_clock else now)
                 if (
                     position["strategy"] == "SCALP"
+                    and (decision_current or (snapshot is None and not live_clock))
                     and master_action.startswith("LOCK")
                     and signal_side == position["side"]
                     and pending.get("execution_approved") is True
@@ -1106,6 +1115,12 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if expires is None or expires <= now or str(market.get("status", "")).lower() not in {"open", "active"}:
         paper["last_message"] = "Skipped PAPER entry: market expired, closed, or expiry unavailable."
         return paper
+    if snapshot is not None:
+        from decision_snapshot import snapshot_blockers
+        blockers = snapshot_blockers(snapshot, pending_ticker, now)
+        if blockers:
+            paper['last_message'] = 'Skipped PAPER entry: ' + '; '.join(blockers)
+            return paper
 
     metrics = _post_fix_metrics(paper)
     gate = _paper_gate(paper)
@@ -1267,6 +1282,12 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if _fill_size(market, side, 'ask', now) == 0:
         paper['last_message'] = 'Skipped PAPER entry: quote expired before fill.'
         return paper
+    if snapshot is not None or live_clock:
+        from decision_snapshot import snapshot_blockers
+        blockers = snapshot_blockers(snapshot, ticker, now)
+        if blockers:
+            paper['last_message'] = 'Skipped PAPER entry: ' + '; '.join(blockers)
+            return paper
     if live_clock or pending.get("decision_schema") == SCHEMA:
         assessment = assess_paper_entry(pending, market, contracts=contracts, now=now,
                                         lock_gate=lock_validation_policy(_post_fix_metrics(paper)))
@@ -1280,6 +1301,8 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     expires = _f(pending.get("expires_at"))
     position = {"ticker": ticker, "side": side, "direction": "UP" if side == "YES" else "DOWN", "strategy": strategy, "status": "OPEN", "opened_at": now, "expires_at": expires, "entry_price": ask, "spot_entry_price": _f(pending.get("start_price")), "contracts": contracts, "entry_fee": fee, "amount": amount, "last_mark": bid}
     position['entry_fee_model'] = PAPER_FEE_MODEL
+    position['decision_id'] = (snapshot or {}).get('decision_id')
+    position['decision_captured_at'] = (snapshot or {}).get('captured_at')
     position['fill_basis'] = 'OBSERVED_TOP_OF_BOOK' if fill_size is not None else 'LEGACY_QUOTE_ONLY'
     position['quotes_observed_at'] = market.get('quotes_observed_at')
     for field in ('code_revision', 'forecast_trial_version', 'contract_probability_source'):
@@ -1296,6 +1319,23 @@ def run_cycle(learning_state, market_reader=_market, now=None):
     if position["risk_mode"] == "PAPER RECOVERY":
         message += " • PAPER RECOVERY (0.5% cash cap)"
     _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, "OPENED", now)
+    return paper
+
+
+def run_cycle(learning_state, market_reader=_market, now=None):
+    """Keep every worker result tied to its decision, including early vetoes."""
+    paper = _run_cycle(learning_state, market_reader=market_reader, now=now)
+    snapshot = learning_state.get('settlement_decision') or {}
+    assessment = paper.setdefault('entry_assessment', {})
+    assessment.update(decision_id=snapshot.get('decision_id'),
+                      decision_captured_at=snapshot.get('captured_at'),
+                      ticker=snapshot.get('ticker'), reason=paper.get('last_message'))
+    if assessment.get('blockers') == ['Awaiting current-cycle checks']:
+        assessment.update(approved=False, paper_action='WAIT',
+                          blockers=[paper.get('last_message', 'No entry')])
+    position = paper.get('open_position') or {}
+    assessment['actual_position'] = {key: position.get(key) for key in
+        ('ticker', 'side', 'strategy', 'opened_at', 'entry_price', 'decision_id')}
     return paper
 
 
@@ -1326,15 +1366,17 @@ def main():
     )
     for cycle in range(cycles):
         try:
+            # Historical-label reads finish before capturing fresh execution
+            # evidence. Their latency must not consume its freshness budget.
+            cutoff_research.resolve(state, _market)
+            from learner_v31 import refresh_execution_decision
+            refresh_execution_decision(state)
             paper = run_cycle(state)
         except Exception as exc:
             paper = state.setdefault("background_paper", initial_state())
             paper["worker_ok"] = False
             paper["last_cycle_at"] = _now_iso()
             paper["last_message"] = "Background paper cycle failed safely: " + str(exc)
-        # Resolve research labels only after the current execution cycle. Old
-        # ticker/network timeouts must not age a fresh book before entry checks.
-        cutoff_research.resolve(state, _market)
         # Checkpoint every pass so a later transient failure cannot erase an
         # entry or settlement recorded by an earlier retry.
         save_checkpoint(STATE_INPUT, state)

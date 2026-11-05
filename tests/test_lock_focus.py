@@ -30,8 +30,8 @@ class LockFocusTests(unittest.TestCase):
         values.update(updates)
         return evaluate_lock_focus(**values)
 
-    def test_automatic_scalping_is_enabled(self):
-        self.assertTrue(AUTO_SCALPING_ENABLED)
+    def test_automatic_scalping_stays_disabled_in_lock_first_mode(self):
+        self.assertFalse(AUTO_SCALPING_ENABLED)
 
     def test_pattern_model_migration_resets_only_stale_pattern_evidence(self):
         from learner_v31 import ensure_v31

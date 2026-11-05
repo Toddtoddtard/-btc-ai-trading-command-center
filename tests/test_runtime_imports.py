@@ -34,7 +34,7 @@ class RuntimeImportTests(unittest.TestCase):
             self.assertEqual(kalshi_paper_engine.entry_price_limit('LOCK'), .93)
             self.assertEqual(background_paper.entry_price_limit('LOCK'), .93)
             self.assertEqual(background_paper.entry_price_limit('SCALP'), .75)
-            self.assertTrue(lock_focus.AUTO_SCALPING_ENABLED)
+            self.assertFalse(lock_focus.AUTO_SCALPING_ENABLED)
             self.assertTrue(callable(ai_core.enrich_history_core))
             self.assertTrue(callable(research_lab.fit_guarded_calibrator))
         finally:

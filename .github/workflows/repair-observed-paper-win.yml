@@ -23,7 +23,7 @@ jobs:
       - name: Repair exact observed winning trade
         run: |
           python - <<'PY'
-          import json, math
+          import json, math, gzip
           from pathlib import Path
 
           TARGET = 'KXBTC15M-26SEP111030-30'
@@ -124,12 +124,13 @@ jobs:
           print('METRICS', json.dumps(metrics, sort_keys=True))
 
           p.write_text(json.dumps(data, indent=2, sort_keys=True, allow_nan=True) + '\n')
+          Path('learning_state.json.gz').write_bytes(gzip.compress(p.read_bytes(), compresslevel=6, mtime=0))
           PY
       - name: Commit repaired learning state
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add learning_state.json
+          git add learning_state.json learning_state.json.gz
           if git diff --cached --quiet; then
             echo 'No state changes to commit.'
             exit 0

@@ -37,7 +37,7 @@ for _runtime_module in (
     "outcome_timing", "contribution_evidence", "contract_calibration", "reliability_v31", "council_v4",
     "kalshi_chart_data", "settlement_predictor", "research_lab", "horizon_models", "ai_core",
     "council_accounting", "specialist_knowledge_v5", "hourly_forecast",
-    "trade_assessment", "scalp_exit_research", "background_paper", "pro_trade_ticket",
+    "trade_assessment", "decision_snapshot", "scalp_exit_research", "background_paper", "pro_trade_ticket",
     "dashboard_ui", "decision_dashboard", "live_feeds", "shared_learning",
 ):
     importlib.reload(importlib.import_module(_runtime_module))
@@ -105,6 +105,7 @@ from lock_focus import (
 )
 from pro_trade_ticket import build_pro_trade_ticket
 from decision_dashboard import render_decision_assessment, outlook_label
+from decision_snapshot import dashboard_decision
 from public_futures import parse_bybit_futures_snapshot
 from reliability_v31 import (
     detect_regime, execution_cost_bps,
@@ -1542,7 +1543,7 @@ def _register_window_lock(ticker, side, expires_at):
 
 def master_decision(
     results, hist, kalshi=None, settlement_price=None, reference_healthy=True,
-    settlement_reference=None,
+    settlement_reference=None, preview_only=False,
 ):
     remote_learning = fetch_remote_learning_state() or {}
     regime_name = detect_regime(hist)
@@ -1590,7 +1591,7 @@ def master_decision(
     # registered for a still-open ticker, every refresh and every downstream
     # gate must keep that exact side until the contract window expires.
     current_ticker = kctx.get("ticker", "")
-    _db_lock_side = _persistent_window_lock_side(current_ticker)
+    _db_lock_side = None if preview_only else _persistent_window_lock_side(current_ticker)
     lock_side = "UP" if _db_lock_side == "YES" else "DOWN" if _db_lock_side == "NO" else None
     lock_ticker = current_ticker if lock_side else ""
     _lock_was_already_persisted = lock_side in {"UP", "DOWN"}
@@ -1763,7 +1764,7 @@ def master_decision(
         action = f"LOCK {lock_side}"
         locked_side = lock_side
         gate_note = ""
-    elif action in {"LOCK UP", "LOCK DOWN"} and current_ticker:
+    elif action in {"LOCK UP", "LOCK DOWN"} and current_ticker and not preview_only:
         _registered_side = _register_window_lock(
             current_ticker,
             "YES" if action == "LOCK UP" else "NO",
@@ -1889,7 +1890,7 @@ def master_decision(
         "policy": policy,
         "source_health": source_health,
         "regime": regime_name,
-        "execution_mode": "BALANCED_CALLS",
+        "execution_mode": "LOCK_FIRST",
         "auto_scalping_enabled": AUTO_SCALPING_ENABLED,
         "execution_approved": execution_approved,
         "execution_reason": gate_note,
@@ -3658,7 +3659,7 @@ with st.expander("🧾 Recent Updates — Last 24 Hours", expanded=False):
 - **Continuous LOCK evaluation:** LOCK qualification is checked throughout the active 15-minute market instead of only at a single late-window moment.
 - **Three-market outlook:** the research layer now grades directional outlooks for the next three 15-minute markets to provide broader context without changing paper execution by itself.
 - **Authoritative Kalshi entry display:** selected-side paper fills come from the shared Kalshi ledger so the displayed entry percentage matches the actual recorded paper fill.
-- **Balanced call automation:** every healthy BTC 15-minute market gets a directional SCALP outlook; automatic paper entries still require price, fee, data-quality, and reliability approval. LOCK requires at least 68% calibrated confidence plus independent confirmation.
+- **LOCK-first automation:** directional forecasts are separate from paper actions; only an explicit worker LOCK can qualify for automatic paper entry. LOCK requires at least 68% calibrated confidence plus independent confirmation.
 - **Evidence-based LOCK learning:** every LOCK gate is now retained and graded against official settlement, with paper-only comparisons across 64%–80% confidence floors.
 - **Faster unattended execution checks:** the scheduled paper worker retries safe quotes during each run while preserving the LOCK 93% / SCALP 75% entry ceilings and other risk gates.
 - **Research calibration safeguards:** walk-forward Brier calibration and JSON-safe learning-state validation were tightened so research updates cannot silently corrupt the learner state.
@@ -4929,8 +4930,11 @@ def live_dashboard():
         settlement_price=price,
         reference_healthy=bool(_display_feed.get("available")),
         settlement_reference=_display_feed,
+        preview_only=True,
     )
     _shared_learning_state = fetch_remote_learning_state() or {}
+    _live_preview = decision
+    decision = dashboard_decision(_live_preview, _shared_learning_state)
     hourly_ai = hourly_kalshi_target_ai(hist, results, hourly_kalshi, price, _shared_learning_state)
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
@@ -5024,6 +5028,20 @@ def live_dashboard():
     else:
         st.warning("Live Kalshi price unavailable. Current-price cards show Unavailable; internal spot-proxy diagnostics are not Kalshi prices. New LOCK qualification is blocked until the Kalshi feed recovers.")
     st.markdown("#### Kalshi 15-minute settlement prediction")
+    if not decision.get('authoritative_available'):
+        st.warning('Worker Outlook unavailable for new entries: ' + str(decision.get('execution_reason')))
+    if decision.get('decision_time'):
+        st.caption('Worker decision ' + str(decision.get('decision_id')) + ' • ' +
+                   eastern_time(decision['decision_time'], clock_only=True) +
+                   ' • ' + str(decision.get('worker_outlook_action') or 'WAIT') +
+                   ' • entry qualification: ' + str(decision.get('execution_reason')))
+    with st.expander('Live forecast preview — not a worker LOCK or paper fill'):
+        _preview_probability = safe_float(_live_preview.get('contract_probability_up'), np.nan)
+        if pd.notna(_preview_probability):
+            st.caption(f'Live preview YES {_preview_probability:.1%} • NO {1-_preview_probability:.1%}. '
+                       'The worker decision above is authoritative; existing paper positions keep their recorded side.')
+        else:
+            st.caption('Live preview unavailable.')
     if _settlement_prediction.get("available"):
         _p_yes = _settlement_prediction["probability_yes"]
         _outcome = _settlement_prediction["outcome"]
@@ -5990,11 +6008,11 @@ def live_dashboard():
             )
             st.caption(risk["reason"])
             st.caption(
-                "Balanced-call mode publishes a directional outlook for every healthy 15-minute market. "
+                "LOCK-first mode keeps directional forecasts separate from approved paper actions. "
                 "Paper execution remains separate and may reject a visible call for price, fees, feed health, or weak evidence. "
                 "LOCK outlook qualification uses the 68% signal threshold; paper entries separately require validated settlement value, "
                 "strong council agreement, healthy data, "
-                "target confirmation, market alignment, and a LOCK entry at or below 93%. SCALPs remain capped at 75%. "
+                "target confirmation, market alignment, and a LOCK entry at or below 93%. Automatic scalping is disabled. "
                 "LOCK keeps its original direction, "
                 "stays open through the exact 15-minute window, and is finalized "
                 "only from that ticker's official Kalshi settlement."

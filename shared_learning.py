@@ -1,4 +1,5 @@
 import base64
+import gzip
 import json
 import time
 from datetime import datetime, timezone
@@ -100,7 +101,17 @@ def _fetch_private(token):
 
 
 def _fetch_public(cache_key=None):
-    url = RAW_URL + (f"?v={int(cache_key)}" if cache_key is not None else "")
+    suffix = f"?v={int(cache_key)}" if cache_key is not None else ""
+    # Same full checkpoint, compressed in the publisher's atomic commit. Keep
+    # the original JSON fallback for old branches or incomplete CDN responses.
+    try:
+        request = Request(RAW_URL+'.gz'+suffix, headers={
+            'User-Agent':'BTC-AI-Command-Center/shared-learning', 'Cache-Control':'no-cache'})
+        with urlopen(request, timeout=3.0) as response:
+            return json.loads(gzip.decompress(response.read()).decode('utf-8'))
+    except (OSError, EOFError, ValueError):
+        pass
+    url = RAW_URL + suffix
     req = Request(
         url,
         headers={

@@ -288,7 +288,7 @@ def _metrics(rows):
 def scorecard(state, as_of=None):
     as_of = time.time() if as_of is None else as_of
     score = _metrics(_observations(state, as_of))
-    score['by_horizon'] = {f'{m}m': _metrics(_observations(state, as_of, m*60)) for m in (10, 5, 1)}
+    score['by_horizon'] = {f'{m}m': _metrics(_observations(state, as_of, m*60)) for m in (10, 8, 5, 2, 1)}
     score['checkpoint_tolerance_seconds'] = CHECKPOINT_TOLERANCE
     settled, available, unavailable, reasons, seen = set(), set(), 0, {}, set()
     for row in _history(state):
