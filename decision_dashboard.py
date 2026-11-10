@@ -13,7 +13,7 @@ def outlook_label(decision):
         return 'LOCKED OUTLOOK '+action.split()[-1]
     if action.endswith((' UP',' DOWN')):
         return 'OUTLOOK '+action.split()[-1]
-    return 'OUTLOOK UNAVAILABLE'
+    return 'WAIT' if decision.get('authoritative_available') else 'OUTLOOK UNAVAILABLE'
 
 
 def decision_status(decision, state):

@@ -717,7 +717,7 @@ def current_shadow_call(state, df, market_info):
         execution_approved = False
         execution_reason = vote["precision_gate_reason"]
         call["master_action"] = "WAIT"
-    if not contract_view.get("calibrator_active"):
+    if execution_approved and not contract_view.get("calibrator_active"):
         execution_approved = False
         execution_reason = NO_VALIDATED_EDGE
     if not reference_healthy:
@@ -801,12 +801,16 @@ def refresh_pending_lock_focus(state, live_call, market_info):
 
 
 def refresh_execution_decision(state):
-    """Observe current inputs immediately before a paper pass; never train here."""
+    """Observe current inputs and carry pending market state across a rollover."""
     try:
         feeds = parallel_calls({'history': legacy.history, 'market': legacy.market})
-        # The main pass can grade the prior window while its initial market
-        # read still points at that expired ticker. Register this genuinely
-        # observed window now; never fabricate the missed earlier forecast.
+        # Paper passes can cross a boundary between full learning runs.
+        # Retain the old observation until its closed expiry candle can grade it.
+        pending = state.get('pending')
+        market = feeds['market']
+        if (isinstance(pending, dict) and market and pending.get('ticker') != market.get('ticker')
+                and time.time() >= safe_float(pending.get('expires_at'), float('inf'))):
+            strict_grade(state, feeds['history'])
         if not isinstance(state.get('pending'), dict):
             register_with_snapshot(state, feeds['history'], feeds['market'])
         live = current_shadow_call(state, feeds['history'], feeds['market'])

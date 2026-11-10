@@ -77,7 +77,7 @@ from bot_intelligence_dashboard import render_bot_intelligence_dashboard
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
-from improvement_evidence import display_forecast, scorecard as improvement_scorecard
+from improvement_evidence import dashboard_forecast, scorecard as improvement_scorecard
 from research_dashboard import render_research_dashboard, render_settlement_evidence
 from background_paper import (
     latest_shared_call_entry,
@@ -4939,7 +4939,7 @@ def live_dashboard():
     account = get_account(price)
     risk = risk_evaluate(decision, account, hist, futures)
 
-    _settlement_prediction = display_forecast(decision.get("settlement_prediction"), decision)
+    _settlement_prediction = dashboard_forecast(decision, _live_preview)
     _shared_paper = _shared_learning_state.get("background_paper", {})
     auto_result = {
         "event": False,
@@ -4972,7 +4972,7 @@ def live_dashboard():
     )
     with m3:
         st.markdown(
-            f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Settlement outlook</div><div class="direction-card-value">{directional_badge_html(outlook_label(decision).replace("LOCKED OUTLOOK ", ""))}</div></div>',
+            f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Worker Outlook</div><div class="direction-card-value">{directional_badge_html(outlook_label(decision).replace("LOCKED OUTLOOK ", ""))}</div></div>',
             unsafe_allow_html=True,
         )
     # Confidence card only: keep every other top metric unchanged and add the
@@ -4989,27 +4989,33 @@ def live_dashboard():
         )
         _confidence_direction = "UP" if _confidence_score >= 0 else "DOWN"
 
+    _worker_current = decision.get("authoritative_available", False)
     _confidence_color = "var(--cc-up, #87d4b6)" if _confidence_direction == "UP" else "var(--cc-down, #f0a5ac)"
     _confidence_arrow = "▲" if _confidence_direction == "UP" else "▼"
+    _confidence_badge = (
+        f'<span style="color:{_confidence_color};">{_confidence_arrow}&nbsp;{_confidence_direction}</span>'
+        if _worker_current else ''
+    )
+    _confidence_text = f"{decision['confidence']:.1%}" if _worker_current else "Unavailable"
     with m4:
         st.markdown(
             f"""
             <div class="confidence-metric-card">
                 <div class="confidence-metric-label">
                     Signal strength
-                    <span style="color:{_confidence_color};">{_confidence_arrow}&nbsp;{_confidence_direction}</span>
+                    {_confidence_badge}
                 </div>
-                <div class="confidence-metric-value">{decision['confidence']*100:.1f}%</div>
+                <div class="confidence-metric-value">{_confidence_text}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-    m5.metric("Vote agreement", f"{decision['consensus']*100:.1f}%")
+    m5.metric("Vote agreement", f"{decision['consensus']:.1%}" if _worker_current else "Unavailable")
     # Show the current settlement forecast, not an unrelated historical paper fill.
     # This is a display-only indication; it must not imply a trade was opened.
+    _preview_only = _settlement_prediction.get("preview_only", False)
     if _settlement_prediction.get("available"):
         _forecast_side = str(_settlement_prediction.get("outcome", "")).upper().strip()
-        _forecast_yes = safe_float(_settlement_prediction.get("probability_yes"), np.nan)
         _forecast_value = (
             f"{_forecast_side} forecast"
             if _forecast_side in ("YES", "NO") else "Unavailable"
@@ -5021,7 +5027,8 @@ def live_dashboard():
     else:
         _forecast_value = "Unavailable"
         _forecast_help = "No current settlement forecast; no paper entry is implied."
-    m6.metric("Current settlement call", _forecast_value, help=_forecast_help)
+    m6.metric("Live settlement preview" if _preview_only else "Current settlement call",
+              _forecast_value, help=_forecast_help)
 
     if _display_feed.get("available"):
         st.caption("Current BTC price and target distance use Kalshi's chart feed. Technical candles and order flow use Binance.")
@@ -5029,24 +5036,18 @@ def live_dashboard():
         st.warning("Live Kalshi price unavailable. Current-price cards show Unavailable; internal spot-proxy diagnostics are not Kalshi prices. New LOCK qualification is blocked until the Kalshi feed recovers.")
     st.markdown("#### Kalshi 15-minute settlement prediction")
     if not decision.get('authoritative_available'):
-        st.warning('Worker Outlook unavailable for new entries: ' + str(decision.get('execution_reason')))
+        st.caption('A fresh worker decision is required for a new paper entry.')
     if decision.get('decision_time'):
         st.caption('Worker decision ' + str(decision.get('decision_id')) + ' • ' +
                    eastern_time(decision['decision_time'], clock_only=True) +
                    ' • ' + str(decision.get('worker_outlook_action') or 'WAIT') +
                    ' • entry qualification: ' + str(decision.get('execution_reason')))
-    with st.expander('Live forecast preview — not a worker LOCK or paper fill'):
-        _preview_probability = safe_float(_live_preview.get('contract_probability_up'), np.nan)
-        if pd.notna(_preview_probability):
-            st.caption(f'Live preview YES {_preview_probability:.1%} • NO {1-_preview_probability:.1%}. '
-                       'The worker decision above is authoritative; existing paper positions keep their recorded side.')
-        else:
-            st.caption('Live preview unavailable.')
     if _settlement_prediction.get("available"):
         _p_yes = _settlement_prediction["probability_yes"]
         _outcome = _settlement_prediction["outcome"]
-        st.metric("Predicted final outcome", _outcome,
-                  help="The same settlement probability used by the paper decision engine. Entry approval also requires fees, quotes and strategy checks.")
+        st.metric("Live forecast preview" if _preview_only else "Worker settlement forecast", _outcome)
+        if _preview_only:
+            st.caption("Display only. Paper entries require a fresh worker LOCK and current entry checks.")
         st.caption(
             f"YES {_p_yes:.1%} • NO {1-_p_yes:.1%} • "
             f"Target {fmt_money(_settlement_prediction['target'])} • "
@@ -5060,7 +5061,7 @@ def live_dashboard():
         st.caption("Forecast basis: " + (
             "Kalshi market-price baseline; no validated model advantage yet."
             if _settlement_prediction.get('probability_source') == 'market_midpoint' else
-            "Validated model correction; paper entries still require positive net value after fees."
+            "Forecast uses a model correction."
         ))
     else:
         st.info("Settlement prediction unavailable: " + _settlement_prediction.get("reason", "fresh contract data required"))
