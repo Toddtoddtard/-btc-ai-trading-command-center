@@ -21,11 +21,12 @@ def finite(value):
         return None
 
 
-def assess_paper_entry(call, market, contracts=1, now=None, lock_gate=None):
+def assess_paper_entry(call, market, contracts=1, now=None, lock_gate=None, *, outlook_follow=False):
     now = time.time() if now is None else float(now)
     action = str(call.get('master_action') or call.get('action') or 'WAIT').upper()
     side = 'YES' if action.endswith(' UP') else 'NO' if action.endswith(' DOWN') else None
     strategy = 'LOCK' if action.startswith('LOCK ') else 'SCALP' if action.startswith('SCALP ') else 'WAIT'
+    outlook_follow = outlook_follow and strategy == 'LOCK'
     ticker = call.get('ticker') or call.get('kalshi_ticker')
     expiry = finite(call.get('expires_at', call.get('kalshi_close_ts')))
     probability = finite(call.get('contract_probability_up'))
@@ -56,9 +57,9 @@ def assess_paper_entry(call, market, contracts=1, now=None, lock_gate=None):
             blockers.append('STALE_'+field)
     if call.get('execution_approved') is not True:
         blockers.append(str(call.get('execution_reason') or 'RELIABILITY_GATE'))
-    if (call.get('contract_probability_basis') != BASIS
-            or call.get('contract_calibrator_active') is not True
-            or probability is None or not 0 <= probability <= 1):
+    if not outlook_follow and (call.get('contract_probability_basis') != BASIS
+                               or call.get('contract_calibrator_active') is not True
+                               or probability is None or not 0 <= probability <= 1):
         blockers.append('NO_VALIDATED_SETTLEMENT_EDGE')
     if not executable_entry_quote(bid, ask):
         blockers.append('INVALID_EXECUTABLE_QUOTE')
@@ -70,8 +71,10 @@ def assess_paper_entry(call, market, contracts=1, now=None, lock_gate=None):
         blockers.append('INVALID_SIZE')
     selected = (probability if side == 'YES' else 1-probability) if probability is not None and side else None
     fee = kalshi_taker_fee(size, ask) if size and ask is not None and 0 <= ask <= 1 else None
-    net = expected_lock_net_pnl(size, ask, call, side) if fee is not None and side else None
-    if strategy == 'LOCK':
+    net = expected_lock_net_pnl(size, ask, call, side) if fee is not None and side and not outlook_follow else None
+    if outlook_follow and fee is not None and size * (1 - ask) <= fee + 1e-12:
+        blockers.append('NO_POSITIVE_PAYOUT_AFTER_FEES')
+    if strategy == 'LOCK' and not outlook_follow:
         if lock_gate is None or lock_gate.get('approved') is not True:
             blockers.append('LOCK_VALIDATION_QUARANTINE')
         if net is None or net/size + 1e-12 < LOCK_MIN_NET_PROBABILITY_EDGE:

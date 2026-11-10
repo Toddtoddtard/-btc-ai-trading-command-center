@@ -1122,6 +1122,7 @@ def _run_cycle(learning_state, market_reader=_market, now=None):
             paper['last_message'] = 'Skipped PAPER entry: ' + '; '.join(blockers)
             return paper
 
+    outlook_follow = (snapshot or {}).get("paper_outlook_follow") is True
     metrics = _post_fix_metrics(paper)
     gate = _paper_gate(paper)
     paper["metrics"], paper["gate"] = metrics, gate
@@ -1167,7 +1168,7 @@ def _run_cycle(learning_state, market_reader=_market, now=None):
     if strategy == "LOCK":
         lock_gate = lock_validation_policy(_post_fix_metrics(paper))
         paper["lock_gate"] = lock_gate
-        if not lock_gate["approved"]:
+        if not outlook_follow and not lock_gate["approved"]:
             _record_signal_outcome(
                 paper, pending, ticker, side, strategy, confidence,
                 "Skipped PAPER LOCK: validation quarantine — " + lock_gate["reason"] + ".",
@@ -1250,10 +1251,10 @@ def _run_cycle(learning_state, market_reader=_market, now=None):
                            time.time() if live_clock and 'execution_book' in market else now)
     if fill_size is not None:
         contracts = min(contracts, fill_size)
-        if contracts < 1:
-            _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
-                                  'Skipped PAPER entry: fresh ask depth unavailable.', 'BLOCKED', now)
-            return paper
+    if (fill_size is not None and contracts < 1) or (outlook_follow and fill_size is None):
+        _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
+                              'Skipped PAPER entry: fresh ask depth unavailable.', 'BLOCKED', now)
+        return paper
     while contracts and contracts * ask + kalshi_taker_fee(contracts, ask) > budget:
         contracts -= 1
     if contracts < 1:
@@ -1263,7 +1264,7 @@ def _run_cycle(learning_state, market_reader=_market, now=None):
         _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
                               "Skipped PAPER SCALP: projected profit is not positive after entry and exit fees.", "BLOCKED", now)
         return paper
-    if strategy == "LOCK":
+    if strategy == "LOCK" and not outlook_follow:
         expected_net = expected_lock_net_pnl(contracts, ask, pending, side)
         if (expected_net is None or expected_net <= 0
                 or not lock_edge_is_sufficient(contracts, ask, pending, side)):
@@ -1288,9 +1289,9 @@ def _run_cycle(learning_state, market_reader=_market, now=None):
         if blockers:
             paper['last_message'] = 'Skipped PAPER entry: ' + '; '.join(blockers)
             return paper
-    if live_clock or pending.get("decision_schema") == SCHEMA:
+    if outlook_follow or live_clock or pending.get("decision_schema") == SCHEMA:
         assessment = assess_paper_entry(pending, market, contracts=contracts, now=now,
-                                        lock_gate=lock_validation_policy(_post_fix_metrics(paper)))
+                                        lock_gate=paper.get("lock_gate"), outlook_follow=outlook_follow)
         paper["entry_assessment"] = assessment
         if not assessment["approved"]:
             _record_signal_outcome(paper, pending, ticker, side, strategy, confidence,
@@ -1308,6 +1309,8 @@ def _run_cycle(learning_state, market_reader=_market, now=None):
     for field in ('code_revision', 'forecast_trial_version', 'contract_probability_source'):
         position[field] = pending.get(field)
     position["risk_mode"] = "PAPER RECOVERY" if strategy == "SCALP" and gate["recovery"] else "STANDARD"
+    if outlook_follow:
+        position["risk_mode"] = "PAPER OUTLOOK FOLLOW"
     paper["cash"] -= amount
     paper["open_position"] = position
     _record_ledger_event(
@@ -1318,6 +1321,8 @@ def _run_cycle(learning_state, market_reader=_market, now=None):
     message = f"Opened PAPER {strategy} {position['direction']} • Amount: ${amount:.2f} • Kalshi entry: {ask*100:.0f}%"
     if position["risk_mode"] == "PAPER RECOVERY":
         message += " • PAPER RECOVERY (0.5% cash cap)"
+    if outlook_follow:
+        message += " • Outlook follow"
     _record_signal_outcome(paper, pending, ticker, side, strategy, confidence, message, "OPENED", now)
     return paper
 

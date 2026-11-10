@@ -43,9 +43,11 @@ def render_decision_assessment(decision, risk, state, futures, reference):
     ticket = build_pro_trade_ticket(decision,preview_risk,paper,
              has_open_position=bool(paper.get('open_position')),lock_gate=paper.get('lock_gate'))
     assessment = ticket.get('assessment') or {}
+    blockers = ticket['blockers']
     worker_assessment = paper.get('entry_assessment') or {}
     if decision.get('decision_id') and worker_assessment.get('decision_id') == decision['decision_id']:
         assessment = worker_assessment
+        blockers = assessment.get('blockers', [])
     p=finite(assessment.get('selected_probability'))
     breakeven=finite(assessment.get('break_even_probability'))
     edge=finite(assessment.get('net_edge_per_contract'))
@@ -60,8 +62,8 @@ def render_decision_assessment(decision, risk, state, futures, reference):
         from display_time import eastern_time
         st.caption('Assessed worker decision ' + str(worker_assessment['decision_id']) +
                    ' • ' + eastern_time(worker_assessment.get('checked_at'), clock_only=True))
-    if ticket['blockers']:
-        st.caption('Entry preview: WAIT · approval checks have not passed. See details below.')
+    if blockers:
+        st.caption('Entry checks blocked a new paper trade. See details below.')
     with st.expander('Contract details and entry checks'):
         st.caption('Probability source: '+str(decision.get('contract_probability_source') or 'Unavailable')+
                    '. Preview includes rounded fees; only the persistent worker can fill after current depth, freshness, position and risk checks.')
@@ -69,7 +71,7 @@ def render_decision_assessment(decision, risk, state, futures, reference):
         if not futures.get('ok'):
             st.caption('Futures liquidity and derivatives abstain while their source is unavailable; zero is not a live reading.')
         st.caption('Signal strength and agreement are indicator scores, not probabilities of winning. Related price indicators share one corroboration family; every specialist remains available.')
-        for blocker in ticket['blockers']:
+        for blocker in blockers:
             st.markdown('• ' + str(blocker))
         st.caption('A winning LOCK payout is a conditional scenario, not expected profit. A terminal settlement estimate is not an early-exit forecast.')
     research=scorecard(state)
