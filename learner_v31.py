@@ -23,7 +23,7 @@ from contract_probability import realized_minute_volatility, terminal_above_prob
 from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration, fit_settlement
 from council_confidence import for_direction as confidence_for_direction
 from improvement_evidence import VERSION as FORECAST_TRIAL_VERSION
-from decision_snapshot import publish_decision
+from decision_snapshot import NO_VALIDATED_EDGE, publish_decision
 from kalshi_chart_data import fetch_chart, event_ticker
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
 from settlement_predictor import record_observation, resolve_observations
@@ -719,7 +719,7 @@ def current_shadow_call(state, df, market_info):
         call["master_action"] = "WAIT"
     if not contract_view.get("calibrator_active"):
         execution_approved = False
-        execution_reason = "WAIT — NO VALIDATED SETTLEMENT EDGE"
+        execution_reason = NO_VALIDATED_EDGE
     if not reference_healthy:
         execution_approved = False
         execution_reason = "WAIT — KALSHI REFERENCE"

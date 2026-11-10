@@ -55,6 +55,57 @@ class DecisionSnapshotTests(unittest.TestCase):
                 self.assertEqual((paper['open_position'] or {}).get('side'), side)
                 self.assertNotIn('Awaiting current-cycle checks', paper['entry_assessment']['blockers'])
 
+    def unvalidated_lock(self, action='LOCK UP', probability=.61):
+        state = self.state(action, probability)
+        live = dict(state['pending'], execution_approved=False,
+                    execution_reason='WAIT — NO VALIDATED SETTLEMENT EDGE',
+                    contract_calibrator_active=False, contract_probability_source='market_midpoint')
+        refresh_pending_lock_focus(state, live, {'ticker': 'T', 'expires_at': 1600})
+        return state
+
+    def test_paper_follows_fresh_outlook_locks_without_validated_edge(self):
+        api = self.api()
+        for action, probability, side in [('LOCK UP', .61, 'YES'), ('LOCK DOWN', .39, 'NO')]:
+            with self.subTest(side=side):
+                state = self.unvalidated_lock(action, probability)
+                view = api.dashboard_decision({'kalshi_ticker': 'T'}, state, now=1000)
+                market = dict(self.market(), yes_bid_dollars=.60, yes_ask_dollars=.62,
+                              no_bid_dollars=.60, no_ask_dollars=.62)
+                paper = bg.run_cycle(state, lambda _: market, now=1000)
+                position = paper['open_position']
+                self.assertIsNotNone(position, paper['last_message'])
+                self.assertEqual(position['side'], side)
+                self.assertEqual(position['decision_id'], view['decision_id'])
+                self.assertEqual(position['risk_mode'], 'PAPER OUTLOOK FOLLOW')
+                self.assertIsNone(paper['entry_assessment']['expected_settlement_net_pnl'])
+                bg.run_cycle(state, lambda _: market, now=1001)
+                self.assertEqual(sum(e['event_type'] == 'OPENED' for e in paper['ledger_events']), 1)
+                settled = dict(ticker='T', status='settled', result=side.lower())
+                bg.run_cycle(state, lambda _: settled, now=1600)
+                self.assertIsNone(paper['open_position'])
+                self.assertEqual(paper['trades'][-1]['exit_reason'], 'OFFICIAL_SETTLEMENT:' + side.lower())
+                self.assertGreater(paper['trades'][-1]['pnl'], 0)
+
+    def test_paper_outlook_follow_keeps_fresh_depth_and_price_checks(self):
+        for changes, now, reason in [
+            ({'execution_book': None}, 1000, 'fresh ask depth'),
+            ({'yes_ask_dollars': .94}, 1000, 'maximum'),
+            ({}, 1031, 'STALE_DECISION'),
+        ]:
+            with self.subTest(reason=reason):
+                state = self.unvalidated_lock()
+                paper = bg.run_cycle(state, lambda _: dict(self.market(now), **changes), now=now)
+                self.assertIsNone(paper['open_position'])
+                self.assertIn(reason, paper['last_message'])
+
+    def test_paper_outlook_follow_requires_a_fresh_same_side_lock(self):
+        state = self.unvalidated_lock()
+        live = dict(state['pending'], master_action='WAIT', opened_at=1001,
+                    settlement_reference_timestamp=1001)
+        refresh_pending_lock_focus(state, live, {'ticker': 'T', 'expires_at': 1600})
+        paper = bg.run_cycle(state, lambda _: self.market(1001), now=1001)
+        self.assertIsNone(paper['open_position'])
+
     def test_stale_future_wrong_ticker_and_expiry_never_authorize(self):
         api = self.api()
         for now, ticker in [(1031,'T'), (999,'T'), (1600,'T'), (1000,'OTHER')]:

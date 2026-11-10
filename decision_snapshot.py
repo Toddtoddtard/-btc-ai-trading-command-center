@@ -7,6 +7,7 @@ import time
 
 VERSION = 'settlement-decision-v1'
 MAX_AGE = 30
+NO_VALIDATED_EDGE = 'WAIT — NO VALIDATED SETTLEMENT EDGE'
 CALL_FIELDS = (
     'ticker', 'expires_at', 'opened_at', 'master_action', 'master_confidence',
     'master_base_score', 'execution_approved', 'execution_reason', 'would_wait',
@@ -51,6 +52,12 @@ def publish_decision(state, live_call, market):
     captured = _number(live.get('opened_at'))
     reason = str(pending.get('execution_reason') or 'WAIT')
     approved = pending.get('execution_approved') is True and side is not None
+    outlook_follow = (
+        side is not None and live.get('master_action') == action
+        and live.get('execution_reason') == NO_VALIDATED_EDGE
+    )
+    if outlook_follow:
+        approved, reason = True, 'PAPER OUTLOOK FOLLOW — no validated settlement edge required'
     if (not ticker or live.get('ticker') != ticker or market.get('ticker') != ticker
             or (market.get('expires_at') is not None and market['expires_at'] != pending.get('expires_at'))
             or live.get('expires_at') != pending.get('expires_at')):
@@ -73,6 +80,8 @@ def publish_decision(state, live_call, market):
                     probability_yes=p, approved=approved, reason=reason,
                     reference_timestamp=_number(live.get('settlement_reference_timestamp')),
                     call=call)
+    if outlook_follow and approved:
+        snapshot['paper_outlook_follow'] = True
     snapshot['decision_id'] = _identity(snapshot)
     state['settlement_decision'] = snapshot
     return snapshot
