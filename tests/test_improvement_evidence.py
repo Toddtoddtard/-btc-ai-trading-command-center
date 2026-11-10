@@ -97,6 +97,26 @@ class ImprovementEvidenceTests(unittest.TestCase):
         self.assertEqual(displayed['probability_yes'],.2)
         self.assertEqual(prediction['probability_yes'],.9)
 
+    def test_stale_worker_keeps_fresh_display_only_preview_available(self):
+        module = self.module()
+        preview = dict(kalshi_ticker=TICKER, contract_probability_up=.7,
+                       settlement_prediction=dict(available=True, ticker=TICKER, expires_at=EXPIRY))
+        worker = dict(kalshi_ticker=TICKER, action='WAIT', authoritative_available=False)
+        display = module.dashboard_forecast(worker, preview, now=EXPIRY-1)
+        self.assertTrue(display['available'])
+        self.assertTrue(display['preview_only'])
+        self.assertEqual(display['outcome'], 'YES')
+        self.assertEqual(worker['action'], 'WAIT')
+        self.assertFalse(module.dashboard_forecast(worker, preview, now=EXPIRY)['available'])
+        other = dict(preview, kalshi_ticker='OTHER')
+        self.assertFalse(module.dashboard_forecast(worker, other, now=EXPIRY-1)['available'])
+
+        worker.update(authoritative_available=True, contract_probability_up=.3,
+                      settlement_prediction=preview['settlement_prediction'])
+        display = module.dashboard_forecast(worker, preview, now=EXPIRY-1)
+        self.assertFalse(display['preview_only'])
+        self.assertEqual(display['outcome'], 'NO')
+
     def test_actual_profit_excludes_historical_and_open_trades(self):
         module = self.module()
         state = {'status':dict(code_revision='revision-a',prediction_policy_version=module.VERSION),

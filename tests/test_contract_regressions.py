@@ -705,16 +705,18 @@ def test_current_settlement_card_does_not_imply_a_paper_fill():
     dashboard = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'live_dashboard')
     start = next(i for i, n in enumerate(dashboard.body) if isinstance(n, ast.If)
                  and any(isinstance(x, ast.Name) and x.id == '_forecast_side' for x in ast.walk(n)))
-    code = compile(ast.Module(body=dashboard.body[start:start+2], type_ignores=[]), 'settlement-card', 'exec')
-    for prediction, expected in (({'available':True,'outcome':'YES','probability_yes':.8},'YES forecast'),
-                                 ({'available':True,'outcome':'NO','probability_yes':.2},'NO forecast'),
-                                 ({'available':False},'Unavailable')):
+    code = compile(ast.Module(body=dashboard.body[start-1:start+2], type_ignores=[]), 'settlement-card', 'exec')
+    for prediction, label, expected in (
+        ({'available':True,'outcome':'YES','probability_yes':.8}, 'Current settlement call', 'YES forecast'),
+        ({'available':True,'outcome':'NO','probability_yes':.2,'preview_only':True}, 'Live settlement preview', 'NO forecast'),
+        ({'available':False}, 'Current settlement call', 'Unavailable'),
+    ):
         rendered = []
         namespace = {'_settlement_prediction':prediction, 'np':SimpleNamespace(nan=float('nan')),
                      'safe_float':lambda value, fallback: float(value) if value is not None else fallback,
                      'm6':SimpleNamespace(metric=lambda *a, **kw:rendered.append((a,kw)))}
         exec(code, namespace)
-        assert rendered[0][0] == ('Current settlement call', expected)
+        assert rendered[0][0] == (label, expected)
         assert 'paper' in rendered[0][1]['help']
 
 

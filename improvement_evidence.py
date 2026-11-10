@@ -123,6 +123,22 @@ def display_forecast(prediction, decision):
     return result
 
 
+def dashboard_forecast(decision, preview, now=None):
+    """Use the current worker probability when available, with a display-only fallback."""
+    result = display_forecast(decision.get('settlement_prediction'), decision)
+    if result['available'] and decision.get('authoritative_available'):
+        return dict(result, preview_only=False)
+    if preview.get('kalshi_ticker') == decision.get('kalshi_ticker'):
+        forecast = display_forecast(preview.get('settlement_prediction'), preview)
+        expires = _finite(forecast.get('expires_at'))
+        if forecast['available'] and expires is not None and expires > (time.time() if now is None else now):
+            return dict(forecast, preview_only=True)
+        reason = (preview.get('settlement_prediction') or {}).get('reason')
+        if reason and not (preview.get('settlement_prediction') or {}).get('available'):
+            return dict(result, available=False, reason=reason)
+    return dict(result, available=False, reason='Fresh Kalshi forecast for the active market required')
+
+
 def publish_summary(path, as_of=None):
     import json
     from pathlib import Path

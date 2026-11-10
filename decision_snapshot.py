@@ -47,9 +47,16 @@ def publish_decision(state, live_call, market):
     ticker = str(pending.get('ticker') or '')
     action = str(pending.get('master_action') or 'WAIT').upper()
     side = 'YES' if action == 'LOCK UP' else 'NO' if action == 'LOCK DOWN' else None
+    expires = _number(pending.get('expires_at'))
+    captured = _number(live.get('opened_at'))
+    same_observation = (ticker and live.get('ticker') == market.get('ticker') == ticker
+                        and live.get('expires_at') == expires
+                        and market.get('expires_at', expires) == expires
+                        and captured is not None and expires is not None and captured < expires)
+    if not same_observation:
+        live, captured = {}, None
     p = _number(live.get('contract_probability_up'))
     forecast_side = ('YES' if p >= .5 else 'NO') if p is not None and 0 <= p <= 1 else None
-    captured = _number(live.get('opened_at'))
     reason = str(pending.get('execution_reason') or 'WAIT')
     approved = pending.get('execution_approved') is True and side is not None
     outlook_follow = (
@@ -58,15 +65,17 @@ def publish_decision(state, live_call, market):
     )
     if outlook_follow:
         approved, reason = True, 'PAPER OUTLOOK FOLLOW — no validated settlement edge required'
-    if (not ticker or live.get('ticker') != ticker or market.get('ticker') != ticker
-            or (market.get('expires_at') is not None and market['expires_at'] != pending.get('expires_at'))
-            or live.get('expires_at') != pending.get('expires_at')):
+    if not same_observation:
         approved, reason = False, 'FRESH_SAME_TICKER_EVALUATION_UNAVAILABLE'
-    if side and forecast_side != side:
+        call.update(contract_probability_up=None, settlement_reference_timestamp=None)
+    elif side and forecast_side != side:
         approved, reason = False, 'CURRENT_LOCK_DIRECTION_OR_QUALIFICATION_CHANGED'
     if not side:
-        action = 'WAIT'
-        approved, reason = False, 'WAIT — no approved LOCK; directional forecast only'
+        action, approved = 'WAIT', False
+        if same_observation:
+            reason = (live.get('execution_reason') if live.get('master_action') == 'WAIT' else
+                      (live.get('lock_focus') or {}).get('reason'))
+            reason = reason or 'WAIT — no qualified LOCK'
     call.update(master_action=action, execution_approved=approved, execution_reason=reason,
                 would_wait=not approved)
     # Forecast geometry and the first official grading decision stay in pending.
@@ -74,7 +83,7 @@ def publish_decision(state, live_call, market):
     previous = state.get('settlement_decision') or {}
     snapshot = dict(version=VERSION, paper_only=True, ticker=ticker,
                     revision=int(previous.get('revision', 0))+1,
-                    captured_at=captured, expires_at=_number(pending.get('expires_at')),
+                    captured_at=captured, expires_at=expires,
                     master_action=action, side=side, forecast_side=forecast_side,
                     confidence=_number(pending.get('master_confidence')),
                     probability_yes=p, approved=approved, reason=reason,

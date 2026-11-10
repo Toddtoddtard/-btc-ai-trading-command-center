@@ -238,6 +238,55 @@ class DecisionSnapshotTests(unittest.TestCase):
         self.assertEqual(state['settlement_decision']['master_action'],'LOCK UP')
         self.assertIsNotNone(state['pending'])
 
+    def test_rollover_grades_old_pending_before_registering_current_market(self):
+        from unittest.mock import patch
+        import learner_v31 as worker
+        state = self.state()
+        live = dict(state['pending'], ticker='NEXT', opened_at=1602,
+                    expires_at=2500, settlement_reference_timestamp=1602)
+        market = {'ticker': 'NEXT', 'expires_at': 2500}
+        frame = object()
+
+        def grade(current, history):
+            self.assertIs(history, frame)
+            self.assertEqual(current['pending']['ticker'], 'T')
+            current['pending'] = None
+            return True
+
+        def register(current, history, observed):
+            self.assertIsNone(current['pending'])
+            current['pending'] = copy.deepcopy(live)
+            return True
+
+        with patch.object(worker.time, 'time', return_value=1602), \
+             patch.object(worker, 'parallel_calls', return_value={'history': frame, 'market': market}), \
+             patch.object(worker, 'strict_grade', side_effect=grade) as grading, \
+             patch.object(worker, 'register_with_snapshot', side_effect=register) as registration, \
+             patch.object(worker, 'current_shadow_call', return_value=live), \
+             patch.object(worker, 'record_observation'), patch.object(worker, 'record_prediction'):
+            worker.refresh_execution_decision(state)
+            worker.refresh_execution_decision(state)
+
+        grading.assert_called_once()
+        registration.assert_called_once()
+        snapshot = state['settlement_decision']
+        self.assertEqual(snapshot['ticker'], 'NEXT')
+        self.assertFalse(self.api().snapshot_blockers(snapshot, 'NEXT', now=1602))
+        paper = bg.run_cycle(state, lambda _: dict(self.market(1602), ticker='NEXT'), now=1602)
+        self.assertEqual((paper['open_position'] or {}).get('decision_id'), snapshot['decision_id'])
+
+    def test_cross_market_refresh_cannot_timestamp_the_old_decision(self):
+        state = self.state()
+        live = dict(state['pending'], ticker='NEXT', opened_at=1602,
+                    expires_at=2500, settlement_reference_timestamp=1602)
+        refresh_pending_lock_focus(state, live, {'ticker': 'NEXT', 'expires_at': 2500})
+        snapshot = state['settlement_decision']
+        self.assertEqual(snapshot['ticker'], 'T')
+        self.assertIsNone(snapshot['captured_at'])
+        self.assertIsNone(snapshot['reference_timestamp'])
+        self.assertIsNone(snapshot['probability_yes'])
+        self.assertFalse(snapshot['approved'])
+
     def test_incompatible_existing_account_is_rejected_without_replacement(self):
         self.api()
         for version in (None,2):

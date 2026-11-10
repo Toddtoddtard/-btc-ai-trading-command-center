@@ -67,7 +67,10 @@ WAIT in the action snapshot. Automatic scalping is disabled. Filled LOCKs keep
 their recorded side and official settlement lifecycle, even when evidence changes.
 The dashboard overlays that same decision onto its Master/Outlook presentation;
 local calculations are labeled previews and cannot latch a separate local LOCK.
-Stale/missing snapshots show WAIT with their reason and original decision time.
+Stale or missing snapshots show their entry blockers. A current same-contract
+dashboard forecast remains visible as a display-only preview while the next
+worker checkpoint is pending. At rollover, a paper pass with a new contract
+grades the expired pending observation before registering the new window.
 Assessments, signal attempts, fills and lifecycle events retain decision IDs.
 Existing ledgers with missing/unsupported versions fail closed; missing old
 migration markers never authorize a balance reset or history archival.
