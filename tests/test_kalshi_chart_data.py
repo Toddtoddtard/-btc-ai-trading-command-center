@@ -25,6 +25,7 @@ class ChartDataTests(unittest.TestCase):
         self.assertEqual(result['price'], 83104)
         self.assertEqual(result['candles'][0]['close'], 83104)
         self.assertEqual(event_ticker(EVENT), EVENT)
+        self.assertEqual(event_ticker("KXBTC15M-26NOV010115EST-15"), "KXBTC15M-26NOV010115EST")
         self.assertEqual(event_ticker('BTCUSDT'), '')
 
     def test_rejects_wrong_event_historical_stale_and_expired(self):
@@ -85,4 +86,4 @@ assert.equal(parseKalshiCandles(payload,event,now),null);
         script=re.findall(r'<script>(.*?)</script>',output[0],re.S)[0]
         result=subprocess.run(['node','--check'],input=script,text=True,capture_output=True)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn(r'/^(KXBTC15M-\d{2}[A-Z]{3}\d{6})(?:-\d+)?$/',script)
+        self.assertIn(r'/^(KXBTC15M-\d{2}[A-Z]{3}\d{6}(?:EST)?)(?:-\d+)?$/',script)

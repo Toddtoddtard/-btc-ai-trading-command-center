@@ -67,7 +67,7 @@ from dashboard_ui import (
 )
 from live_feeds import load_live_feeds, load_chart_startup, parallel_calls
 from kalshi_reference import fetch_kalshi_reference
-from kalshi_chart_data import fetch_chart
+from kalshi_chart_data import active_market_close, fetch_chart, market_ticker
 from macd_engine import project_macd_path
 from council_v4 import council_vote
 from council_confidence import for_direction as confidence_for_direction
@@ -936,62 +936,31 @@ def fetch_exact_kalshi_market(ticker):
     return None
 
 
-def _kalshi_15m_boundary(now_ts=None):
-    """Return the next Kalshi 15m close boundary in America/New_York."""
-    now_ts = time.time() if now_ts is None else float(now_ts)
-    ny = datetime.fromtimestamp(now_ts, tz=ZoneInfo("America/New_York"))
-    minute = ((ny.minute // 15) + 1) * 15
-    if minute >= 60:
-        close_ny = ny.replace(minute=0, second=0, microsecond=0) + pd.Timedelta(hours=1)
-    else:
-        close_ny = ny.replace(minute=minute, second=0, microsecond=0)
-    return close_ny
-
-
-def _kalshi_15m_ticker(close_ny):
-    mon = close_ny.strftime("%b").upper()
-    return f"KXBTC15M-{close_ny.strftime('%y')}{mon}{close_ny.strftime('%d%H%M')}-{close_ny.strftime('%M')}"
+def fetch_kalshi_bitcoin_markets():
+    # Key the cache by the market boundary so a rollover never reuses the old row.
+    close = active_market_close(time.time())
+    return _fetch_kalshi_bitcoin_markets(market_ticker(close), close.timestamp())
 
 
 @st.cache_data(ttl=3, show_spinner=False)
-def fetch_kalshi_bitcoin_markets():
-    """Resolve the active KXBTC15M contract robustly.
-
-    Primary path: construct the exact active ticker from the next 15-minute
-    New York boundary and fetch that exact market directly. This avoids Kalshi
-    list/status lag. Secondary path: series-list discovery for resilience.
-    """
+def _fetch_kalshi_bitcoin_markets(expected_ticker, expected_close_ts):
+    """Prefer the exact active ticker and fall back to series discovery."""
     now_ts = time.time()
     errors = []
 
-    # Deterministic exact-ticker path. Try the expected active close first,
-    # then adjacent boundaries in case Kalshi publishes a few seconds early/late.
-    expected_close = _kalshi_15m_boundary(now_ts)
-    for offset_min in (0, 15, -15):
-        close_ny = expected_close + pd.Timedelta(minutes=offset_min)
-        ticker = _kalshi_15m_ticker(close_ny)
-        exact = fetch_exact_kalshi_market(ticker)
-        if not exact:
-            continue
+    exact = fetch_exact_kalshi_market(expected_ticker)
+    if exact and str(exact.get("ticker") or expected_ticker) == expected_ticker:
         exact_close_ts = kalshi_close_timestamp(exact)
         if pd.isna(exact_close_ts):
-            exact_close_ts = float(close_ny.timestamp())
-        if not now_ts < exact_close_ts <= float(expected_close.timestamp()):
-            continue
-        target = kalshi_numeric_target(exact)
-        row = dict(exact)
-        row["ticker"] = ticker
-        row["_close_ts"] = exact_close_ts
-        row["_seconds_remaining"] = max(0, int(exact_close_ts - now_ts))
-        row["_target"] = target
-        return {
-            "ok": True,
-            "markets": [row],
-            "current": row,
-            "feed_ms": np.nan,
-            "error": None,
-            "resolution": "deterministic-exact-ticker",
-        }
+            exact_close_ts = expected_close_ts
+        if exact_close_ts == expected_close_ts and time.time() < exact_close_ts:
+            row = dict(exact, ticker=expected_ticker, _close_ts=exact_close_ts,
+                       _seconds_remaining=max(0, int(exact_close_ts - time.time())),
+                       _target=kalshi_numeric_target(exact))
+            return {
+                "ok": True, "markets": [row], "current": row, "feed_ms": np.nan,
+                "error": None, "resolution": "deterministic-exact-ticker",
+            }
 
     # Fallback: discover from the KXBTC15M series list, but never require target
     # fields in the list response. Canonical target still comes from exact ticker.
@@ -1006,10 +975,10 @@ def fetch_kalshi_bitcoin_markets():
                 hits = []
                 for market in markets:
                     ticker = str(market.get("ticker") or "")
-                    if not ticker.upper().startswith("KXBTC15M-"):
+                    if ticker != expected_ticker:
                         continue
                     close_ts = kalshi_close_timestamp(market)
-                    if pd.isna(close_ts) or not now_ts < close_ts <= float(expected_close.timestamp()):
+                    if close_ts != expected_close_ts or time.time() >= close_ts:
                         continue
                     row = dict(market)
                     row["_close_ts"] = close_ts
@@ -1020,17 +989,21 @@ def fetch_kalshi_bitcoin_markets():
                     continue
                 current = min(hits, key=lambda row: (row["_close_ts"], str(row.get("ticker", ""))))
                 exact = fetch_exact_kalshi_market(current.get("ticker", ""))
-                if exact:
+                if exact and str(exact.get("ticker") or current["ticker"]) == current["ticker"]:
                     merged = dict(current)
                     merged.update(exact)
                     target = kalshi_numeric_target(exact)
                     exact_close_ts = kalshi_close_timestamp(exact)
                     if pd.notna(target) and target > 0:
                         merged["_target"] = float(target)
+                    if pd.notna(exact_close_ts) and exact_close_ts != expected_close_ts:
+                        continue
                     if pd.notna(exact_close_ts):
                         merged["_close_ts"] = exact_close_ts
                         merged["_seconds_remaining"] = max(0, int(exact_close_ts - now_ts))
                     current = merged
+                if time.time() >= current["_close_ts"]:
+                    break
                 return {
                     "ok": True,
                     "markets": hits[:25],
@@ -1044,9 +1017,10 @@ def fetch_kalshi_bitcoin_markets():
 
     # Last-resort timer seed: even if Kalshi API is temporarily unreachable,
     # the 15m countdown remains usable from the official quarter-hour schedule.
-    close_ny = expected_close
+    now_ts = time.time()
+    close_ny = active_market_close(now_ts)
     synthetic_close = float(close_ny.timestamp())
-    ticker = _kalshi_15m_ticker(close_ny)
+    ticker = market_ticker(close_ny)
     row = {
         "ticker": ticker,
         "title": "BTC price up in next 15 mins?",
@@ -1138,7 +1112,7 @@ def current_kalshi_context(kalshi, spot_price):
     }
 
 
-def stable_kalshi_contract(kalshi, spot_price):
+def stable_kalshi_contract(kalshi, spot_price, *, include_orderbook=True):
     """Return one canonical Kalshi 15-minute contract for the whole app.
 
     Exact ticker + strike stay paired until expiry so chart, metrics,
@@ -1220,9 +1194,10 @@ def stable_kalshi_contract(kalshi, spot_price):
                           distance=np.nan, distance_pct=np.nan, market=None)
             return result
         result["available"] = True
-        result["orderbook"] = fetch_kalshi_orderbook(str(result.get("ticker") or ""))
-        if result["orderbook"].get("midpoint") is not None:
-            result["up_probability"] = result["orderbook"]["midpoint"]
+        if include_orderbook:
+            result["orderbook"] = fetch_kalshi_orderbook(str(result.get("ticker") or ""))
+            if result["orderbook"].get("midpoint") is not None:
+                result["up_probability"] = result["orderbook"]["midpoint"]
         return result
 
     return live
@@ -4377,7 +4352,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             const stamp = Number(packet.timestamp) * 1000;
             const now = Date.now();
             if (!(expiry > now && expiry <= (Math.floor(now / 900000)+1)*900000) ||
-                !/^KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}}(?:-\\d+)?$/.test(packet.ticker) ||
+                !/^KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}}(?:EST)?(?:-\\d+)?$/.test(packet.ticker) ||
                 !Number.isFinite(stamp) || stamp < lastChartTimestamp ||
                 now-stamp > 30000 || stamp > now+5000 ||
                 !Number.isFinite(packet.price) || packet.price <= 1000 ||
@@ -4434,7 +4409,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 return serverFeed.candles;
             }}
             const ticker = currentTicker || (serverClose > Date.now() ? initial.ticker : "");
-            const match = String(ticker || "").match(/^(KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}})(?:-\\d+)?$/);
+            const match = String(ticker || "").match(/^(KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}}(?:EST)?)(?:-\\d+)?$/);
             if (!match) return null;
             const event = match[1];
             const payload = await fetchKalshiJson("/live_data/events/" + encodeURIComponent(event) + "?range=1h");
@@ -4708,7 +4683,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
 _chart_startup = load_chart_startup(fetch_klines, fetch_kalshi_bitcoin_markets, enrich_history)
 _persistent_hist = _chart_startup["history"]
 try:
-    _persistent_ctx = stable_kalshi_contract(_chart_startup["kalshi"], np.nan)
+    _persistent_ctx = stable_kalshi_contract(_chart_startup["kalshi"], np.nan, include_orderbook=False)
 except Exception:
     _persistent_ctx = {"available": False, "target": np.nan, "ticker": ""}
 
@@ -4794,7 +4769,7 @@ persistent_kalshi_market_chart(
 @st.fragment(run_every=live_run_every)
 def refresh_market_chart():
     try:
-        context = stable_kalshi_contract(fetch_kalshi_bitcoin_markets(), np.nan)
+        context = stable_kalshi_contract(fetch_kalshi_bitcoin_markets(), np.nan, include_orderbook=False)
         live = fetch_kalshi_chart(context.get("ticker", ""))
     except Exception as exc:
         live = {"available": False, "error": str(exc)}
@@ -4893,7 +4868,7 @@ def live_dashboard():
             st.code("\n".join(errors))
         st.stop()
 
-    _display_context = stable_kalshi_contract(kalshi, np.nan)
+    _display_context = stable_kalshi_contract(kalshi, np.nan, include_orderbook=False)
     _display_feed = fetch_kalshi_chart(_display_context.get("ticker", ""))
     display_price = safe_float(_display_feed.get("price"), np.nan) if _display_feed.get("available") else np.nan
     # Official chart prices also drive the dashboard target-distance inputs.

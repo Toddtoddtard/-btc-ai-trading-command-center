@@ -20,8 +20,28 @@ class MarketInputIntegrityTests(unittest.TestCase):
         book = orderbook_features({'orderbook_fp': {'yes_dollars': [], 'yes': [[80, 20]]}})
         self.assertIsNone(book['yes_bid'])
 
+    def test_worker_uses_exact_active_market_without_waiting_for_series_list(self):
+        market = {'ticker': 'KXBTC15M-25DEC311915-15', 'close_time': '2026-01-01T00:15:00Z',
+                  'floor_strike': 100000, 'status': 'active'}
+        with patch.object(learner.time, 'time', return_value=1767225600), \
+             patch.object(learner, 'kalshi_get', side_effect=AssertionError('Series list should not be needed')), \
+             patch.object(learner, 'exact_market', return_value=market) as exact, \
+             patch.object(learner, 'orderbook', return_value={}):
+            self.assertEqual(learner.market()['ticker'], market['ticker'])
+        exact.assert_called_once_with(market['ticker'])
+
+    def test_worker_rejects_next_window_when_active_market_is_missing(self):
+        market = {'ticker': 'KXBTC15M-25DEC311930-30', 'close_time': '2026-01-01T00:30:00Z',
+                  'floor_strike': 100000, 'status': 'active'}
+        with patch.object(learner.time, 'time', return_value=1767225600), \
+             patch.object(learner, 'kalshi_get', return_value={'markets': [market]}), \
+             patch.object(learner, 'exact_market', return_value={}), \
+             patch.object(learner, 'orderbook', return_value={}) as depth:
+            self.assertIsNone(learner.market())
+        depth.assert_not_called()
+
     def test_learner_midpoint_uses_legacy_quotes_when_book_unavailable(self):
-        market = {'ticker': 'TEST', 'close_time': '2026-01-01T00:15:00Z',
+        market = {'ticker': 'KXBTC15M-25DEC311915-15', 'close_time': '2026-01-01T00:15:00Z',
                   'floor_strike': 100000, 'status': 'active', 'yes_bid': 70, 'yes_ask': 74}
         with patch.object(learner.time, 'time', return_value=1767225600), \
              patch.object(learner, 'kalshi_get', return_value={'markets': [market]}), \
@@ -31,7 +51,7 @@ class MarketInputIntegrityTests(unittest.TestCase):
         self.assertAlmostEqual(result['prob'], .72)
 
     def test_learner_rejects_wrong_exact_market(self):
-        market = {'ticker': 'TEST', 'close_time': '2026-01-01T00:15:00Z',
+        market = {'ticker': 'KXBTC15M-25DEC311915-15', 'close_time': '2026-01-01T00:15:00Z',
                   'floor_strike': 100000, 'status': 'active'}
         with patch.object(learner.time, 'time', return_value=1767225600), \
              patch.object(learner, 'kalshi_get', return_value={'markets': [market]}), \

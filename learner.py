@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from ai_core import SPECIALIST_NAMES, enrich_history_core, forecast_path_core, run_specialists_core
+from kalshi_chart_data import active_market_close, market_ticker
 from kalshi_microstructure import orderbook_features
 from learning_prices import closed_price_at
 from multi_timeframe import fetch_multi_timeframe_context
@@ -277,40 +278,36 @@ def orderbook(ticker):
 
 
 def market():
-    try:
-        markets = kalshi_get(
-            "/markets",
-            {"limit": 100, "status": "open", "series_ticker": "KXBTC15M"},
-        ).get("markets", [])
-    except Exception:
-        return None
-    now = time.time()
-    choices = []
-    for item in markets:
-        try:
-            expires = pd.Timestamp(item.get("close_time") or item.get("expiration_time") or item.get("expected_expiration_time")).timestamp()
-            target = strike(item)
-            if expires > now and target is not None:
-                choices.append((expires, str(item.get("ticker", "")), item, target))
-        except Exception:
-            pass
-    if not choices:
-        return None
-    expires, ticker, item, target = sorted(choices, key=lambda row: (row[0], row[1]))[0]
     quote_requested_at = time.time()
-    exact = exact_market(ticker)
-    if exact:
-        if str(exact.get("ticker") or ticker) != ticker:
-            return None
-        exact_target = strike(exact)
-        if exact_target is not None:
-            target = exact_target
-        raw_expiry = exact.get("close_time") or exact.get("expiration_time") or exact.get("expected_expiration_time")
-        if raw_expiry:
-            expires = pd.Timestamp(raw_expiry).timestamp()
-        item = {**item, **exact}
-    if expires <= time.time() or str(item.get("status") or "active").lower() not in {"open", "active"}:
+    boundary = active_market_close(quote_requested_at)
+    close = boundary.timestamp()
+    ticker = market_ticker(boundary)
+    item = exact_market(ticker)
+    if item and str(item.get("ticker") or ticker) != ticker:
         return None
+    if strike(item) is None:
+        try:
+            markets = kalshi_get(
+                "/markets", {"limit": 100, "status": "open", "series_ticker": "KXBTC15M"},
+            ).get("markets", [])
+        except Exception:
+            return None
+        listed = next((row for row in markets if row.get("ticker") == ticker), None)
+        if not listed:
+            return None
+        item = {**listed, **item}
+    target = strike(item)
+    expires = close
+    raw_expiry = item.get("close_time") or item.get("expiration_time") or item.get("expected_expiration_time")
+    if raw_expiry:
+        try:
+            expires = pd.Timestamp(raw_expiry).timestamp()
+        except (ValueError, TypeError, OverflowError):
+            return None
+    if (target is None or expires != close or expires <= time.time()
+            or str(item.get("status") or "active").lower() not in {"open", "active"}):
+        return None
+
     def quote_value(name):
         try:
             return float(item[name + "_dollars"])
@@ -324,6 +321,8 @@ def market():
     prob = (yes_bid + yes_ask) / 2 if yes_bid is not None and yes_ask is not None else None
     no_bid, no_ask = quote_value("no_bid"), quote_value("no_ask")
     book = orderbook(ticker)
+    if expires <= time.time():
+        return None
     if book.get("available"):
         yes_bid = book.get("yes_bid") if book.get("yes_bid") is not None else yes_bid
         yes_ask = book.get("yes_ask") if book.get("yes_ask") is not None else yes_ask

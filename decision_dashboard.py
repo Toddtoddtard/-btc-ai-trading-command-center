@@ -8,6 +8,12 @@ from dashboard_ui import metric_cards_html
 
 
 def outlook_label(decision):
+    age = decision.get('outlook_age_seconds')
+    last_action = decision.get('worker_outlook_action')
+    if age is not None and last_action in ('WAIT', 'LOCK UP', 'LOCK DOWN'):
+        minutes, seconds = divmod(age, 60)
+        elapsed = f'{minutes}m {seconds:02d}s' if minutes else f'{seconds}s'
+        return f'LAST {last_action} · {elapsed} old'
     action = str(decision.get('action') or 'WAIT')
     if action.startswith('LOCK '):
         return 'LOCKED OUTLOOK '+action.split()[-1]

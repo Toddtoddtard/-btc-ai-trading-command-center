@@ -141,6 +141,35 @@ class DecisionSnapshotTests(unittest.TestCase):
         self.assertEqual(view['action'],'WAIT')
         self.assertFalse(view['authoritative_available'])
 
+    def test_last_same_market_outlook_shows_its_age_without_authorizing_a_trade(self):
+        from decision_dashboard import outlook_label
+        for action, probability, label in [
+            ('WAIT', .61, 'LAST WAIT'),
+            ('LOCK UP', .85, 'LAST LOCK UP'),
+            ('LOCK DOWN', .15, 'LAST LOCK DOWN'),
+        ]:
+            with self.subTest(action=action):
+                state = self.state(action, probability)
+                view = self.api().dashboard_decision({'kalshi_ticker': 'T'}, state, now=1137)
+                self.assertEqual(outlook_label(view), f'{label} · 2m 17s old')
+                self.assertEqual(view['action'], 'WAIT')
+                self.assertFalse(view['execution_approved'])
+                self.assertFalse(view['authoritative_available'])
+
+    def test_invalid_expired_or_wrong_market_outlook_stays_unavailable(self):
+        from decision_dashboard import outlook_label
+        for now, ticker, changes in [
+            (999, 'T', {}),
+            (1600, 'T', {}),
+            (1137, 'OTHER', {}),
+            (1137, 'T', {'approved': False}),
+        ]:
+            with self.subTest(now=now, ticker=ticker, changes=changes):
+                state = self.state()
+                state['settlement_decision'].update(changes)
+                view = self.api().dashboard_decision({'kalshi_ticker': ticker}, state, now=now)
+                self.assertEqual(outlook_label(view), 'OUTLOOK UNAVAILABLE')
+
     def test_authoritative_panel_never_keeps_opposing_preview_metadata(self):
         api=self.api();state=self.state()
         state['pending'].update(master_base_score=.4,lock_focus={'source_health':.8,'consensus':.75})

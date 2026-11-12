@@ -5,13 +5,24 @@ import re
 import time
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 BASES = ('https://external-api.kalshi.com/trade-api/v2',
          'https://api.elections.kalshi.com/trade-api/v2')
 
 
+def active_market_close(now):
+    """Next 15-minute close, expressed in Eastern time for the market ticker."""
+    return datetime.fromtimestamp((int(now // 900) + 1) * 900, ZoneInfo("America/New_York"))
+
+
+def market_ticker(close):
+    repeated_hour = "EST" if close.fold else ""
+    return f"KXBTC15M-{close.strftime('%y%b%d%H%M').upper()}{repeated_hour}-{close:%M}"
+
+
 def event_ticker(market):
-    match = re.fullmatch(r'(KXBTC15M-\d{2}[A-Z]{3}\d{6})(?:-\d+)?', str(market or ''))
+    match = re.fullmatch(r'(KXBTC15M-\d{2}[A-Z]{3}\d{6}(?:EST)?)(?:-\d+)?', str(market or ''))
     return match.group(1) if match else ''
 
 
