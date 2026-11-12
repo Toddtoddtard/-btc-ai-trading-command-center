@@ -67,7 +67,9 @@ WAIT in the action snapshot. Automatic scalping is disabled. Filled LOCKs keep
 their recorded side and official settlement lifecycle, even when evidence changes.
 The dashboard overlays that same decision onto its Master/Outlook presentation;
 local calculations are labeled previews and cannot latch a separate local LOCK.
-Stale or missing snapshots show their entry blockers. A current same-contract
+Stale or missing snapshots show their entry blockers. The Outlook label can show
+the last valid decision for the current, unexpired market with its original age.
+A current same-contract
 dashboard forecast remains visible as a display-only preview while the next
 worker checkpoint is pending. At rollover, a paper pass with a new contract
 grades the expired pending observation before registering the new window.
@@ -120,6 +122,9 @@ cadence (one second by default) sends a compact same-origin data packet from a
 zero-height Streamlit component into that retained chart. Plotly updates traces
 in place, retaining zoom and the selected prediction horizon. The server chart
 feed is cached for one second; browser-side Kalshi polling remains a fallback.
+The dashboard and worker derive the exact ticker from the active Eastern close
+using UTC-aligned 15-minute boundaries. The dashboard market cache rotates with
+the ticker, and chart refreshes do not wait for contract order-book depth.
 Only the forming candle incorporates the latest observed tick. Closed history
 and learning/paper source timestamps retain their original meaning; a one-second
 display update does not imply a new completed outcome or worker publication.

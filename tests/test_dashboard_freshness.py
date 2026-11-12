@@ -20,7 +20,7 @@ def load_function(name, namespace):
 class DashboardFreshnessTests(unittest.TestCase):
     def test_live_refresh_sends_data_without_recreating_chart(self):
         frames = []
-        ns = dict(stable_kalshi_contract=lambda *a: {'ticker': 'test', 'target': 83000},
+        ns = dict(stable_kalshi_contract=lambda *a, **kw: {'ticker': 'test', 'target': 83000},
                   fetch_kalshi_bitcoin_markets=lambda: {},
                   fetch_kalshi_chart=lambda ticker: {'available': True, 'price': 83104,
                       'timestamp': 1000, 'candles': []},
@@ -33,6 +33,29 @@ class DashboardFreshnessTests(unittest.TestCase):
         refresh(); refresh()
         self.assertEqual(frames, [83104, 83104])
         ns['persistent_kalshi_market_chart'].assert_not_called()
+
+    def test_market_cache_key_rotates_at_the_window_boundary(self):
+        from kalshi_chart_data import active_market_close, market_ticker
+        boundary = datetime(2026, 11, 1, 6, 0, tzinfo=timezone.utc).timestamp()
+        clock = Mock(side_effect=[boundary - 1, boundary])
+        cached = Mock()
+        namespace = dict(time=SimpleNamespace(time=clock), active_market_close=active_market_close,
+                         market_ticker=market_ticker, _fetch_kalshi_bitcoin_markets=cached)
+        fetch = load_function('fetch_kalshi_bitcoin_markets', namespace)
+        fetch()
+        fetch()
+        self.assertEqual([call.args for call in cached.call_args_list], [
+            ('KXBTC15M-26NOV010100-00', boundary),
+            ('KXBTC15M-26NOV010115-15', boundary + 900),
+        ])
+
+    def test_chart_refresh_does_not_wait_for_market_depth(self):
+        context = Mock(return_value={'ticker': 'test', 'target': 83000})
+        ns = dict(stable_kalshi_contract=context, fetch_kalshi_bitcoin_markets=lambda: {},
+                  fetch_kalshi_chart=lambda ticker: {'available': False}, np=np)
+        load_function('refresh_market_chart', ns)()
+        context.assert_called_once()
+        self.assertFalse(context.call_args.kwargs['include_orderbook'])
 
     def test_expired_cached_target_is_unavailable_during_feed_outage(self):
         now = datetime(2026, 10, 11, 19, 30, tzinfo=timezone.utc).timestamp()

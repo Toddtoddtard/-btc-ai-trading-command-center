@@ -134,7 +134,7 @@ def dashboard_decision(preview, state, now=None):
     blockers = snapshot_blockers(snapshot, ticker, now)
     result = dict(preview or {})
     result.update(action='WAIT', execution_approved=False, locked_side=None,
-                  authoritative_available=not blockers, decision_id=snapshot.get('decision_id'),
+                  outlook_age_seconds=None, authoritative_available=not blockers, decision_id=snapshot.get('decision_id'),
                   decision_time=snapshot.get('captured_at'), decision_blockers=blockers,
                   execution_reason='; '.join(blockers), contract_probability_up=None,
                   settlement_prediction=None, reason='; '.join(blockers),
@@ -155,6 +155,10 @@ def dashboard_decision(preview, state, now=None):
                   target_price=call.get('target'),
                   kalshi_close_ts=snapshot.get('expires_at'),
                   seconds_remaining=max(0., (snapshot.get('expires_at') or now)-now))
+    captured = _number(snapshot.get('captured_at'))
+    if (captured is not None and captured <= now and blockers
+            and set(blockers) <= {'STALE_DECISION', 'STALE_REFERENCE'}):
+        result['outlook_age_seconds'] = int(now - captured)
     if not blockers:
         result.update(action=snapshot.get('master_action', 'WAIT'),
                       locked_side=('UP' if snapshot.get('side') == 'YES' else 'DOWN') if snapshot.get('side') else None,
