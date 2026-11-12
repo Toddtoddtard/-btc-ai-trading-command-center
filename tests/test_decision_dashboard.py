@@ -71,3 +71,6 @@ render_decision_assessment({'action': 'SCALP UP'}, {'approved': False}, state, {
             with self.subTest(reference=reference, now=now):
                 self.assertEqual(live_outlook(preview, reference, now=now),
                                  ('OUTLOOK UNAVAILABLE', None, None, None))
+        # The local engine can substitute its projected end for a missing strike.
+        self.assertEqual(live_outlook(dict(preview, action='HOLD'), feed, now=1000),
+                         ('OUTLOOK UNAVAILABLE', None, None, None))

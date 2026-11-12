@@ -27,16 +27,16 @@ def outlook_label(decision):
 def live_outlook(preview, reference, now=None):
     """Read the dashboard's current analysis for display."""
     now = time.time() if now is None else now
+    action = str(preview.get('action') or 'WAIT')
     expires = finite(preview.get('kalshi_close_ts'))
     target = finite(preview.get('target_price'))
     stamp = finite(reference.get('timestamp'))
     event = event_ticker(preview.get('kalshi_ticker'))
-    if (not event or reference.get('event_ticker') != event or not reference.get('available')
+    if (action == 'HOLD' or not event or reference.get('event_ticker') != event or not reference.get('available')
             or expires is None or expires <= now or target is None or target <= 0
             or stamp is None or not 0 <= now - stamp <= MAX_AGE):
         return 'OUTLOOK UNAVAILABLE', None, None, None
 
-    action = str(preview.get('action') or 'WAIT')
     label = outlook_label(dict(action=action, authoritative_available=True))
     label = label.replace('LOCKED OUTLOOK ', 'LOCK ')
     if action.endswith((' UP', ' DOWN')):
