@@ -4944,7 +4944,7 @@ def live_dashboard():
         fmt_pct(ticker.get("change_24h")),
         help="Live BTC market change over 24 hours; this is not an AI accuracy statistic.",
     )
-    outlook, direction, strength, agreement = live_outlook(_live_preview, _display_feed)
+    outlook, _confidence_direction, strength, agreement = live_outlook(_live_preview, _display_feed)
     with m3:
         st.html(
             '<div class="direction-card metric-direction-card">'
@@ -4953,9 +4953,9 @@ def live_dashboard():
         )
         st.caption("Dashboard analysis")
     _confidence_badge = ""
-    if direction == "UP":
+    if _confidence_direction == "UP":
         _confidence_badge = '<span style="color:var(--cc-up, #87d4b6);">▲&nbsp;UP</span>'
-    elif direction == "DOWN":
+    elif _confidence_direction == "DOWN":
         _confidence_badge = '<span style="color:var(--cc-down, #f0a5ac);">▼&nbsp;DOWN</span>'
     _confidence_text = f"{strength:.1%}" if strength is not None else "Unavailable"
     with m4:
