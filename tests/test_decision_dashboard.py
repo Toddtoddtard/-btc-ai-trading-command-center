@@ -44,3 +44,30 @@ render_decision_assessment({'action': 'SCALP UP'}, {'approved': False}, state, {
         for label in ['OUTLOOK DOWN','LOCKED OUTLOOK DOWN']:
             self.assertIn('call-down',directional_badge_html(label))
             self.assertIn('▼',directional_badge_html(label))
+
+    def test_live_outlook_uses_current_market_without_worker_data(self):
+        from decision_dashboard import live_outlook
+        from decision_snapshot import dashboard_decision
+        ticker = 'KXBTC15M-26NOV121900-00'
+        preview = dict(kalshi_ticker=ticker, kalshi_close_ts=1600, target_price=71200,
+                       action='LOCK DOWN', confidence=.74, consensus=.8, base_score=-.4)
+        feed = dict(available=True, timestamp=999, event_ticker='KXBTC15M-26NOV121900')
+        self.assertEqual(live_outlook(preview, feed, now=1000),
+                         ('LOCK DOWN', 'DOWN', .74, .8))
+        worker = dashboard_decision(preview, {}, now=1000)
+        self.assertFalse(worker['execution_approved'])
+        self.assertEqual(worker['action'], 'WAIT')
+        self.assertEqual(live_outlook(dict(preview, action='SCALP DOWN'), feed, now=1000)[0],
+                         'OUTLOOK DOWN')
+
+    def test_live_outlook_rejects_expired_market_stale_reference_and_other_event(self):
+        from decision_dashboard import live_outlook
+        preview = dict(kalshi_ticker='KXBTC15M-26NOV121900-00', kalshi_close_ts=1600,
+                       target_price=71200, action='LOCK UP', confidence=.74, consensus=.8)
+        feed = dict(available=True, timestamp=999, event_ticker='KXBTC15M-26NOV121900')
+        for reference, now in [
+            (feed, 1600), (feed, 1030), (dict(feed, event_ticker='KXBTC15M-26NOV121845'), 1000),
+        ]:
+            with self.subTest(reference=reference, now=now):
+                self.assertEqual(live_outlook(preview, reference, now=now),
+                                 ('OUTLOOK UNAVAILABLE', None, None, None))
