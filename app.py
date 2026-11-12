@@ -104,7 +104,7 @@ from lock_focus import (
     specialist_consensus,
 )
 from pro_trade_ticket import build_pro_trade_ticket
-from decision_dashboard import render_decision_assessment, outlook_label
+from decision_dashboard import live_outlook, outlook_label, render_decision_assessment
 from decision_snapshot import dashboard_decision
 from public_futures import parse_bybit_futures_snapshot
 from reliability_v31 import (
@@ -4944,33 +4944,20 @@ def live_dashboard():
         fmt_pct(ticker.get("change_24h")),
         help="Live BTC market change over 24 hours; this is not an AI accuracy statistic.",
     )
+    outlook, _confidence_direction, strength, agreement = live_outlook(_live_preview, _display_feed)
     with m3:
-        st.markdown(
-            f'<div class="direction-card metric-direction-card"><div class="direction-card-label">Worker Outlook</div><div class="direction-card-value">{directional_badge_html(outlook_label(decision).replace("LOCKED OUTLOOK ", ""))}</div></div>',
-            unsafe_allow_html=True,
+        st.html(
+            '<div class="direction-card metric-direction-card">'
+            '<div class="direction-card-label">Live Outlook</div>'
+            f'<div class="direction-card-value">{directional_badge_html(outlook)}</div></div>'
         )
-    # Confidence card only: keep every other top metric unchanged and add the
-    # Master directional lean beside the Confidence label.
-    _confidence_action = str(decision.get("action", "HOLD")).upper().strip()
-    if "UP" in _confidence_action:
-        _confidence_direction = "UP"
-    elif "DOWN" in _confidence_action:
-        _confidence_direction = "DOWN"
-    else:
-        _confidence_score = safe_float(
-            decision.get("base_score"),
-            safe_float(decision.get("score"), 0.0),
-        )
-        _confidence_direction = "UP" if _confidence_score >= 0 else "DOWN"
-
-    _worker_current = decision.get("authoritative_available", False)
-    _confidence_color = "var(--cc-up, #87d4b6)" if _confidence_direction == "UP" else "var(--cc-down, #f0a5ac)"
-    _confidence_arrow = "▲" if _confidence_direction == "UP" else "▼"
-    _confidence_badge = (
-        f'<span style="color:{_confidence_color};">{_confidence_arrow}&nbsp;{_confidence_direction}</span>'
-        if _worker_current else ''
-    )
-    _confidence_text = f"{decision['confidence']:.1%}" if _worker_current else "Unavailable"
+        st.caption("Dashboard analysis")
+    _confidence_badge = ""
+    if _confidence_direction == "UP":
+        _confidence_badge = '<span style="color:var(--cc-up, #87d4b6);">▲&nbsp;UP</span>'
+    elif _confidence_direction == "DOWN":
+        _confidence_badge = '<span style="color:var(--cc-down, #f0a5ac);">▼&nbsp;DOWN</span>'
+    _confidence_text = f"{strength:.1%}" if strength is not None else "Unavailable"
     with m4:
         st.html(
             f"""
@@ -4980,7 +4967,7 @@ def live_dashboard():
             </div>
             """
         )
-    m5.metric("Vote agreement", f"{decision['consensus']:.1%}" if _worker_current else "Unavailable")
+    m5.metric("Vote agreement", f"{agreement:.1%}" if agreement is not None else "Unavailable")
     # Show the current settlement forecast, not an unrelated historical paper fill.
     # This is a display-only indication; it must not imply a trade was opened.
     _preview_only = _settlement_prediction.get("preview_only", False)
@@ -5005,6 +4992,7 @@ def live_dashboard():
     else:
         st.warning("Live Kalshi price unavailable. Current-price cards show Unavailable; internal spot-proxy diagnostics are not Kalshi prices. New LOCK qualification is blocked until the Kalshi feed recovers.")
     st.markdown("#### Kalshi 15-minute settlement prediction")
+    st.caption('Paper worker outlook · ' + outlook_label(decision))
     if not decision.get('authoritative_available'):
         st.caption('A fresh worker decision is required for a new paper entry.')
     if decision.get('decision_time'):

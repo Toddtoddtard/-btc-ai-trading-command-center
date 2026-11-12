@@ -65,8 +65,10 @@ matching snapshot no more than 30 seconds old, plus all existing fee, depth,
 reference, confidence, validation and position checks. Ordinary forecasts become
 WAIT in the action snapshot. Automatic scalping is disabled. Filled LOCKs keep
 their recorded side and official settlement lifecycle, even when evidence changes.
-The dashboard overlays that same decision onto its Master/Outlook presentation;
-local calculations are labeled previews and cannot latch a separate local LOCK.
+The dashboard displays the current market’s Live Outlook, signal strength and
+vote agreement from its local analysis and a fresh matching Kalshi reference.
+The worker snapshot supplies the paper worker outlook and paper entry checks.
+The local calculation runs in preview mode and cannot persist a LOCK.
 Stale or missing snapshots show their entry blockers. The Outlook label can show
 the last valid decision for the current, unexpired market with its original age.
 A current same-contract
