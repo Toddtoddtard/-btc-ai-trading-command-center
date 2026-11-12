@@ -77,11 +77,12 @@ def run_cycle():
     command(sys.executable, 'bot_intelligence_report.py',
             env={**env, 'LEARNING_STATE_INPUT': str(output), 'LEARNING_STATE_OUTPUT': str(enriched)})
     enriched.replace(output)
-    for script in ('enrich_learning_state_v5.py', 'audit_scorecard_v7.py'):
-        command(sys.executable, script, env=env)
+    command(sys.executable, 'audit_scorecard_v7.py', env=env)
     command(sys.executable, 'multi_asset_paper.py', '--state', str(output), env=env)
     # Refresh the BTC decision after unrelated network work, just before publish.
     command(sys.executable, 'background_paper.py', env=env)
+    # A paper pass can roll into a new pending window with a different regime.
+    command(sys.executable, 'enrich_learning_state_v5.py', env=env)
     command(sys.executable, 'improvement_evidence.py', env=env)
     command(sys.executable, 'scripts/validate_learning_state.py', env=env)
     publish_state()

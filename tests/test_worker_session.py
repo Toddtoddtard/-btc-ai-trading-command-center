@@ -1,3 +1,4 @@
+import json
 import tempfile
 import os
 import subprocess
@@ -78,6 +79,30 @@ class WorkerSessionTests(unittest.TestCase):
             self.assertEqual(previous.read_text(), 'current ledger')
             self.assertEqual(output.read_text(), 'enriched ledger')
             self.assertEqual(calls[-2:], [('scripts/validate_learning_state.py',), ('publish',)])
+
+    def test_rollover_enriches_the_latest_pending_regime_before_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'learning_state.json'
+            previous = Path(directory) / 'previous.json'
+            output.write_text(json.dumps({'pending': {'regime': 'TREND_UP'}}))
+
+            def command(*args, **kwargs):
+                path = Path(kwargs['env']['LEARNING_STATE_OUTPUT'])
+                if args[1] == 'bot_intelligence_report.py':
+                    path.write_text(output.read_text())
+                    return
+                state = json.loads(path.read_text())
+                if args[1] == 'background_paper.py':
+                    state['pending']['regime'] = 'RANGE'
+                elif args[1] == 'enrich_learning_state_v5.py':
+                    state['specialist_knowledge_v5'] = {'regime': state['pending']['regime']}
+                elif args[1] == 'scripts/validate_learning_state.py':
+                    self.assertEqual(state['specialist_knowledge_v5']['regime'], 'RANGE')
+                path.write_text(json.dumps(state))
+
+            with patch.dict(os.environ, LEARNING_STATE_INPUT=str(previous), LEARNING_STATE_OUTPUT=str(output)), \
+                 patch('worker_session.command', side_effect=command), patch('worker_session.publish_state'):
+                run_cycle()
 
     def test_publication_keeps_runner_on_main_and_preserves_other_state_files(self):
         def git(*args, cwd):
