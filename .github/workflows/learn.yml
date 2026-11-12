@@ -150,11 +150,6 @@ jobs:
         run: |
           python bot_intelligence_report.py
           mv /tmp/learning_state_v4.json /tmp/learning_state.json
-      - name: Enrich specialist self-learning knowledge
-        env:
-          LEARNING_STATE_OUTPUT: /tmp/learning_state.json
-          HISTORICAL_SPECIALIST_INPUT: /tmp/historical_specialist_knowledge_v7.json
-        run: python enrich_learning_state_v5.py
       - name: Update Audit v6 milestone scorecard
         env:
           LEARNING_STATE_OUTPUT: /tmp/learning_state.json
@@ -171,6 +166,11 @@ jobs:
           # Every pass observes a new shared worker decision; retries never
           # renew cached signal timestamps. Streamlit only displays this state.
           python background_paper.py
+      - name: Enrich specialist self-learning knowledge
+        env:
+          LEARNING_STATE_OUTPUT: /tmp/learning_state.json
+          HISTORICAL_SPECIALIST_INPUT: /tmp/historical_specialist_knowledge_v7.json
+        run: python enrich_learning_state_v5.py
       - name: Validate generated learning state
         # Publish the actual current paper cohort after all paper cycles.
         # The evidence script changes only its own summary key.

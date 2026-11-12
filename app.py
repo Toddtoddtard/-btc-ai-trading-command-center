@@ -4998,17 +4998,13 @@ def live_dashboard():
     )
     _confidence_text = f"{decision['confidence']:.1%}" if _worker_current else "Unavailable"
     with m4:
-        st.markdown(
+        st.html(
             f"""
             <div class="confidence-metric-card">
-                <div class="confidence-metric-label">
-                    Signal strength
-                    {_confidence_badge}
-                </div>
+                <div class="confidence-metric-label">Signal strength {_confidence_badge}</div>
                 <div class="confidence-metric-value">{_confidence_text}</div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """
         )
     m5.metric("Vote agreement", f"{decision['consensus']:.1%}" if _worker_current else "Unavailable")
     # Show the current settlement forecast, not an unrelated historical paper fill.
