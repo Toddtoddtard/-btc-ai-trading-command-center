@@ -17,11 +17,12 @@ def active_market_close(now):
 
 
 def market_ticker(close):
-    return f"KXBTC15M-{close.strftime('%y%b%d%H%M').upper()}-{close:%M}"
+    repeated_hour = "EST" if close.fold else ""
+    return f"KXBTC15M-{close.strftime('%y%b%d%H%M').upper()}{repeated_hour}-{close:%M}"
 
 
 def event_ticker(market):
-    match = re.fullmatch(r'(KXBTC15M-\d{2}[A-Z]{3}\d{6})(?:-\d+)?', str(market or ''))
+    match = re.fullmatch(r'(KXBTC15M-\d{2}[A-Z]{3}\d{6}(?:EST)?)(?:-\d+)?', str(market or ''))
     return match.group(1) if match else ''
 
 

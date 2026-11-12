@@ -4352,7 +4352,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             const stamp = Number(packet.timestamp) * 1000;
             const now = Date.now();
             if (!(expiry > now && expiry <= (Math.floor(now / 900000)+1)*900000) ||
-                !/^KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}}(?:-\\d+)?$/.test(packet.ticker) ||
+                !/^KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}}(?:EST)?(?:-\\d+)?$/.test(packet.ticker) ||
                 !Number.isFinite(stamp) || stamp < lastChartTimestamp ||
                 now-stamp > 30000 || stamp > now+5000 ||
                 !Number.isFinite(packet.price) || packet.price <= 1000 ||
@@ -4409,7 +4409,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 return serverFeed.candles;
             }}
             const ticker = currentTicker || (serverClose > Date.now() ? initial.ticker : "");
-            const match = String(ticker || "").match(/^(KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}})(?:-\\d+)?$/);
+            const match = String(ticker || "").match(/^(KXBTC15M-\\d{{2}}[A-Z]{{3}}\\d{{6}}(?:EST)?)(?:-\\d+)?$/);
             if (!match) return null;
             const event = match[1];
             const payload = await fetchKalshiJson("/live_data/events/" + encodeURIComponent(event) + "?range=1h");

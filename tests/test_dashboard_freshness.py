@@ -45,8 +45,8 @@ class DashboardFreshnessTests(unittest.TestCase):
         fetch()
         fetch()
         self.assertEqual([call.args for call in cached.call_args_list], [
-            ('KXBTC15M-26NOV010100-00', boundary),
-            ('KXBTC15M-26NOV010115-15', boundary + 900),
+            ('KXBTC15M-26NOV010100EST-00', boundary),
+            ('KXBTC15M-26NOV010115EST-15', boundary + 900),
         ])
 
     def test_chart_refresh_does_not_wait_for_market_depth(self):
