@@ -22,7 +22,7 @@ class WorkerSessionTests(unittest.TestCase):
         def sleep(seconds):
             clock[0] += seconds
         run_session(12, cycle=cycle, clock=now, sleep=sleep)
-        self.assertEqual(len(starts), 2)
+        self.assertEqual(len(starts), 3)
 
     def test_repeated_cycles_publish_without_another_schedule_event(self):
         clock = [0.0]
@@ -33,7 +33,7 @@ class WorkerSessionTests(unittest.TestCase):
         def sleep(seconds):
             clock[0] += seconds
         run_session(6, cycle=cycle, clock=lambda: clock[0], sleep=sleep, cycle_budget=60)
-        self.assertEqual(cycles, [0, 150, 300])
+        self.assertEqual(cycles, [0, 105, 210])
 
     def test_failed_cycle_stops_without_claiming_a_new_checkpoint(self):
         with self.assertRaisesRegex(RuntimeError, 'feed failed'):

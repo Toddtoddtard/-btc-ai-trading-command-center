@@ -72,6 +72,28 @@ class LearnerFeedLatencyTests(unittest.TestCase):
                                              {'ticker': 'TEST', 'expires_at': 1700, 'target': 100.})
         self.assertEqual(call['ticker'], 'TEST')
 
+    def test_worker_refreshes_current_quote_and_chart_reference_concurrently(self):
+        market = {'ticker': 'KXBTC15M-26NOV121730-30', 'expires_at': 1700, 'target': 100.}
+        barrier = Barrier(2, timeout=1)
+
+        def quote():
+            barrier.wait()
+            return market.copy()
+
+        def reference(ticker):
+            barrier.wait()
+            self.assertEqual(ticker, market['ticker'])
+            return {'available': True, 'timestamp': 999, 'price': 71000,
+                    'event_ticker': 'KXBTC15M-26NOV121730'}
+
+        with ExitStack() as stack:
+            fixtures.ReliabilityTests().shadow_dependencies(stack)
+            stack.enter_context(patch.object(worker.time, 'time', return_value=1000))
+            stack.enter_context(patch.object(learner, 'market', side_effect=quote))
+            stack.enter_context(patch.object(worker, 'fetch_chart', side_effect=reference))
+            call = worker.current_shadow_call({}, pd.DataFrame({'close': [100.]}), market.copy())
+        self.assertEqual(call['settlement_reference_timestamp'], 999)
+
     def test_registration_specialist_feeds_overlap(self):
         barrier = Barrier(2, timeout=1)
         def read():

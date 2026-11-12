@@ -3752,7 +3752,8 @@ dark_mode = st.sidebar.toggle(
 st.markdown(dashboard_theme_css(dark_mode), unsafe_allow_html=True)
 
 auto_refresh = st.sidebar.checkbox("Auto refresh", value=True)
-refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=1)
+refresh_seconds = st.sidebar.select_slider("Dashboard refresh", options=[1, 2, 3, 5, 10, 15, 30, 60], value=1,
+                                            help="Chart update interval. The analysis panels refresh at most every five seconds.")
 record_predictions = st.sidebar.checkbox("Auto-journal predictions", value=True)
 show_raw = st.sidebar.checkbox("Show diagnostics", value=False)
 
@@ -3771,9 +3772,8 @@ def refresh_sidebar_paper_status():
     if auto_paper_enabled:
         st.info("AUTO PAPER: ENABLED")
         st.caption(
-            "The GitHub learner requests a paper cycle every "
-            "5 minutes; scheduling can be delayed. The open dashboard "
-            "re-evaluates LOCK qualification on every live refresh."
+            "The worker evaluates paper entries between GitHub checkpoints. "
+            "The dashboard shows the latest published worker decision and a live forecast preview."
         )
     else:
         st.info("AUTO PAPER: OFF")
@@ -3799,6 +3799,7 @@ st.sidebar.caption(
 # A fragment reruns independently from the rest of the Streamlit app.
 # This avoids the full-page rebuild/flash caused by time.sleep()+st.rerun().
 live_run_every = refresh_seconds if auto_refresh else None
+analysis_run_every = max(5, refresh_seconds) if auto_refresh else None
 
 # ============================================================
 # LIVE CHART ANTI-FLASH
@@ -3990,6 +3991,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
         let busy = false;
         let targetRequest = 0;
         let targetBusy = false;
+        let lastTargetRequestAt = -Infinity;
 
         const learning = initial.learning || {{}};
         let W_RET3 = Number(learning.w_ret3 ?? 0.46);
@@ -4578,14 +4580,6 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                     config
                 );
 
-                status.textContent =
-                    "Kalshi BTC/USD $" + Number(lastChartPrice).toLocaleString(undefined, {{minimumFractionDigits:2,maximumFractionDigits:2}}) + " • " +
-                    (currentTicker ? currentTicker + " • " : "") +
-                    "price at " + easternTime(lastChartTimestamp) +
-                    " • " + (SERVER_CURVE?.method === "validated_curve" ? "Learned 15-minute curve" :
-                    SERVER_CURVE?.method === "experimental_curve" ? "Model forecast — next 15 minutes" :
-                    SERVER_CURVE?.method === "momentum_baseline" ? "Momentum estimate" :
-                    SERVER_CURVE?.method === "flat_baseline" ? "Flat estimate — directional edge unproven" : "Forecast warming up");
             }} finally {{
                 busy = false;
             }}
@@ -4595,6 +4589,7 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
             const windowKey = Math.floor(Date.now() / 900000);
             if (windowKey !== kalshiWindowKey) {{
                 kalshiWindowKey = windowKey;
+                lastTargetRequestAt = -Infinity;
                 currentTicker = "";
                 currentTarget = NaN;
                 entryMarkers = [];
@@ -4606,7 +4601,11 @@ def persistent_kalshi_market_chart(initial_hist, initial_target, initial_ticker,
                 status.textContent = "Loading new Kalshi 15m target…";
             }}
 
-            if (targetBusy) return;
+            const now = Date.now();
+            if (targetBusy || (serverFeed && Date.parse(serverFeed.close_time) > now &&
+                now - serverReceivedAt <= 2500) ||
+                now - lastTargetRequestAt < (Number.isFinite(currentTarget) ? 10000 : 2000)) return;
+            lastTargetRequestAt = now;
             targetBusy = true;
             const request = ++targetRequest;
             let market;
@@ -4837,7 +4836,7 @@ def refresh_learning_summary():
             "the first completed 15-minute Kalshi window is graded."
         )
 
-@st.fragment(run_every=live_run_every)
+@st.fragment(run_every=analysis_run_every)
 def live_dashboard():
 
     load_started = time.perf_counter()
