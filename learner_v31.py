@@ -591,12 +591,14 @@ def current_shadow_call(state, df, market_info):
         return None
     # Specialist requests can outlast the quote freshness budget. Capture the
     # same contract again after those reads, before freezing any probabilities.
-    if event_ticker(market_info.get('ticker')):
-        fresh_market = legacy.market()
+    ticker = market_info.get('ticker')
+    if event_ticker(ticker):
+        refreshed = parallel_calls({'market': legacy.market, 'reference': lambda: fetch_chart(ticker)})
+        fresh_market = refreshed['market']
         if (fresh_market and fresh_market.get('ticker') == market_info.get('ticker')
                 and fresh_market.get('expires_at') == expires_at):
             market_info.update(fresh_market)
-            market_info['settlement_reference'] = fetch_chart(market_info['ticker'])
+            market_info['settlement_reference'] = refreshed['reference']
         else:
             market_info['settlement_reference'] = {}
     opened_at = time.time()

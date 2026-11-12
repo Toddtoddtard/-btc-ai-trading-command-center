@@ -101,9 +101,9 @@ def run_session(minutes, cycle=run_cycle, clock=time.monotonic, sleep=time.sleep
             cycle()
         finally:
             _cycle_deadline = None
-        # The existing paper pass evaluates four times, 30 seconds apart.
-        # Start the next full learning pass on a 150-second cadence.
-        remaining = min(deadline - clock(), started + 150 - clock())
+        # The existing paper pass evaluates four times, 15 seconds apart.
+        # Start the next full learning pass on a 105-second cadence.
+        remaining = min(deadline - clock(), started + 105 - clock())
         if remaining > 0:
             sleep(remaining)
 

@@ -91,9 +91,10 @@ The learner reuses `live_feeds.parallel_calls` for independent startup reads,
 trade/futures specialist inputs and the futures primary/fallback requests.
 All requests in a batch finish before it returns or raises. Partial futures
 failures retain the existing fallback and health semantics; same-contract
-quote/reference refresh and expiry checks still run after slow specialist reads.
+quote and reference refresh run concurrently after slow specialist reads,
+with the same market identity, expiry and timestamp checks.
 After its first validated publication, `worker_session.py` repeats the same
-pipeline for a bounded 55-minute session, starting cycles every 150 seconds
+pipeline for a bounded 55-minute session, targeting a 105-second start-to-start cadence
 and publishing each validated checkpoint. Publication uses a separate Git
 worktree, so runner code remains on its original main revision and unrelated
 state files are preserved. Ordinary pushes and bounded rebase retries retain
@@ -122,6 +123,8 @@ cadence (one second by default) sends a compact same-origin data packet from a
 zero-height Streamlit component into that retained chart. Plotly updates traces
 in place, retaining zoom and the selected prediction horizon. The server chart
 feed is cached for one second; browser-side Kalshi polling remains a fallback.
+The full analysis panel refreshes at most every five seconds. Browser target
+lookup skips redundant requests while the server chart packets are current.
 The dashboard and worker derive the exact ticker from the active Eastern close
 using UTC-aligned 15-minute boundaries. The dashboard market cache rotates with
 the ticker, and chart refreshes do not wait for contract order-book depth.

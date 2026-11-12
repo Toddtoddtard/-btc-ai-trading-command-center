@@ -36,6 +36,7 @@ assert.ok(Number.isNaN(seed({close_time:new Date(2700000).toISOString(),target:n
 const assert=require('assert');
 let now=1800000+60000; Date.now=()=>now;
 let currentTicker='',currentTarget=NaN,kalshiWindowKey=2,targetRequest=0,targetBusy=false,entryMarkers=[];
+let serverFeed=null,serverReceivedAt=0,lastTargetRequestAt=-Infinity;
 const chart={},status={},Plotly={relayout:async()=>{}};
 const setPredictionHorizon=()=>{},selectedPredictionHorizon=15;
 const targetShape=()=>[],targetAnnotation=()=>[];
@@ -55,6 +56,10 @@ const market=(ticker,close,target)=>({ticker,close_time:new Date(close).toISOStr
   assert.equal(await fetchKalshiTarget(),null);
   exact=market('CURRENT',2700000,81000);
   await updateTarget(); assert.equal(currentTarget,81000);
+  serverFeed={close_time:new Date(2700000).toISOString()};
+  now+=10000; serverReceivedAt=now;
+  await updateTarget(); assert.equal(targetRequest,1);
+  serverFeed=null;
   // An old in-flight reply must not restore the line after the window changes.
   let release;
   fetchKalshiTarget=()=>new Promise(r=>{release=r});
