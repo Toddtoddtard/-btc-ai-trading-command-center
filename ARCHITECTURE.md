@@ -65,16 +65,16 @@ matching snapshot no more than 30 seconds old, plus all existing fee, depth,
 reference, confidence, validation and position checks. Ordinary forecasts become
 WAIT in the action snapshot. Automatic scalping is disabled. Filled LOCKs keep
 their recorded side and official settlement lifecycle, even when evidence changes.
-The dashboard displays the current market’s Live Outlook, signal strength and
-vote agreement from its local analysis and a fresh matching Kalshi reference.
-The worker snapshot supplies the paper worker outlook and paper entry checks.
-The local calculation runs in preview mode and cannot persist a LOCK.
-Stale or missing snapshots show their entry blockers. The Outlook label can show
-the last valid decision for the current, unexpired market with its original age.
-A current same-contract
-dashboard forecast remains visible as a display-only preview while the next
-worker checkpoint is pending. At rollover, a paper pass with a new contract
-grades the expired pending observation before registering the new window.
+The dashboard shows the active worker decision, timestamp and action reason.
+A fresh same-contract local forecast remains visible as a directional preview
+during publication gaps. It carries no LOCK label. The dashboard identifies
+stale worker or reference data and keeps the last same-contract decision age.
+At rollover the worker can defer a missing old expiry candle and register the
+current market. Deferred candle grading retries during full learning passes.
+Paper LOCK entry requires validated settlement probability, observed ask depth
+and the existing five-point fee-adjusted edge margin at the actual fill size.
+Validation uses comparable LOCK fills. Prior outlook-follow fills and SCALPs
+remain in total ledger results.
 Assessments, signal attempts, fills and lifecycle events retain decision IDs.
 Existing ledgers with missing/unsupported versions fail closed; missing old
 migration markers never authorize a balance reset or history archival.
@@ -236,7 +236,7 @@ workflow or stale deployment caption cannot be mistaken for verified new results
 The settlement headline now uses the same production probability as execution;
 the independent model and its archival score remain available as challengers.
 
-Each full worker pass freezes a settlement observation independently of research-phase deduplication and trade approval, preserving WAIT calls, specialist votes, timestamps, target/rule, and unavailable reasons. Only official binary results read after expiry resolve these observations; unresolved labels are retained. The last 3,000 settled captures supplement the existing research history. Earliest-per-contract observations within the same remaining-time group train the bounded ridge residual, but it remains disabled until at least 100 chronological validation markets follow at least 100 training markets and beat both the uncorrected model and Kalshi midpoint by 0.0005 Brier overall, with nonnegative recent paired improvement. Each validation fit uses only outcomes observed before its forecast. No retrospective refitting changes a stored prediction.
+Each full worker pass freezes a settlement observation independently of research-phase deduplication and trade approval, preserving WAIT calls, specialist votes, timestamps, target/rule, and unavailable reasons. Only official binary results read after expiry resolve these observations; unresolved labels are retained. The last 3,000 full settled captures supplement the existing research history. Compact official checkpoint records preserve timing, result and frozen probabilities independently of this rolling window. Compatible dashboard builds share a forecast policy identifier, with producing build retained for provenance. Coverage counts elapsed 15-minute windows within the observed policy period. The order-book blend is scored prospectively against both the production forecast and market prices. Earliest-per-contract observations within the same remaining-time group train the bounded ridge residual, but it remains disabled until at least 100 chronological validation markets follow at least 100 training markets and beat both the uncorrected model and Kalshi midpoint by 0.0005 Brier overall, with nonnegative recent paired improvement. Each validation fit uses only outcomes observed before its forecast. No retrospective refitting changes a stored prediction.
 
 The settlement evidence panel shows independent accuracy, Brier, log loss, calibration and the paired market/coin-flip benchmarks. Its 10-, 8-, 5-, 2- and 1-minute checkpoints select the closest capture before each checkpoint within 150 seconds; they never borrow later forecasts. Sampling is limited by worker cadence, not the one-second screen refresh. Coverage describes retained observed markets and unavailable captures, not continuous uptime or unobserved outage windows. The displayed raw estimate does not itself approve execution; the independent execution qualification above is required. Legacy Binance snapshots are not backfilled as official reference features.
 

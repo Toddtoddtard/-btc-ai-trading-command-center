@@ -63,48 +63,27 @@ class DecisionSnapshotTests(unittest.TestCase):
         refresh_pending_lock_focus(state, live, {'ticker': 'T', 'expires_at': 1600})
         return state
 
-    def test_paper_follows_fresh_outlook_locks_without_validated_edge(self):
-        api = self.api()
-        for action, probability, side in [('LOCK UP', .61, 'YES'), ('LOCK DOWN', .39, 'NO')]:
-            with self.subTest(side=side):
+    def test_outlook_lock_without_validated_edge_cannot_fill(self):
+        for action, probability in [('LOCK UP', .61), ('LOCK DOWN', .39)]:
+            with self.subTest(action=action):
                 state = self.unvalidated_lock(action, probability)
-                view = api.dashboard_decision({'kalshi_ticker': 'T'}, state, now=1000)
-                market = dict(self.market(), yes_bid_dollars=.60, yes_ask_dollars=.62,
-                              no_bid_dollars=.60, no_ask_dollars=.62)
-                paper = bg.run_cycle(state, lambda _: market, now=1000)
-                position = paper['open_position']
-                self.assertIsNotNone(position, paper['last_message'])
-                self.assertEqual(position['side'], side)
-                self.assertEqual(position['decision_id'], view['decision_id'])
-                self.assertEqual(position['risk_mode'], 'PAPER OUTLOOK FOLLOW')
-                self.assertIsNone(paper['entry_assessment']['expected_settlement_net_pnl'])
-                bg.run_cycle(state, lambda _: market, now=1001)
-                self.assertEqual(sum(e['event_type'] == 'OPENED' for e in paper['ledger_events']), 1)
-                settled = dict(ticker='T', status='settled', result=side.lower())
-                bg.run_cycle(state, lambda _: settled, now=1600)
+                view = self.api().dashboard_decision({'kalshi_ticker': 'T'}, state, now=1000)
+                self.assertEqual(view['action'], action)
+                self.assertFalse(view['execution_approved'])
+                paper = bg.run_cycle(state, lambda _: self.market(), now=1000)
                 self.assertIsNone(paper['open_position'])
-                self.assertEqual(paper['trades'][-1]['exit_reason'], 'OFFICIAL_SETTLEMENT:' + side.lower())
-                self.assertGreater(paper['trades'][-1]['pnl'], 0)
+                self.assertIn('NO VALIDATED SETTLEMENT EDGE', paper['last_message'])
 
-    def test_paper_outlook_follow_keeps_fresh_depth_and_price_checks(self):
-        for changes, now, reason in [
-            ({'execution_book': None}, 1000, 'fresh ask depth'),
-            ({'yes_ask_dollars': .94}, 1000, 'maximum'),
-            ({}, 1031, 'STALE_DECISION'),
-        ]:
-            with self.subTest(reason=reason):
-                state = self.unvalidated_lock()
-                paper = bg.run_cycle(state, lambda _: dict(self.market(now), **changes), now=now)
-                self.assertIsNone(paper['open_position'])
-                self.assertIn(reason, paper['last_message'])
-
-    def test_paper_outlook_follow_requires_a_fresh_same_side_lock(self):
-        state = self.unvalidated_lock()
-        live = dict(state['pending'], master_action='WAIT', opened_at=1001,
-                    settlement_reference_timestamp=1001)
-        refresh_pending_lock_focus(state, live, {'ticker': 'T', 'expires_at': 1600})
-        paper = bg.run_cycle(state, lambda _: self.market(1001), now=1001)
+    def test_shared_lock_requires_observed_depth_and_records_negative_ev(self):
+        state = self.state(probability=.61)
+        market = dict(self.market(), yes_bid_dollars=.60, yes_ask_dollars=.62)
+        paper = bg.run_cycle(state, lambda _: market, now=1000)
         self.assertIsNone(paper['open_position'])
+        self.assertLess(paper['entry_assessment']['expected_settlement_net_pnl'], 0)
+        self.assertIn('INSUFFICIENT_FEE_ADJUSTED_EDGE', paper['entry_assessment']['blockers'])
+        paper = bg.run_cycle(self.state(), lambda _: dict(self.market(), execution_book=None), now=1000)
+        self.assertIsNone(paper['open_position'])
+        self.assertIn('fresh ask depth', paper['last_message'])
 
     def test_stale_future_wrong_ticker_and_expiry_never_authorize(self):
         api = self.api()
@@ -189,7 +168,7 @@ class DecisionSnapshotTests(unittest.TestCase):
         before=copy.deepcopy(state.get('background_paper',{}).get('trades',[]))
         paper=bg.run_cycle(state,lambda _:self.market(),now=1000)
         self.assertIsNone(paper['open_position'])
-        self.assertIn('fee-adjusted',paper['last_message'])
+        self.assertIn('INSUFFICIENT_FEE_ADJUSTED_EDGE', paper['entry_assessment']['blockers'])
         self.assertEqual(paper['trades'],before)
 
     def test_missing_fresh_evaluation_publishes_veto_and_keeps_original_clock(self):
@@ -303,6 +282,27 @@ class DecisionSnapshotTests(unittest.TestCase):
         self.assertFalse(self.api().snapshot_blockers(snapshot, 'NEXT', now=1602))
         paper = bg.run_cycle(state, lambda _: dict(self.market(1602), ticker='NEXT'), now=1602)
         self.assertEqual((paper['open_position'] or {}).get('decision_id'), snapshot['decision_id'])
+
+    def test_rollover_with_missing_old_candle_preserves_grading_and_updates_next_decision(self):
+        from unittest.mock import patch
+        import learner_v31 as worker
+        state = self.state()
+        live = dict(state['pending'], ticker='NEXT', opened_at=1602,
+                    expires_at=2500, settlement_reference_timestamp=1602)
+        market = {'ticker': 'NEXT', 'expires_at': 2500}
+        def register(current, history, observed):
+            current['pending'] = copy.deepcopy(live)
+            return True
+        with patch.object(worker.time, 'time', return_value=1602), \
+             patch.object(worker, 'parallel_calls', return_value={'history': object(), 'market': market}), \
+             patch.object(worker, 'strict_grade', return_value=False), \
+             patch.object(worker, 'register_with_snapshot', side_effect=register), \
+             patch.object(worker, 'current_shadow_call', return_value=live), \
+             patch.object(worker, 'record_observation'), patch.object(worker, 'record_prediction'):
+            worker.refresh_execution_decision(state)
+        self.assertEqual(state['settlement_decision']['ticker'], 'NEXT')
+        self.assertEqual(state['pending']['ticker'], 'NEXT')
+        self.assertEqual([pending['ticker'] for pending in state['deferred_expiry_grades']], ['T'])
 
     def test_cross_market_refresh_cannot_timestamp_the_old_decision(self):
         state = self.state()

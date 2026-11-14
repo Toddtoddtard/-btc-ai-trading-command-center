@@ -121,3 +121,15 @@ class CouncilEvidenceTests(unittest.TestCase):
         self.assertEqual(_contribution_multiplier(state, 'Trend AI'), 1.2)
         state['bot_intelligence_v4']['evidence_version'] = 1
         self.assertEqual(_contribution_multiplier(state, 'Trend AI'), 1.)
+
+    def test_rare_specialist_ablation_reports_only_active_market_regimes(self):
+        state = self.evidence(2)
+        for row, regime in zip(state['prediction_snapshots'], ('RANGE', 'HIGH_VOL')):
+            row['snapshot']['regime'] = regime
+        event = state['prediction_snapshots'][1]['snapshot']['specialists']['Political Event Watch AI']
+        event['event_status'] = 'ACTIVE'
+        report = analyze_bot_contributions(state)
+        row = next(r for r in report['ranking'] if r['name'] == 'Political Event Watch AI')
+        self.assertEqual(set(row['regimes']), {'HIGH_VOL'})
+        self.assertEqual(row['regimes']['HIGH_VOL']['active_samples'], 1)
+        self.assertFalse(row['regimes']['HIGH_VOL']['evidence_passed'])

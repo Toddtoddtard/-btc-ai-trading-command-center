@@ -104,7 +104,7 @@ from lock_focus import (
     specialist_consensus,
 )
 from pro_trade_ticket import build_pro_trade_ticket
-from decision_dashboard import live_outlook, outlook_label, render_decision_assessment
+from decision_dashboard import shared_outlook, outlook_label, render_decision_assessment
 from decision_snapshot import dashboard_decision
 from public_futures import parse_bybit_futures_snapshot
 from reliability_v31 import (
@@ -4944,14 +4944,15 @@ def live_dashboard():
         fmt_pct(ticker.get("change_24h")),
         help="Live BTC market change over 24 hours; this is not an AI accuracy statistic.",
     )
-    outlook, _confidence_direction, strength, agreement = live_outlook(_live_preview, _display_feed)
+    (outlook, _confidence_direction, strength, agreement), outlook_preview = shared_outlook(
+        decision, _live_preview, _display_feed)
     with m3:
         st.html(
             '<div class="direction-card metric-direction-card">'
             '<div class="direction-card-label">Live Outlook</div>'
             f'<div class="direction-card-value">{directional_badge_html(outlook)}</div></div>'
         )
-        st.caption("Dashboard analysis")
+        st.caption("Live forecast preview" if outlook_preview else "Shared paper decision")
     _confidence_badge = ""
     if _confidence_direction == "UP":
         _confidence_badge = '<span style="color:var(--cc-up, #87d4b6);">▲&nbsp;UP</span>'
@@ -4992,14 +4993,18 @@ def live_dashboard():
     else:
         st.warning("Live Kalshi price unavailable. Current-price cards show Unavailable; internal spot-proxy diagnostics are not Kalshi prices. New LOCK qualification is blocked until the Kalshi feed recovers.")
     st.markdown("#### Kalshi 15-minute settlement prediction")
-    st.caption('Paper worker outlook · ' + outlook_label(decision))
-    if not decision.get('authoritative_available'):
-        st.caption('A fresh worker decision is required for a new paper entry.')
-    if decision.get('decision_time'):
-        st.caption('Worker decision ' + str(decision.get('decision_id')) + ' • ' +
+    if decision.get('kalshi_ticker'):
+        st.caption(str(decision['kalshi_ticker']))
+    if decision.get('authoritative_available'):
+        st.caption('Decision ' + str(decision['decision_id']) + ' • ' +
                    eastern_time(decision['decision_time'], clock_only=True) +
-                   ' • ' + str(decision.get('worker_outlook_action') or 'WAIT') +
-                   ' • entry qualification: ' + str(decision.get('execution_reason')))
+                   ' ET • ' + str(decision.get('execution_reason') or 'WAIT'))
+    else:
+        reasons = ' · '.join(reason.replace('_', ' ').lower()
+                            for reason in decision.get('decision_blockers', []))
+        st.caption('Paper WAIT • ' + (reasons or 'worker decision unavailable'))
+        if decision.get('outlook_age_seconds') is not None:
+            st.caption(outlook_label(decision))
     if _settlement_prediction.get("available"):
         _p_yes = _settlement_prediction["probability_yes"]
         _outcome = _settlement_prediction["outcome"]

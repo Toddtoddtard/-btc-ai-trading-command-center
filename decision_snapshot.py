@@ -59,16 +59,10 @@ def publish_decision(state, live_call, market):
     forecast_side = ('YES' if p >= .5 else 'NO') if p is not None and 0 <= p <= 1 else None
     reason = str(pending.get('execution_reason') or 'WAIT')
     approved = pending.get('execution_approved') is True and side is not None
-    outlook_follow = (
-        side is not None and live.get('master_action') == action
-        and live.get('execution_reason') == NO_VALIDATED_EDGE
-    )
-    if outlook_follow:
-        approved, reason = True, 'PAPER OUTLOOK FOLLOW — no validated settlement edge required'
     if not same_observation:
         approved, reason = False, 'FRESH_SAME_TICKER_EVALUATION_UNAVAILABLE'
         call.update(contract_probability_up=None, settlement_reference_timestamp=None)
-    elif side and forecast_side != side:
+    elif side and (forecast_side != side or live.get('master_action') != action):
         approved, reason = False, 'CURRENT_LOCK_DIRECTION_OR_QUALIFICATION_CHANGED'
     if not side:
         action, approved = 'WAIT', False
@@ -89,8 +83,6 @@ def publish_decision(state, live_call, market):
                     probability_yes=p, approved=approved, reason=reason,
                     reference_timestamp=_number(live.get('settlement_reference_timestamp')),
                     call=call)
-    if outlook_follow and approved:
-        snapshot['paper_outlook_follow'] = True
     snapshot['decision_id'] = _identity(snapshot)
     state['settlement_decision'] = snapshot
     return snapshot
@@ -107,6 +99,8 @@ def snapshot_blockers(snapshot, ticker, now=None):
         valid_id = False
     if not valid_id or snapshot.get('paper_only') is not True:
         blockers.append('INVALID_DECISION_ID')
+    if snapshot.get('paper_outlook_follow') is True:
+        blockers.append('NO_VALIDATED_SETTLEMENT_EDGE')
     call = snapshot.get('call') or {}
     if not ticker or snapshot.get('ticker') != ticker or call.get('ticker') != ticker:
         blockers.append('DECISION_CONTRACT_MISMATCH')
@@ -136,6 +130,7 @@ def dashboard_decision(preview, state, now=None):
     result.update(action='WAIT', execution_approved=False, locked_side=None,
                   outlook_age_seconds=None, authoritative_available=not blockers, decision_id=snapshot.get('decision_id'),
                   decision_time=snapshot.get('captured_at'), decision_blockers=blockers,
+                  decision_reference_time=snapshot.get('reference_timestamp'),
                   execution_reason='; '.join(blockers), contract_probability_up=None,
                   settlement_prediction=None, reason='; '.join(blockers),
                   score=0., projected_end=float('nan'), source_health=0.,
