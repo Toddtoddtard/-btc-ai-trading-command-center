@@ -47,6 +47,22 @@ def live_outlook(preview, reference, now=None):
     return label, direction, finite(preview.get('confidence')), finite(preview.get('consensus'))
 
 
+def shared_outlook(decision, preview, reference, now=None):
+    """Only the worker can publish a LOCK; an available preview stays directional."""
+    if decision.get('authoritative_available'):
+        label = (outlook_label(decision).replace('LOCKED OUTLOOK ', 'LOCK ')
+                 if decision.get('execution_approved') else 'WAIT')
+        probability = finite(decision.get('contract_probability_up'))
+        direction = ('UP' if probability >= .5 else 'DOWN') if probability is not None else None
+        return (label, direction, finite(decision.get('confidence')),
+                finite(decision.get('consensus'))), False
+
+    label, direction, strength, agreement = live_outlook(preview, reference, now=now)
+    if label.startswith('LOCK '):
+        label = 'OUTLOOK ' + label.split()[-1]
+    return (label, direction, strength, agreement), label != 'OUTLOOK UNAVAILABLE'
+
+
 def decision_status(decision, state):
     paper = state.get('background_paper') or {}
     p = paper.get('open_position')

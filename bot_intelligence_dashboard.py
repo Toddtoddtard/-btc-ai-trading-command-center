@@ -98,6 +98,21 @@ def render_bot_intelligence_dashboard(results, learning_state, regime, dark_mode
         f"Current regime: {regime} • official-result snapshots reviewed: {evaluated:,} • verdict minimum: {minimum} samples."
     )
 
+    with st.expander("Specialist results by market regime"):
+        regimes = [
+            {"Specialist": row["name"], "Market regime": mode,
+             "Active markets": evidence["active_samples"],
+             "Helped": evidence.get("beneficial_decisions", 0),
+             "Hurt": evidence.get("harmful_decisions", 0),
+             "Evidence": "Passed" if evidence["evidence_passed"] else "Collecting"}
+            for row in intel.get("ranking", [])
+            for mode, evidence in row.get("regimes", {}).items()
+        ]
+        if regimes:
+            st.dataframe(pd.DataFrame(regimes), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Waiting for officially settled specialist observations.")
+
     candle_lab = (learning_state.get("horizon_models") or {}).get("candle_learning", {})
     if candle_lab:
         with st.expander("Candle and wick learning coverage"):

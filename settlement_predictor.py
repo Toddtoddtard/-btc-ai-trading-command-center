@@ -37,27 +37,32 @@ def _history(state):
             + list((state.get('settlement_predictor') or {}).get('history') or []))
 
 
+def official_observation_times(row, as_of):
+    prediction = row.get('settlement_prediction') or {}
+    opened, expiry = _finite(row.get('opened_at')), _finite(row.get('expires_at'))
+    observed = _timestamp(row.get('result_observed_at'))
+    probabilities = [_finite(prediction.get(key)) for key in
+                     ('probability_yes', 'base_probability_yes', 'market_probability_yes')]
+    features = prediction.get('features')
+    ticker = str(row.get('ticker') or '')
+    if (prediction.get('version') != VERSION or not prediction.get('available')
+            or prediction.get('ticker') != ticker or row.get('result') not in ('yes', 'no')
+            or opened is None or expiry is None or observed is None
+            or not opened < expiry <= observed <= as_of
+            or any(value is None or not 0 <= value <= 1 for value in probabilities)
+            or not isinstance(features, list) or len(features) != 4
+            or any(_finite(value) is None for value in features)):
+        return None
+    return ticker, opened, expiry, observed
+
+
 def _observations(state, as_of, lead_seconds=None, horizon=None):
     earliest = {}
     for row in _history(state):
-        prediction = row.get('settlement_prediction') or {}
-        opened, expiry = _finite(row.get('opened_at')), _finite(row.get('expires_at'))
-        observed = _timestamp(row.get('result_observed_at'))
-        probability = _finite(prediction.get('probability_yes'))
-        base = _finite(prediction.get('base_probability_yes'))
-        market = _finite(prediction.get('market_probability_yes'))
-        features = prediction.get('features')
-        ticker = str(row.get('ticker') or '')
-        if (prediction.get('version') != VERSION or not prediction.get('available')
-                or prediction.get('ticker') != ticker or row.get('result') not in ('yes', 'no')
-                or opened is None or expiry is None or observed is None
-                or not opened < expiry <= observed <= as_of
-                or probability is None or not 0 <= probability <= 1
-                or base is None or not 0 <= base <= 1
-                or market is None or not 0 <= market <= 1
-                or not isinstance(features, list) or len(features) != 4
-                or any(_finite(x) is None for x in features)):
+        timing = official_observation_times(row, as_of)
+        if timing is None:
             continue
+        ticker, opened, expiry, _ = timing
         if lead_seconds is not None and not lead_seconds <= expiry-opened <= lead_seconds+CHECKPOINT_TOLERANCE:
             continue
         if horizon is not None and horizon_bucket(expiry-opened) != horizon:
@@ -161,6 +166,9 @@ def resolve_observations(state, result_reader, now=None):
             continue
         history.append(dict(row, result=result, result_observed_at=observed_at))
         resolved += 1
+    if len(history) > 3000:
+        from improvement_evidence import archive_checkpoints
+        archive_checkpoints(state)
     lab['pending'], lab['history'] = unresolved, history[-3000:]
     return resolved
 

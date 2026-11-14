@@ -23,6 +23,14 @@ def render_settlement_evidence(score, latest, evidence=None):
                         + eastern_time(evidence['latest_capture'])) if revision and evidence.get('latest_capture') else
                        'Awaiting the first checkpoint with verified worker revision.')
             st.caption(evidence['cohort_scope'])
+            coverage = evidence.get('checkpoint_coverage', {})
+            if coverage:
+                st.dataframe(pd.DataFrame([
+                    {'Checkpoint': timing, 'Forecasts': counts['forecast'],
+                     'Elapsed market windows': counts['scheduled'],
+                     'Windows without a scored forecast': max(0, counts['scheduled'] - counts['forecast'])}
+                    for timing, counts in coverage.items()
+                ]), use_container_width=True, hide_index=True)
             rows = []
             names = dict(previous_execution='Previous execution formula', market='Kalshi price',
                          independent='Independent model')
@@ -46,6 +54,18 @@ def render_settlement_evidence(score, latest, evidence=None):
                        f"{paper['wins']} wins / {paper['losses']} losses • net ${paper['net_pnl']:.2f}. "
                        'Recorded fees are included. No closed trades means profitability is unverified.')
             st.caption(evidence['interval_note'])
+        with st.expander('Shadow settlement model'):
+            st.caption('Uses the official reference and strike, time remaining and order-book pressure. '
+                       'Each comparison uses the same captured markets and official settlements.')
+            st.dataframe(pd.DataFrame([
+                {'Checkpoint': timing, 'Baseline': 'Kalshi price' if name == 'market' else 'Live forecast',
+                 'Paired markets': metrics['samples'], 'Shadow accuracy': _pct(metrics['accuracy']),
+                 'Baseline accuracy': _pct(metrics['baseline_accuracy']),
+                 'Brier gain': metrics['brier_gain'], 'Status': metrics['status']}
+                for timing, comparisons in evidence.get('shadow', {}).items()
+                for name, metrics in comparisons.items()
+            ]), use_container_width=True, hide_index=True)
+
     learning = score.get('bias_learning') or {}
     if learning:
         with st.expander('Learning algorithm — new official results'):

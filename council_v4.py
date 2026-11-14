@@ -237,6 +237,7 @@ def analyze_bot_contributions(state, min_samples=12):
     from contribution_evidence import paired_evidence, stable_update, MIN_ACTIVE_MARKETS
     state = state if isinstance(state, dict) else {}
     stats = defaultdict(lambda: defaultdict(int))
+    regime_stats = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
     records = sorted(official_snapshots(state), key=lambda pair: _safe_float(pair[0].get("opened_at")))
     evaluated = 0
 
@@ -272,6 +273,8 @@ def analyze_bot_contributions(state, min_samples=12):
             if not specialist_active(name, adjusted[name]):
                 continue
             st["active_samples"] += 1
+            phase = regime_stats[regime][name]
+            phase["active_samples"] += 1
             call_dir = _direction(adjusted[name].get("score"))
             st["standalone_hits"] += int(call_dir == actual_dir)
             st["score_abs_sum"] += abs(_safe_float(adjusted[name].get("score")))
@@ -292,6 +295,8 @@ def analyze_bot_contributions(state, min_samples=12):
                 without_value = (1 if without_dir == actual_dir else -1) if without_dir else 0
                 st["beneficial_decisions"] += int(full_value > without_value)
                 st["harmful_decisions"] += int(full_value < without_value)
+                phase["beneficial_decisions"] += int(full_value > without_value)
+                phase["harmful_decisions"] += int(full_value < without_value)
             # Repeated polling of identical evidence cannot advance hysteresis.
             st["last_active_evidence"] = str(snap.get("ticker"))
 
@@ -326,6 +331,13 @@ def analyze_bot_contributions(state, min_samples=12):
                "unique_saves": saves, "harmful_flips": harms,
                "avg_abs_score": st["score_abs_sum"]/active if active else 0.,
                "contribution_score": effect, "candidate_verdict": candidate, **evidence}
+        row["regimes"] = {}
+        for regime, members in regime_stats.items():
+            if name in members:
+                phase = members[name]
+                row["regimes"][regime] = dict(phase, **paired_evidence(
+                    phase["beneficial_decisions"], phase["harmful_decisions"],
+                    phase["active_samples"], len(stats) * len(regime_stats)))
         if name == "Pattern AI":
             row["model_version"] = state.get("pattern_structure_version", 1)
         row.update(stable_update(row, old.get(name), st["last_active_evidence"]))

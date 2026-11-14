@@ -22,7 +22,7 @@ from ai_core import PATTERN_STRUCTURE_VERSION, forecast_path_core
 from contract_probability import realized_minute_volatility, terminal_above_probability
 from contract_calibration import apply as apply_contract_calibration, fit as fit_contract_calibration, fit_settlement
 from council_confidence import for_direction as confidence_for_direction
-from improvement_evidence import VERSION as FORECAST_TRIAL_VERSION
+from improvement_evidence import FORECAST_POLICY, VERSION as FORECAST_TRIAL_VERSION
 from decision_snapshot import NO_VALIDATED_EDGE, publish_decision
 from kalshi_chart_data import fetch_chart, event_ticker
 from settlement_predictor import predict as predict_settlement, scorecard as settlement_scorecard
@@ -301,6 +301,21 @@ def strict_grade(state, df):
     state.setdefault("status", {}).pop("last_grade_skipped_reason", None)
     state.setdefault("status", {}).pop("last_grade_recovery_error", None)
     return True
+
+
+def retry_deferred_expiry_grade(state, df):
+    deferred = state.get('deferred_expiry_grades') or []
+    if not deferred:
+        return
+    current = state.get('pending')
+    state['pending'] = deferred[0]
+    try:
+        if strict_grade(state, df):
+            deferred.pop(0)
+        else:
+            deferred.append(deferred.pop(0))
+    finally:
+        state['pending'] = current
 
 
 def update_wait_counterfactual(state):
@@ -612,6 +627,7 @@ def current_shadow_call(state, df, market_info):
         "specialists": specialists,
         "code_revision": (state.get("status") or {}).get("code_revision"),
         "forecast_trial_version": FORECAST_TRIAL_VERSION,
+        "forecast_policy": FORECAST_POLICY,
     }
     call["regime"] = detect_regime(df)
     vote = knowledge_council_vote(specialists, state, call["regime"])
@@ -807,12 +823,13 @@ def refresh_execution_decision(state):
     try:
         feeds = parallel_calls({'history': legacy.history, 'market': legacy.market})
         # Paper passes can cross a boundary between full learning runs.
-        # Retain the old observation until its closed expiry candle can grade it.
         pending = state.get('pending')
         market = feeds['market']
         if (isinstance(pending, dict) and market and pending.get('ticker') != market.get('ticker')
                 and time.time() >= safe_float(pending.get('expires_at'), float('inf'))):
-            strict_grade(state, feeds['history'])
+            if not strict_grade(state, feeds['history']):
+                state.setdefault('deferred_expiry_grades', []).append(pending)
+                state['pending'] = None
         if not isinstance(state.get('pending'), dict):
             register_with_snapshot(state, feeds['history'], feeds['market'])
         live = current_shadow_call(state, feeds['history'], feeds['market'])
@@ -879,6 +896,7 @@ def main():
     state = ensure_v31(load_previous_state())
     state['status']['code_revision'] = os.environ.get('GITHUB_SHA')
     state['status']['prediction_policy_version'] = FORECAST_TRIAL_VERSION
+    state['status']['forecast_policy'] = FORECAST_POLICY
     previous_updated_at = state.get("updated_at")
     before_samples = int(state.get("forecast", {}).get("samples", 0))
     feeds = parallel_calls({'history': legacy.history, 'market': legacy.market,
@@ -895,6 +913,7 @@ def main():
         candle_lab = horizon_root.setdefault("candle_learning", {})
         candle_lab["error"] = str(exc)[:300]
     horizon_graded = resolve_horizon_predictions(state, df)
+    retry_deferred_expiry_grade(state, df)
     graded = strict_grade(state, df)
     forward_outlooks_graded = grade_forward_outlooks(state, df)
     official_cache = {}

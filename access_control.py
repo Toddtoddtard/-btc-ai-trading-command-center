@@ -5,7 +5,7 @@ import time
 import streamlit as st
 
 # Deployment touch: keep Streamlit synced to the latest private-access build.
-DEPLOYED_BUILD = "2026.11.12-r120-live-outlook"
+DEPLOYED_BUILD = "2026.11.14-r121-shared-outlook"
 
 
 def _hash_code(code: str) -> str:

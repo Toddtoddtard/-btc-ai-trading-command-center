@@ -28,7 +28,7 @@ class LockExpectedReturnTests(unittest.TestCase):
     def test_no_loss_mature_scorecard_passes_with_infinite_profit_factor(self):
         paper = bg.initial_state(now=1000)
         paper['trades'] = [
-            dict(ticker=f'WIN-{index}', strategy='SCALP', status='CLOSED',
+            dict(ticker=f'WIN-{index}', strategy='LOCK', status='CLOSED',
                  opened_at=index, closed_at=500+index, pnl=1.0,
                  entry_fee=.05, exit_fee=.05)
             for index in range(100)
@@ -37,6 +37,18 @@ class LockExpectedReturnTests(unittest.TestCase):
         self.assertEqual(metrics['profit_factor'], float('inf'))
         self.assertTrue(metrics['lock_gate']['approved'])
         self.assertEqual(metrics['lock_gate']['status'], 'VALIDATED PASS')
+
+    def test_removed_bypass_losses_stay_in_ledger_but_not_validated_lock_cohort(self):
+        paper = bg.initial_state(now=1000)
+        paper['trades'] = [
+            dict(ticker=f'old-{i}', strategy='LOCK', status='CLOSED',
+                 risk_mode='PAPER OUTLOOK FOLLOW', pnl=-1., closed_at=i)
+            for i in range(100)
+        ]
+        metrics, _ = bg.shared_paper_scorecard(paper)
+        self.assertEqual(metrics['total_pnl'], -100.)
+        self.assertEqual(metrics['lock_gate']['performance']['markets'], 0)
+        self.assertTrue(metrics['lock_gate']['approved'])
 
     def promotion(self, trades=None, **updates):
         paper = bg.initial_state(now=1000)
@@ -73,7 +85,7 @@ class LockExpectedReturnTests(unittest.TestCase):
         self.assertEqual(paper['trades'][-1]['strategy'], 'SCALP')
 
     def test_failed_mature_scorecard_blocks_scalp_to_lock_promotion(self):
-        trades = [dict(ticker=f'OLD-{index}', strategy='SCALP', status='CLOSED',
+        trades = [dict(ticker=f'OLD-{index}', strategy='LOCK', status='CLOSED',
                        opened_at=index, closed_at=500+index, pnl=-1,
                        entry_fee=.05, exit_fee=.05)
                   for index in range(100)]
@@ -127,7 +139,7 @@ class LockExpectedReturnTests(unittest.TestCase):
         paper = bg.initial_state(now)
         paper['balance_reset'] = {'id': bg.PAPER_ACCOUNT_RESET_ID}
         paper['trades'] = [
-            dict(ticker=f'SETTLED-{index}', strategy='SCALP', status='CLOSED',
+            dict(ticker=f'SETTLED-{index}', strategy='LOCK', status='CLOSED',
                  opened_at=now-20000+index, closed_at=now-10000+index,
                  pnl=-1.0, entry_fee=.05, exit_fee=.05)
             for index in range(100)

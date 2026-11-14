@@ -152,6 +152,21 @@ class ImprovementEvidenceTests(unittest.TestCase):
         self.assertEqual(report['overall']['previous_execution']['status'],'COLLECTING')
         self.assertEqual(report['paper']['net_pnl'],-1)
 
+    def test_forecast_policy_survives_deploys_and_compaction_but_versions_stay_distinct(self):
+        module = self.module()
+        history = [self.row(i) for i in (0, 2, 3)]
+        for row, revision, policy in zip(history, ('build-a', 'build-b', 'build-c'),
+                                          ('same', 'same', 'new')):
+            row.update(code_revision=revision, forecast_policy=policy)
+        state = dict(status=dict(forecast_policy='same'), settlement_predictor=dict(history=history))
+        module.archive_checkpoints(state)
+        state['settlement_predictor']['history'] = []
+        report = module.scorecard(state, as_of=EXPIRY+4000)
+        self.assertEqual(report['by_horizon']['10m']['market']['samples'], 2)
+        self.assertEqual(report['checkpoint_coverage']['10m']['scheduled'], 3)
+        state['status']['forecast_policy'] = 'new'
+        self.assertEqual(module.scorecard(state, as_of=EXPIRY+4000)['overall']['market']['samples'], 1)
+
     def test_published_evidence_preserves_ledger_and_training_history(self):
         module = self.module()
         self.assertTrue(hasattr(module,'publish_summary'))

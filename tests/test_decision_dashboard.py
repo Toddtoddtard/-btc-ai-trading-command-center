@@ -46,7 +46,7 @@ render_decision_assessment({'action': 'SCALP UP'}, {'approved': False}, state, {
             self.assertIn('▼',directional_badge_html(label))
 
     def test_live_outlook_uses_current_market_without_worker_data(self):
-        from decision_dashboard import live_outlook
+        from decision_dashboard import live_outlook, shared_outlook
         from decision_snapshot import dashboard_decision
         ticker = 'KXBTC15M-26NOV121900-00'
         preview = dict(kalshi_ticker=ticker, kalshi_close_ts=1600, target_price=71200,
@@ -57,6 +57,11 @@ render_decision_assessment({'action': 'SCALP UP'}, {'approved': False}, state, {
         worker = dashboard_decision(preview, {}, now=1000)
         self.assertFalse(worker['execution_approved'])
         self.assertEqual(worker['action'], 'WAIT')
+        self.assertEqual(shared_outlook(worker, preview, feed, now=1000)[0][0], 'OUTLOOK DOWN')
+        worker.update(preview, authoritative_available=True, action='LOCK UP', execution_approved=True)
+        self.assertEqual(shared_outlook(worker, preview, feed, now=1000)[0][0], 'LOCK UP')
+        worker['execution_approved'] = False
+        self.assertEqual(shared_outlook(worker, preview, feed, now=1000)[0][0], 'WAIT')
         self.assertEqual(live_outlook(dict(preview, action='SCALP DOWN'), feed, now=1000)[0],
                          'OUTLOOK DOWN')
 
